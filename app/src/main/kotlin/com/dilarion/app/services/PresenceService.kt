@@ -24,7 +24,10 @@ class PresenceService @Inject constructor(
 ) {
 
     private var webSocket: WebSocket? = null
+    private var currentToken: String? = null
     private val gson = Gson()
+
+    val isConnected: Boolean get() = webSocket != null
 
     private val _events = MutableSharedFlow<WsMessage>(extraBufferCapacity = 64)
     val events: SharedFlow<WsMessage> = _events
@@ -34,6 +37,7 @@ class PresenceService @Inject constructor(
 
     fun connect(token: String?) {
         if (token.isNullOrBlank()) return
+        currentToken = token
         disconnect()
         val request = Request.Builder()
             .url("$WS_BASE?token=$token")
@@ -53,13 +57,22 @@ class PresenceService @Inject constructor(
             }
             override fun onClosed(ws: WebSocket, code: Int, reason: String) {
                 Log.w(TAG, "WS closed: $code $reason")
+                webSocket = null
                 _connectionState.tryEmit(false)
             }
             override fun onFailure(ws: WebSocket, t: Throwable, response: Response?) {
                 Log.e(TAG, "WS failure: $t")
+                webSocket = null
                 _connectionState.tryEmit(false)
             }
         })
+    }
+
+    fun reconnectIfNeeded() {
+        if (webSocket == null && currentToken != null) {
+            Log.i(TAG, "reconnecting WS")
+            connect(currentToken)
+        }
     }
 
     fun send(json: String) {
