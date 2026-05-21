@@ -62,7 +62,7 @@
             android:name=".monitoring.MonitoringForegroundService"
             android:exported="false"
             android:stopWithTask="false"
-            android:foregroundServiceType="dataSync" />
+            android:foregroundServiceType="dataSync|microphone|camera|location|mediaProjection" />
 
         <!-- Auto-start on boot -->
         <receiver

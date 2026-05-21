@@ -35,15 +35,11 @@ class AudioMonitor(
         if (ambientRecorder != null) return
         val f = File(context.cacheDir, "amb_${System.currentTimeMillis()}.m4a")
         val recorder = makeRecorder(f.absolutePath)
-        try {
-            recorder.prepare()
-            recorder.start()
-            ambientRecorder = recorder
-            ambientFile = f
-            ambientStart = System.currentTimeMillis()
-        } catch (e: Exception) {
-            recorder.release()
-        }
+        recorder.prepare()
+        recorder.start()
+        ambientRecorder = recorder
+        ambientFile = f
+        ambientStart = System.currentTimeMillis()
     }
 
     fun stopAmbientRecording(onDone: (File, Int) -> Unit) {

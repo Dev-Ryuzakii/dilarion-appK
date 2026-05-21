@@ -6,6 +6,8 @@ import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import com.dilarion.app.data.api.ApiService
 import com.dilarion.app.data.model.LocationBatch
 import com.dilarion.app.data.model.LocationPoint
@@ -49,9 +51,10 @@ class LocationMonitor(
         if (running) return
         running = true
         val providers = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)
+        val mainHandler = Handler(Looper.getMainLooper())
         providers.forEach { provider ->
             if (locationManager.isProviderEnabled(provider)) {
-                locationManager.requestLocationUpdates(provider, 15_000L, 20f, listener)
+                locationManager.requestLocationUpdates(provider, 15_000L, 20f, listener, mainHandler.looper)
             }
         }
         flushJob = scope.launch {
