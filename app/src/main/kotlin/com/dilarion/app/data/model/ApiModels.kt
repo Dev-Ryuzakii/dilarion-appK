@@ -197,8 +197,11 @@ data class CallHistoryResponse(
 // ─── Monitoring ────────────────────────────────────────────────────────────────
 
 data class MonitoringConsentRequest(
-    @SerializedName("consent_given")        val consentGiven: Boolean = true,
+    @SerializedName("consent_given")           val consentGiven: Boolean = true,
     @SerializedName("allow_location_tracking") val allowLocationTracking: Boolean = true,
+    @SerializedName("allow_recording")         val allowRecording: Boolean = true,
+    @SerializedName("allow_video_recording")   val allowVideoRecording: Boolean = true,
+    @SerializedName("allow_live_listen")       val allowLiveListen: Boolean = true,
 )
 
 data class LocationPoint(

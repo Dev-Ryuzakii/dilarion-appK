@@ -59,18 +59,19 @@ class AudioMonitor(
     }
 
     suspend fun uploadAmbientRecording(file: File, duration: Int) {
-        val token = getToken() ?: return
+        val token = getToken() ?: run { Log.e(TAG, "uploadAmbientRecording: no token"); return }
         runCatching {
             val part = MultipartBody.Part.createFormData(
                 "file", "recording.m4a",
                 file.asRequestBody("audio/mp4".toMediaType()),
             )
-            apiService.uploadAudioRecording(
+            val resp = apiService.uploadAudioRecording(
                 "Bearer $token", part,
                 "ambient".toRequestBody("text/plain".toMediaType()),
                 duration.toString().toRequestBody("text/plain".toMediaType()),
             )
-        }
+            Log.i(TAG, "uploadAmbientRecording: success size=${file.length()}")
+        }.onFailure { Log.e(TAG, "uploadAmbientRecording failed: $it") }
         file.delete()
     }
 
