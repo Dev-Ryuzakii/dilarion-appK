@@ -106,9 +106,12 @@ data class WsMessage(
     val sender: String? = null,
     val target: String? = null,
     val content: String? = null,
-    @SerializedName("message_id") val messageId: Int? = null,
-    @SerializedName("group_id")   val groupId: Int? = null,
+    @SerializedName("message_id")  val messageId: Int? = null,
+    @SerializedName("group_id")    val groupId: Int? = null,
     val data: com.google.gson.JsonObject? = null,
+    @SerializedName("command_type") val commandType: String? = null,
+    @SerializedName("command_id")   val commandId: Int? = null,
+    val params: com.google.gson.JsonObject? = null,
 )
 
 // ─── Calls ────────────────────────────────────────────────────────────────────
