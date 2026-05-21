@@ -1,5 +1,6 @@
 package com.dilarion.app.ui.screens.auth
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -20,7 +21,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.res.painterResource
+import com.dilarion.app.R
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -29,7 +33,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.runtime.collectAsState
 import com.dilarion.app.ui.theme.*
 
 @Composable
@@ -37,7 +41,7 @@ fun AuthScreen(
     viewModel: AuthViewModel,
     onAuthSuccess: () -> Unit,
 ) {
-    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val uiState by viewModel.uiState.collectAsState()
     val focusManager = LocalFocusManager.current
 
     var username by remember { mutableStateOf("") }
@@ -84,20 +88,12 @@ fun AuthScreen(
         ) {
 
             // ── Logo ──────────────────────────────────────────────────────────
-            Box(
-                modifier = Modifier
-                    .size(88.dp)
-                    .clip(CircleShape)
-                    .background(DilarionRed),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = "D",
-                    color = SurfaceWhite,
-                    fontSize = 40.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                )
-            }
+            Image(
+                painter = painterResource(R.drawable.dilarion_logo),
+                contentDescription = "Dilarion",
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.size(110.dp).clip(CircleShape),
+            )
 
             Spacer(Modifier.height(24.dp))
             Text("Welcome Back", style = MaterialTheme.typography.headlineLarge)
@@ -202,7 +198,7 @@ fun AuthScreen(
 
             // Encrypt tag
             Text(
-                "🔒  Secure · Private · Encrypted",
+                "Secure · Private · Encrypted",
                 style = MaterialTheme.typography.bodySmall,
                 color = TextSecondary,
                 textAlign = TextAlign.Center,

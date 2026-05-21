@@ -49,10 +49,15 @@ class AuthViewModel @Inject constructor(
                     return@launch
                 }
                 val body = response.body()!!
+                val token = body.sessionToken
+                if (token.isNullOrBlank()) {
+                    _uiState.value = AuthUiState(error = "Server returned no session token")
+                    return@launch
+                }
                 val (pubB64, privB64) = cryptoManager.generateKeyPair()
-                apiService.registerPublicKey("Bearer ${body.sessionToken}", com.dilarion.app.data.model.RegisterKeyRequest(pubB64))
-                sessionManager.saveSession(body.sessionToken, body.username, privB64, pubB64)
-                presenceService.connect(body.sessionToken)
+                apiService.updatePublicKey("Bearer $token", com.dilarion.app.data.model.UpdatePublicKeyRequest(pubB64))
+                sessionManager.saveSession(token, body.username, privB64, pubB64)
+                presenceService.connect(token)
                 _uiState.value = AuthUiState(success = true)
             }.onFailure { e ->
                 _uiState.value = AuthUiState(error = e.message ?: "Network error")

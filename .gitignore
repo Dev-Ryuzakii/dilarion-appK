@@ -1,0 +1,28 @@
+# Build outputs
+build/
+app/build/
+*/build/
+
+# Gradle caches & wrapper
+.gradle/
+gradle/wrapper/gradle-wrapper.jar
+local.properties
+
+# Android Studio / IntelliJ
+*.iml
+.idea/
+*.idea/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# macOS
+.DS_Store
+**/.DS_Store
+Thumbs.db
+
+# Keystores / secrets
+*.jks
+*.keystore
+keystore.properties
+google-services.json

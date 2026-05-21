@@ -25,13 +25,13 @@ class SplashViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            delay(2000) // Show splash for 2 seconds
+            delay(2000)
             val session = sessionManager.getSnapshot()
-            if (session != null) {
+            if (session == null) {
+                _destination.value = SplashDestination.AUTH
+            } else {
                 presenceService.connect(session.token)
                 _destination.value = SplashDestination.HOME
-            } else {
-                _destination.value = SplashDestination.AUTH
             }
         }
     }

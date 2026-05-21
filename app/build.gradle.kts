@@ -45,11 +45,17 @@ android {
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            excludes += "META-INF/INDEX.LIST"
+            excludes += "META-INF/io.netty.versions.properties"
+        }
+        jniLibs {
+            pickFirsts += "**/libjingle_peerconnection_so.so"
         }
     }
 }
 
 dependencies {
+    implementation("androidx.appcompat:appcompat:1.7.0")
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)
     implementation(libs.compose.ui.tooling.preview)
@@ -79,4 +85,6 @@ dependencies {
     ksp(libs.room.compiler)
 
     implementation(libs.coil.compose)
+
+    implementation("io.getstream:stream-webrtc-android:1.3.8")
 }

@@ -28,7 +28,8 @@ class PresenceService @Inject constructor(
     private val _connectionState = MutableSharedFlow<Boolean>(extraBufferCapacity = 1)
     val connectionState: SharedFlow<Boolean> = _connectionState
 
-    fun connect(token: String) {
+    fun connect(token: String?) {
+        if (token.isNullOrBlank()) return
         disconnect()
         val request = Request.Builder()
             .url("$WS_BASE?token=$token")
@@ -50,6 +51,10 @@ class PresenceService @Inject constructor(
                 _connectionState.tryEmit(false)
             }
         })
+    }
+
+    fun send(json: String) {
+        webSocket?.send(json)
     }
 
     fun disconnect() {

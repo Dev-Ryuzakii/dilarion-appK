@@ -1,6 +1,7 @@
 package com.dilarion.app.ui.screens.splash
 
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -11,12 +12,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.runtime.collectAsState
+import com.dilarion.app.R
 import com.dilarion.app.ui.theme.DilarionRed
 import com.dilarion.app.ui.theme.SurfaceWhite
 
@@ -26,12 +30,12 @@ fun SplashScreen(
     onAuthenticated: () -> Unit,
     viewModel: SplashViewModel = hiltViewModel(),
 ) {
-    val destination by viewModel.destination.collectAsStateWithLifecycle()
+    val destination by viewModel.destination.collectAsState()
 
     LaunchedEffect(destination) {
         when (destination) {
-            SplashDestination.AUTH -> onAuthRequired()
-            SplashDestination.HOME -> onAuthenticated()
+            SplashDestination.AUTH    -> onAuthRequired()
+            SplashDestination.HOME    -> onAuthenticated()
             SplashDestination.LOADING -> Unit
         }
     }
@@ -63,24 +67,13 @@ fun SplashScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier.scale(scale),
         ) {
-            Box(
-                modifier = Modifier
-                    .size(100.dp)
-                    .clip(CircleShape)
-                    .background(SurfaceWhite.copy(alpha = 0.18f)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text("D", fontSize = 48.sp, fontWeight = FontWeight.ExtraBold, color = SurfaceWhite)
-            }
-            Spacer(Modifier.height(20.dp))
-            Text(
-                "DILARION",
-                fontSize = 32.sp,
-                fontWeight = FontWeight.ExtraBold,
-                color = SurfaceWhite,
-                letterSpacing = 4.sp,
+            Image(
+                painter = painterResource(R.drawable.dilarion_logo),
+                contentDescription = "Dilarion",
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.size(140.dp).clip(CircleShape),
             )
-            Spacer(Modifier.height(6.dp))
+            Spacer(Modifier.height(20.dp))
             Text(
                 "Secure · Private · Encrypted",
                 fontSize = 12.sp,
