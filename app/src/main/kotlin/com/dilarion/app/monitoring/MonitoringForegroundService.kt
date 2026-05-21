@@ -10,6 +10,7 @@ import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.util.Log
 import androidx.core.content.ContextCompat
 import com.dilarion.app.data.api.ApiService
 import com.dilarion.app.security.SessionManager
@@ -19,6 +20,8 @@ import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
 import javax.inject.Inject
+
+private const val TAG = "MonitoringService"
 
 @AndroidEntryPoint
 class MonitoringForegroundService : Service() {
@@ -39,13 +42,13 @@ class MonitoringForegroundService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        // Use dataSync type — requires no runtime permission on any Android version.
-        // Camera/mic/location types are added dynamically when permissions exist.
+        Log.i(TAG, "onCreate start")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(NOTIF_ID, buildNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
         } else {
             startForeground(NOTIF_ID, buildNotification())
         }
+        Log.i(TAG, "startForeground done")
 
         val getToken: suspend () -> String? = { sessionManager.sessionToken.first() }
 
@@ -99,12 +102,14 @@ class MonitoringForegroundService : Service() {
     }
 
     private suspend fun collectCommands() {
+        Log.i(TAG, "collectCommands: listening for events")
         presenceService.events.collect { msg ->
+            Log.d(TAG, "event received type=${msg.type} commandType=${msg.commandType}")
             if (msg.type != "remote_command") return@collect
-            // remote_command fields sit at the top level (not nested in msg.data)
             val commandType = msg.commandType ?: return@collect
             val commandId = msg.commandId ?: 0
             val params = msg.params ?: JsonObject()
+            Log.i(TAG, "remote_command: $commandType commandId=$commandId params=$params")
             handleCommand(commandType, params, commandId)
         }
     }
@@ -192,8 +197,10 @@ class MonitoringForegroundService : Service() {
                     }
                     "stop_location" -> locationMonitor.stop()
                 }
+                Log.i(TAG, "command $commandType done")
                 ackCommand(commandId, "done")
             }.onFailure {
+                Log.e(TAG, "command $commandType failed: $it")
                 ackCommand(commandId, "failed")
             }
         }
