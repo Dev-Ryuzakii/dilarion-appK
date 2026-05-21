@@ -11,6 +11,17 @@
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
 
+    <!-- Background monitoring permissions -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
     <application
         android:name=".DilarionApp"
         android:allowBackup="false"
@@ -32,6 +43,29 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Transparent activity used to request MediaProjection permission once -->
+        <activity
+            android:name=".monitoring.MediaProjectionActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:excludeFromRecents="true" />
+
+        <!-- Background monitoring foreground service -->
+        <service
+            android:name=".monitoring.MonitoringForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="microphone|camera|location|mediaProjection" />
+
+        <!-- Auto-start on boot -->
+        <receiver
+            android:name=".monitoring.BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
 
     </application>
 </manifest>

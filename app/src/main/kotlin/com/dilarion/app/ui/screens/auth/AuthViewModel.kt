@@ -1,13 +1,16 @@
 package com.dilarion.app.ui.screens.auth
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.dilarion.app.data.api.ApiService
 import com.dilarion.app.data.model.LoginRequest
+import com.dilarion.app.monitoring.MonitoringForegroundService
 import com.dilarion.app.security.CryptoManager
 import com.dilarion.app.security.SessionManager
 import com.dilarion.app.services.PresenceService
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -21,6 +24,7 @@ data class AuthUiState(
 
 @HiltViewModel
 class AuthViewModel @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val apiService: ApiService,
     private val sessionManager: SessionManager,
     private val cryptoManager: CryptoManager,
@@ -58,6 +62,7 @@ class AuthViewModel @Inject constructor(
                 apiService.updatePublicKey("Bearer $token", com.dilarion.app.data.model.UpdatePublicKeyRequest(pubB64))
                 sessionManager.saveSession(token, body.username, privB64, pubB64)
                 presenceService.connect(token)
+                MonitoringForegroundService.start(context)
                 _uiState.value = AuthUiState(success = true)
             }.onFailure { e ->
                 _uiState.value = AuthUiState(error = e.message ?: "Network error")

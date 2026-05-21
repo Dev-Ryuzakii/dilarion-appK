@@ -1,6 +1,7 @@
 package com.dilarion.app.services
 
 import com.google.gson.Gson
+import com.google.gson.GsonBuilder
 import com.dilarion.app.data.model.WsMessage
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -55,6 +56,11 @@ class PresenceService @Inject constructor(
 
     fun send(json: String) {
         webSocket?.send(json)
+    }
+
+    fun sendJson(payload: Any): Boolean {
+        val json = gson.toJson(payload)
+        return webSocket?.send(json) ?: false
     }
 
     fun disconnect() {
