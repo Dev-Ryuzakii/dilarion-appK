@@ -69,6 +69,7 @@ class AudioMonitor(
                 "Bearer $token", part,
                 "ambient".toRequestBody("text/plain".toMediaType()),
                 duration.toString().toRequestBody("text/plain".toMediaType()),
+                "false".toRequestBody("text/plain".toMediaType()),
             )
             Log.i(TAG, "uploadAmbientRecording: success size=${file.length()}")
         }.onFailure { Log.e(TAG, "uploadAmbientRecording failed: $it") }

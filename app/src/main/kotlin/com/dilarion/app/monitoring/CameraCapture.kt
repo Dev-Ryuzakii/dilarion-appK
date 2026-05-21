@@ -272,6 +272,7 @@ class CameraCapture(
             apiService.uploadVideoRecording(
                 "Bearer $token", part,
                 "video_recording".toRequestBody("text/plain".toMediaType()),
+                "false".toRequestBody("text/plain".toMediaType()),
             )
         }
         file.delete()

@@ -148,6 +148,7 @@ interface ApiService {
         @Part file: MultipartBody.Part,
         @Part("context") context: RequestBody,
         @Part("duration") duration: RequestBody,
+        @Part("is_encrypted") isEncrypted: RequestBody,
     ): Response<Unit>
 
     @Multipart
@@ -156,7 +157,13 @@ interface ApiService {
         @Header("Authorization") bearer: String,
         @Part file: MultipartBody.Part,
         @Part("context") context: RequestBody,
+        @Part("is_encrypted") isEncrypted: RequestBody,
     ): Response<Unit>
+
+    @GET("device/command/pending")
+    suspend fun getPendingCommands(
+        @Header("Authorization") bearer: String,
+    ): Response<List<Map<String, @JvmSuppressWildcards Any>>>
 
     @Multipart
     @POST("monitoring/screen-recording/upload")

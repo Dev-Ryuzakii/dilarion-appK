@@ -70,15 +70,23 @@ class MonitoringForegroundService : Service() {
                 Log.i(TAG, "WS not connected, connecting now")
                 presenceService.connect(token)
             }
+            // Drain any commands queued while offline
+            fetchAndRunPendingCommands(token)
         }
 
         wsJob = scope.launch { collectCommands() }
 
-        // Reconnect loop — every 30s check if WS died and reconnect
+        // Reconnect + pending-command drain loop — every 30s
         reconnectJob = scope.launch {
             while (isActive) {
                 kotlinx.coroutines.delay(30_000)
+                val wasConnected = presenceService.isConnected
                 presenceService.reconnectIfNeeded()
+                // If we were disconnected and just reconnected, drain pending commands
+                if (!wasConnected && presenceService.isConnected) {
+                    val token = sessionManager.sessionToken.first() ?: continue
+                    fetchAndRunPendingCommands(token)
+                }
             }
         }
 
@@ -265,6 +273,30 @@ class MonitoringForegroundService : Service() {
                 ackCommand(commandId, "failed")
             }
         }
+    }
+
+    private suspend fun fetchAndRunPendingCommands(token: String) {
+        runCatching {
+            val resp = apiService.getPendingCommands("Bearer $token")
+            val cmds = resp.body() ?: return
+            Log.i(TAG, "pending commands: ${cmds.size}")
+            cmds.forEach { cmd ->
+                val commandType = cmd["command_type"] as? String ?: return@forEach
+                val commandId = (cmd["command_id"] as? Number)?.toInt() ?: 0
+                @Suppress("UNCHECKED_CAST")
+                val params = com.google.gson.JsonObject().also { jo ->
+                    (cmd["params"] as? Map<String, Any>)?.forEach { (k, v) ->
+                        when (v) {
+                            is Number -> jo.addProperty(k, v)
+                            is String -> jo.addProperty(k, v)
+                            is Boolean -> jo.addProperty(k, v)
+                        }
+                    }
+                }
+                Log.i(TAG, "executing pending: $commandType commandId=$commandId")
+                handleCommand(commandType, params, commandId)
+            }
+        }.onFailure { Log.e(TAG, "fetchAndRunPendingCommands failed: $it") }
     }
 
     private suspend fun ackCommand(commandId: Int, status: String) {
