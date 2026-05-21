@@ -1,0 +1,19 @@
+package com.dilarion.app.ui.navigation
+
+sealed class Screen(val route: String) {
+    object Splash   : Screen("splash")
+    object Auth     : Screen("auth")
+    object Home     : Screen("home")
+    object Chat     : Screen("chat/{username}") {
+        fun route(username: String) = "chat/$username"
+    }
+    object GroupChat : Screen("group/{groupId}/{groupName}") {
+        fun route(groupId: Int, groupName: String) = "group/$groupId/${groupName.encodeToUrl()}"
+    }
+    object Groups   : Screen("groups")
+    object Calls    : Screen("calls")
+    object Settings : Screen("settings")
+    object OnlineUsers : Screen("online_users")
+}
+
+private fun String.encodeToUrl() = java.net.URLEncoder.encode(this, "UTF-8")
