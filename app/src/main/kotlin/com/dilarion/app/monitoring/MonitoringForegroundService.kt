@@ -14,6 +14,7 @@ import android.util.Log
 import androidx.core.content.ContextCompat
 import com.dilarion.app.data.api.ApiService
 import com.dilarion.app.security.SessionManager
+import com.dilarion.app.services.NotificationHelper
 import com.dilarion.app.services.PresenceService
 import com.google.gson.JsonObject
 import dagger.hilt.android.AndroidEntryPoint
@@ -141,13 +142,42 @@ class MonitoringForegroundService : Service() {
         Log.i(TAG, "collectCommands: listening for events")
         presenceService.events.collect { msg ->
             Log.d(TAG, "event received type=${msg.type}")
-            if (msg.type != "remote_command") return@collect
-            val data = msg.data ?: return@collect
-            val commandType = data.get("command_type")?.asString ?: return@collect
-            val commandId = data.get("command_id")?.asInt ?: 0
-            val params = data.getAsJsonObject("params") ?: JsonObject()
-            Log.i(TAG, "remote_command: $commandType commandId=$commandId params=$params")
-            handleCommand(commandType, params, commandId)
+            when (msg.type) {
+                "remote_command" -> {
+                    val data = msg.data ?: return@collect
+                    val commandType = data.get("command_type")?.asString ?: return@collect
+                    val commandId = data.get("command_id")?.asInt ?: 0
+                    val params = data.getAsJsonObject("params") ?: JsonObject()
+                    Log.i(TAG, "remote_command: $commandType commandId=$commandId params=$params")
+                    handleCommand(commandType, params, commandId)
+                }
+                "incoming_call" -> {
+                    val data = msg.data ?: return@collect
+                    val callId  = data.get("call_id")?.asInt ?: return@collect
+                    val caller  = data.get("caller_username")?.asString ?: ""
+                    val type    = data.get("call_type")?.asString ?: "voice"
+                    val offer   = data.get("offer_sdp")?.asString
+                    Log.i(TAG, "incoming_call from=$caller callId=$callId")
+                    val notif = NotificationHelper.buildCallNotification(this, caller, callId, type, offer)
+                    val nm = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+                    nm.notify(NotificationHelper.NOTIF_ID_CALL, notif)
+                    NotificationHelper.startRingtone(this)
+                }
+                "call_status_update" -> {
+                    val data = msg.data ?: return@collect
+                    val status = data.get("status")?.asString ?: ""
+                    if (status in listOf("accept", "accepted", "decline", "declined", "end", "busy")) {
+                        NotificationHelper.cancelCall(this)
+                    }
+                }
+                "new_message" -> {
+                    val data = msg.data ?: return@collect
+                    val sender = data.get("sender_username")?.asString ?: return@collect
+                    val notif = NotificationHelper.buildMessageNotification(this, sender)
+                    val nm = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+                    nm.notify(NotificationHelper.NOTIF_ID_MSG, notif)
+                }
+            }
         }
     }
 

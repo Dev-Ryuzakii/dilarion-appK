@@ -139,7 +139,22 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             val token = sessionManager.sessionToken.first() ?: return@launch
             val bearer = "Bearer $token"
+            val me = _uiState.value.currentUsername
             _uiState.value = _uiState.value.copy(isSending = true)
+
+            // Optimistic: show message immediately before server confirms
+            val optimistic = Message(
+                id = -System.currentTimeMillis().toInt(),
+                sender = me,
+                recipient = if (groupId == null) peerUsername else null,
+                content = text.trim(),
+                groupId = groupId,
+                timestamp = java.time.Instant.now().toString(),
+            )
+            _uiState.value = _uiState.value.copy(
+                messages = (_uiState.value.messages + optimistic).sortedBy { it.timestamp }
+            )
+
             runCatching {
                 if (groupId != null) {
                     apiService.sendGroupMessage(bearer, SendGroupMessageRequest(groupId!!, text.trim()))
@@ -148,7 +163,10 @@ class ChatViewModel @Inject constructor(
                 }
                 loadMessages()
             }.onFailure {
-                _uiState.value = _uiState.value.copy(error = it.message)
+                _uiState.value = _uiState.value.copy(
+                    messages = _uiState.value.messages.filter { it.id >= 0 },
+                    error = it.message,
+                )
             }
             _uiState.value = _uiState.value.copy(isSending = false)
         }
@@ -327,8 +345,59 @@ class ChatViewModel @Inject constructor(
     private fun observeWebSocket() {
         viewModelScope.launch {
             presenceService.events.collect { event ->
+                val d = event.data
                 when (event.type) {
-                    "new_message", "new_group_message" -> loadMessages()
+                    "new_message" -> {
+                        if (groupId == null && d != null) {
+                            val sender = d.get("sender_username")?.asString
+                            val recipient = d.get("recipient_username")?.asString
+                            val me = _uiState.value.currentUsername
+                            if (sender != null &&
+                                (sender == peerUsername || (sender == me && recipient == peerUsername))) {
+                                // Show optimistic incoming bubble; loadMessages() fills real content
+                                val ts = d.get("timestamp")?.asString ?: java.time.Instant.now().toString()
+                                val msgId = d.get("message_id")?.asInt ?: 0
+                                val existing = _uiState.value.messages
+                                if (msgId == 0 || existing.none { it.id == msgId }) {
+                                    val placeholder = Message(
+                                        id = msgId,
+                                        sender = sender,
+                                        recipient = recipient,
+                                        content = null, // filled by loadMessages()
+                                        timestamp = ts,
+                                    )
+                                    _uiState.value = _uiState.value.copy(
+                                        messages = (existing + placeholder).sortedBy { it.timestamp }
+                                    )
+                                }
+                            }
+                        }
+                        loadMessages()
+                    }
+                    "new_group_message" -> {
+                        if (groupId != null && d != null) {
+                            val evtGroupId = d.get("group_id")?.asInt
+                            if (evtGroupId == null || evtGroupId == groupId) {
+                                val sender = d.get("sender_username")?.asString
+                                val ts = d.get("timestamp")?.asString ?: java.time.Instant.now().toString()
+                                val msgId = d.get("message_id")?.asInt ?: 0
+                                val existing = _uiState.value.messages
+                                if (msgId == 0 || existing.none { it.id == msgId }) {
+                                    val placeholder = Message(
+                                        id = msgId,
+                                        sender = sender,
+                                        content = null,
+                                        groupId = groupId,
+                                        timestamp = ts,
+                                    )
+                                    _uiState.value = _uiState.value.copy(
+                                        messages = (existing + placeholder).sortedBy { it.timestamp }
+                                    )
+                                }
+                            }
+                        }
+                        loadMessages()
+                    }
                     "new_media" -> if (groupId == null) loadMedia()
                 }
             }

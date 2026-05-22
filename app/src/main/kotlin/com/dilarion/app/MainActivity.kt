@@ -14,14 +14,30 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import com.dilarion.app.data.model.IncomingCallData
+import com.dilarion.app.services.NotificationHelper
 import com.dilarion.app.ui.navigation.AppNavigation
 import com.dilarion.app.ui.theme.DilarionTheme
 import dagger.hilt.android.AndroidEntryPoint
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+
+    private var pendingIncomingCall: IncomingCallData? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Show over lock screen for incoming calls
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(true)
+            setTurnScreenOn(true)
+        } else {
+            @Suppress("DEPRECATION")
+            window.addFlags(
+                WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+            )
+        }
         window.setFlags(
             WindowManager.LayoutParams.FLAG_SECURE,
             WindowManager.LayoutParams.FLAG_SECURE,
@@ -29,11 +45,35 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         requestMonitoringPermissions()
         requestBatteryOptimizationExemption()
+        pendingIncomingCall = extractIncomingCall(intent)
         setContent {
             DilarionTheme {
-                AppNavigation()
+                AppNavigation(pendingIncomingCall = pendingIncomingCall)
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        val call = extractIncomingCall(intent)
+        if (call != null) {
+            NotificationHelper.stopRingtone()
+            NotificationHelper.cancelCall(this)
+            setIntent(intent)
+            recreate()
+        }
+    }
+
+    private fun extractIncomingCall(intent: Intent?): IncomingCallData? {
+        if (intent?.action != NotificationHelper.ACTION_INCOMING_CALL) return null
+        val callId = intent.getIntExtra(NotificationHelper.EXTRA_CALL_ID, -1)
+        if (callId == -1) return null
+        return IncomingCallData(
+            callId       = callId,
+            callerUsername = intent.getStringExtra(NotificationHelper.EXTRA_CALLER) ?: "",
+            callType     = intent.getStringExtra(NotificationHelper.EXTRA_CALL_TYPE) ?: "voice",
+            offerSdp     = intent.getStringExtra(NotificationHelper.EXTRA_OFFER_SDP),
+        )
     }
 
     private fun requestBatteryOptimizationExemption() {

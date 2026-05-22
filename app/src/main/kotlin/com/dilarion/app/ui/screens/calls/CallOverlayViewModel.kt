@@ -34,4 +34,8 @@ class CallOverlayViewModel @Inject constructor(
     }
 
     fun clear() { _incomingCall.value = null }
+
+    fun setFromNotification(call: IncomingCallData) {
+        _incomingCall.value = call
+    }
 }

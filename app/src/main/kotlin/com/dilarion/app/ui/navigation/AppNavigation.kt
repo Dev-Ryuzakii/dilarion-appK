@@ -10,6 +10,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.dilarion.app.data.model.IncomingCallData
 import com.dilarion.app.ui.screens.auth.AuthScreen
 import com.dilarion.app.ui.screens.auth.AuthViewModel
 import com.dilarion.app.ui.screens.calls.CallOverlayViewModel
@@ -24,10 +25,15 @@ import com.dilarion.app.ui.screens.settings.SettingsScreen
 import com.dilarion.app.ui.screens.splash.SplashScreen
 
 @Composable
-fun AppNavigation() {
+fun AppNavigation(pendingIncomingCall: IncomingCallData? = null) {
     val navController = rememberNavController()
     val overlayVm: CallOverlayViewModel = hiltViewModel()
     val incomingCall by overlayVm.incomingCall.collectAsState()
+
+    // Inject call from notification intent into overlay VM
+    LaunchedEffect(pendingIncomingCall) {
+        if (pendingIncomingCall != null) overlayVm.setFromNotification(pendingIncomingCall)
+    }
 
     // Show incoming call overlay over whatever screen is active
     incomingCall?.let { call ->

@@ -23,6 +23,8 @@ import androidx.compose.runtime.collectAsState
 import com.dilarion.app.data.model.CallHistoryItem
 import com.dilarion.app.data.model.Group
 import com.dilarion.app.data.model.Message
+import com.dilarion.app.ui.components.ConversationListSkeleton
+import com.dilarion.app.ui.components.UserListSkeleton
 import com.dilarion.app.ui.theme.*
 import java.text.SimpleDateFormat
 import java.util.Locale
@@ -136,9 +138,7 @@ private fun ChatsTab(uiState: HomeUiState, onOpenChat: (String) -> Unit) {
         .sortedByDescending { it.second.timestamp ?: "" }
 
     if (uiState.isLoading) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator(color = DilarionRed)
-        }
+        ConversationListSkeleton()
         return
     }
 
@@ -166,9 +166,7 @@ private fun ChatsTab(uiState: HomeUiState, onOpenChat: (String) -> Unit) {
 @Composable
 private fun GroupsTab(uiState: HomeUiState, onOpenGroupChat: (Int, String) -> Unit) {
     if (uiState.isLoading) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator(color = DilarionRed)
-        }
+        ConversationListSkeleton()
         return
     }
 
@@ -198,9 +196,7 @@ private fun GroupsTab(uiState: HomeUiState, onOpenGroupChat: (Int, String) -> Un
 @Composable
 private fun CallsTab(uiState: HomeUiState, currentUsername: String) {
     if (uiState.isCallHistoryLoading) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator(color = DilarionRed)
-        }
+        UserListSkeleton(count = 6)
         return
     }
 
