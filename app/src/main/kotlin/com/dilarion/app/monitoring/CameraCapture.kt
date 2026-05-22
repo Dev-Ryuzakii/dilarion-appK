@@ -192,25 +192,26 @@ class CameraCapture(
     @SuppressLint("MissingPermission")
     fun startVideoRecording(useFront: Boolean) {
         scope.launch {
-            val cameraId = findCamera(useFront) ?: findCamera(!useFront) ?: return@launch
-            startThread()
-            val file = File(context.cacheDir, "video_${System.currentTimeMillis()}.mp4")
-            videoFile = file
-            val recorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
-                MediaRecorder(context) else @Suppress("DEPRECATION") MediaRecorder()
-            recorder.apply {
-                setVideoSource(MediaRecorder.VideoSource.SURFACE)
-                setAudioSource(MediaRecorder.AudioSource.MIC)
-                setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-                setVideoEncoder(MediaRecorder.VideoEncoder.H264)
-                setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-                setVideoSize(1280, 720)
-                setVideoFrameRate(30)
-                setOutputFile(file.absolutePath)
-                prepare()
-            }
-            videoRecorder = recorder
+            var recorder: MediaRecorder? = null
             try {
+                val cameraId = findCamera(useFront) ?: findCamera(!useFront) ?: return@launch
+                startThread()
+                val file = File(context.cacheDir, "video_${System.currentTimeMillis()}.mp4")
+                videoFile = file
+                recorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
+                    MediaRecorder(context) else @Suppress("DEPRECATION") MediaRecorder()
+                recorder.apply {
+                    setVideoSource(MediaRecorder.VideoSource.SURFACE)
+                    setAudioSource(MediaRecorder.AudioSource.MIC)
+                    setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+                    setVideoEncoder(MediaRecorder.VideoEncoder.H264)
+                    setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+                    setVideoSize(1280, 720)
+                    setVideoFrameRate(30)
+                    setOutputFile(file.absolutePath)
+                    prepare()
+                }
+                videoRecorder = recorder
                 val camera = openCamera(cameraId)
                 videoCamera = camera
                 val surface = recorder.surface
@@ -222,7 +223,8 @@ class CameraCapture(
                 session.setRepeatingRequest(request, null, handler)
                 recorder.start()
             } catch (e: Exception) {
-                recorder.release()
+                Log.e(TAG, "startVideoRecording failed: $e")
+                runCatching { recorder?.release() }
                 videoRecorder = null
                 videoFile = null
                 stopThread()
