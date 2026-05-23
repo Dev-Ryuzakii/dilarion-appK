@@ -2,7 +2,6 @@ package com.dilarion.app.services
 
 import android.util.Log
 import com.google.gson.Gson
-import com.google.gson.GsonBuilder
 import com.dilarion.app.data.model.WsMessage
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -23,11 +22,12 @@ class PresenceService @Inject constructor(
     private val okHttpClient: OkHttpClient,
 ) {
 
-    private var webSocket: WebSocket? = null
+    @Volatile private var webSocket: WebSocket? = null
+    @Volatile private var isOpen: Boolean = false
     private var currentToken: String? = null
     private val gson = Gson()
 
-    val isConnected: Boolean get() = webSocket != null
+    val isConnected: Boolean get() = isOpen && webSocket != null
 
     private val _events = MutableSharedFlow<WsMessage>(extraBufferCapacity = 64)
     val events: SharedFlow<WsMessage> = _events
@@ -42,9 +42,10 @@ class PresenceService @Inject constructor(
         val request = Request.Builder()
             .url("$WS_BASE?token=$token")
             .build()
-        webSocket = okHttpClient.newWebSocket(request, object : WebSocketListener() {
+        val newWs = okHttpClient.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(ws: WebSocket, response: Response) {
                 Log.i(TAG, "WS connected")
+                isOpen = true
                 _connectionState.tryEmit(true)
             }
             override fun onMessage(ws: WebSocket, text: String) {
@@ -57,19 +58,20 @@ class PresenceService @Inject constructor(
             }
             override fun onClosed(ws: WebSocket, code: Int, reason: String) {
                 Log.w(TAG, "WS closed: $code $reason")
-                webSocket = null
+                if (webSocket === ws) { webSocket = null; isOpen = false }
                 _connectionState.tryEmit(false)
             }
             override fun onFailure(ws: WebSocket, t: Throwable, response: Response?) {
                 Log.e(TAG, "WS failure: $t")
-                webSocket = null
+                if (webSocket === ws) { webSocket = null; isOpen = false }
                 _connectionState.tryEmit(false)
             }
         })
+        webSocket = newWs
     }
 
     fun reconnectIfNeeded() {
-        if (webSocket == null && currentToken != null) {
+        if (!isConnected && currentToken != null) {
             Log.i(TAG, "reconnecting WS")
             connect(currentToken)
         }
@@ -85,8 +87,10 @@ class PresenceService @Inject constructor(
     }
 
     fun disconnect() {
-        webSocket?.close(1000, "logout")
+        val ws = webSocket
         webSocket = null
+        isOpen = false
+        ws?.close(1000, "logout")
         _connectionState.tryEmit(false)
     }
 }
