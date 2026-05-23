@@ -16,6 +16,7 @@ import com.dilarion.app.data.api.ApiService
 import com.dilarion.app.security.SessionManager
 import com.dilarion.app.services.NotificationHelper
 import com.dilarion.app.services.PresenceService
+import com.dilarion.app.webrtc.WebRtcManager
 import com.google.gson.JsonObject
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
@@ -30,6 +31,7 @@ class MonitoringForegroundService : Service() {
     @Inject lateinit var presenceService: PresenceService
     @Inject lateinit var apiService: ApiService
     @Inject lateinit var sessionManager: SessionManager
+    @Inject lateinit var webRtcManager: WebRtcManager
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -157,7 +159,10 @@ class MonitoringForegroundService : Service() {
                     val caller  = data.get("caller_username")?.asString ?: ""
                     val type    = data.get("call_type")?.asString ?: "voice"
                     val offer   = data.get("offer_sdp")?.asString
-                    Log.i(TAG, "incoming_call from=$caller callId=$callId")
+                    Log.i(TAG, "incoming_call from=$caller callId=$callId — pausing audio monitoring")
+                    // Release mic so WebRTC can use it
+                    audioMonitor.stopLiveAudio()
+                    runCatching { audioMonitor.stopAmbientRecording { _, _ -> } }
                     val notif = NotificationHelper.buildCallNotification(this, caller, callId, type, offer)
                     val nm = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
                     nm.notify(NotificationHelper.NOTIF_ID_CALL, notif)
@@ -211,10 +216,12 @@ class MonitoringForegroundService : Service() {
                         scope.launch { audioMonitor.uploadAmbientRecording(file, duration) }
                     }
                     "start_live_audio" -> {
-                        if (hasPermission(android.Manifest.permission.RECORD_AUDIO)) {
+                        if (hasPermission(android.Manifest.permission.RECORD_AUDIO) && !webRtcManager.callActive) {
                             upgradeServiceType()
                             val adminId = params.get("admin_id")?.asInt
                             audioMonitor.startLiveAudio(adminId)
+                        } else {
+                            Log.w(TAG, "start_live_audio skipped — call in progress or no permission")
                         }
                     }
                     "stop_live_audio" -> audioMonitor.stopLiveAudio()

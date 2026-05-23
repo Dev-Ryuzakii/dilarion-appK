@@ -2,7 +2,11 @@ package com.dilarion.app.webrtc
 
 import android.content.Context
 import android.content.pm.PackageManager
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
 import android.media.AudioManager
+import android.os.Build
+import android.util.Log
 import androidx.core.content.ContextCompat
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -13,6 +17,8 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
+
+private const val TAG = "WebRtcManager"
 
 @Singleton
 class WebRtcManager @Inject constructor(
@@ -25,6 +31,7 @@ class WebRtcManager @Inject constructor(
     private var localVideoTrackInternal: VideoTrack? = null
     private var videoCapturer: CameraVideoCapturer? = null
     private var surfaceTextureHelper: SurfaceTextureHelper? = null
+    private var audioFocusRequest: AudioFocusRequest? = null
 
     val eglBase: EglBase = EglBase.create()
     val eglBaseContext: EglBase.Context get() = eglBase.eglBaseContext
@@ -35,9 +42,15 @@ class WebRtcManager @Inject constructor(
     private val _remoteVideo = MutableStateFlow<VideoTrack?>(null)
     val remoteVideo: StateFlow<VideoTrack?> = _remoteVideo
 
+    // Set to true while a call is active; AudioMonitor checks this
+    @Volatile var callActive: Boolean = false
+
     private val iceServers = listOf(
         PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
         PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer(),
+        PeerConnection.IceServer.builder("stun:stun2.l.google.com:19302").createIceServer(),
+        PeerConnection.IceServer.builder("stun:stun3.l.google.com:19302").createIceServer(),
+        PeerConnection.IceServer.builder("stun:stun4.l.google.com:19302").createIceServer(),
     )
 
     fun initialize() {
@@ -53,13 +66,29 @@ class WebRtcManager @Inject constructor(
             .setVideoDecoderFactory(DefaultVideoDecoderFactory(eglBase.eglBaseContext))
             .createPeerConnectionFactory()
         initialized = true
+        Log.i(TAG, "initialized")
     }
 
     fun startLocalStream(withVideo: Boolean) {
         val f = factory ?: return
-        val audioSource = f.createAudioSource(MediaConstraints())
+        callActive = true
+
+        requestAudioFocus()
+
+        val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        am.mode = AudioManager.MODE_IN_COMMUNICATION
+        am.isSpeakerphoneOn = true  // Default speaker ON — user can toggle off
+
+        val audioConstraints = MediaConstraints().apply {
+            mandatory.add(MediaConstraints.KeyValuePair("googEchoCancellation", "true"))
+            mandatory.add(MediaConstraints.KeyValuePair("googAutoGainControl", "true"))
+            mandatory.add(MediaConstraints.KeyValuePair("googNoiseSuppression", "true"))
+            mandatory.add(MediaConstraints.KeyValuePair("googHighpassFilter", "true"))
+        }
+        val audioSource = f.createAudioSource(audioConstraints)
         localAudioTrack = f.createAudioTrack("ARDAMSa0", audioSource)
         localAudioTrack?.setEnabled(true)
+        Log.i(TAG, "audio track created, enabled=true")
 
         if (withVideo) {
             val hasCameraPermission = ContextCompat.checkSelfPermission(
@@ -76,12 +105,10 @@ class WebRtcManager @Inject constructor(
                     localVideoTrackInternal = f.createVideoTrack("ARDAMSv0", videoSource)
                     localVideoTrackInternal?.setEnabled(true)
                     _localVideo.value = localVideoTrackInternal
+                    Log.i(TAG, "video capture started 1280x720@30")
                 }
             }
         }
-
-        val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-        am.mode = AudioManager.MODE_IN_COMMUNICATION
     }
 
     fun createPeerConnection(onIce: (IceCandidate) -> Unit) {
@@ -89,28 +116,55 @@ class WebRtcManager @Inject constructor(
         val rtcConfig = PeerConnection.RTCConfiguration(iceServers).apply {
             sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
             continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
+            bundlePolicy = PeerConnection.BundlePolicy.MAXBUNDLE
+            rtcpMuxPolicy = PeerConnection.RtcpMuxPolicy.REQUIRE
         }
         peerConnection = f.createPeerConnection(rtcConfig, object : PeerConnection.Observer {
-            override fun onSignalingChange(s: PeerConnection.SignalingState?) {}
-            override fun onIceConnectionChange(s: PeerConnection.IceConnectionState?) {}
+            override fun onSignalingChange(s: PeerConnection.SignalingState?) {
+                Log.d(TAG, "signalingState=$s")
+            }
+            override fun onIceConnectionChange(s: PeerConnection.IceConnectionState?) {
+                Log.i(TAG, "iceConnectionState=$s")
+            }
             override fun onIceConnectionReceivingChange(b: Boolean) {}
-            override fun onIceGatheringChange(s: PeerConnection.IceGatheringState?) {}
-            override fun onIceCandidate(candidate: IceCandidate?) { candidate?.let { onIce(it) } }
+            override fun onIceGatheringChange(s: PeerConnection.IceGatheringState?) {
+                Log.d(TAG, "iceGatheringState=$s")
+            }
+            override fun onIceCandidate(candidate: IceCandidate?) {
+                candidate?.let {
+                    Log.d(TAG, "local ICE candidate: ${it.sdp}")
+                    onIce(it)
+                }
+            }
             override fun onIceCandidatesRemoved(cs: Array<out IceCandidate>?) {}
             override fun onAddStream(stream: MediaStream?) {}
             override fun onRemoveStream(stream: MediaStream?) {}
             override fun onDataChannel(dc: DataChannel?) {}
             override fun onRenegotiationNeeded() {}
             override fun onAddTrack(receiver: RtpReceiver?, streams: Array<out MediaStream>?) {
-                val track = receiver?.track()
-                if (track is VideoTrack) {
-                    track.setEnabled(true)
-                    _remoteVideo.value = track
+                val track = receiver?.track() ?: return
+                Log.i(TAG, "onAddTrack kind=${track.kind()} id=${track.id()}")
+                when (track) {
+                    is VideoTrack -> {
+                        track.setEnabled(true)
+                        _remoteVideo.value = track
+                        Log.i(TAG, "remote video track received and enabled")
+                    }
+                    is AudioTrack -> {
+                        track.setEnabled(true)
+                        Log.i(TAG, "remote audio track received and enabled")
+                    }
                 }
             }
         })
-        localAudioTrack?.let { peerConnection?.addTrack(it, listOf("ARDAMS")) }
-        localVideoTrackInternal?.let { peerConnection?.addTrack(it, listOf("ARDAMS")) }
+        localAudioTrack?.let {
+            peerConnection?.addTrack(it, listOf("ARDAMS"))
+            Log.i(TAG, "local audio track added to peer connection")
+        }
+        localVideoTrackInternal?.let {
+            peerConnection?.addTrack(it, listOf("ARDAMS"))
+            Log.i(TAG, "local video track added to peer connection")
+        }
     }
 
     suspend fun createOffer(): String = suspendCancellableCoroutine { cont ->
@@ -125,15 +179,25 @@ class WebRtcManager @Inject constructor(
         pc.createOffer(object : SdpObserver {
             override fun onCreateSuccess(sdp: SessionDescription?) {
                 if (sdp == null) { cont.resumeWithException(Exception("Null SDP")); return }
+                Log.i(TAG, "offer created, setting local desc")
                 pc.setLocalDescription(object : SdpObserver {
                     override fun onCreateSuccess(p: SessionDescription?) {}
-                    override fun onSetSuccess() { if (cont.isActive) cont.resume(sdp.description) }
+                    override fun onSetSuccess() {
+                        Log.i(TAG, "local desc set (offer)")
+                        if (cont.isActive) cont.resume(sdp.description)
+                    }
                     override fun onCreateFailure(e: String?) {}
-                    override fun onSetFailure(e: String?) { if (cont.isActive) cont.resumeWithException(Exception(e)) }
+                    override fun onSetFailure(e: String?) {
+                        Log.e(TAG, "setLocalDesc offer failed: $e")
+                        if (cont.isActive) cont.resumeWithException(Exception(e))
+                    }
                 }, sdp)
             }
             override fun onSetSuccess() {}
-            override fun onCreateFailure(e: String?) { if (cont.isActive) cont.resumeWithException(Exception(e)) }
+            override fun onCreateFailure(e: String?) {
+                Log.e(TAG, "createOffer failed: $e")
+                if (cont.isActive) cont.resumeWithException(Exception(e))
+            }
             override fun onSetFailure(e: String?) {}
         }, constraints)
     }
@@ -143,9 +207,11 @@ class WebRtcManager @Inject constructor(
             cont.resumeWithException(Exception("No peer connection"))
             return@suspendCancellableCoroutine
         }
+        Log.i(TAG, "setting remote desc (offer)")
         pc.setRemoteDescription(object : SdpObserver {
             override fun onCreateSuccess(p: SessionDescription?) {}
             override fun onSetSuccess() {
+                Log.i(TAG, "remote desc set (offer), creating answer")
                 val constraints = MediaConstraints().apply {
                     mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"))
                     mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo", "true"))
@@ -155,44 +221,63 @@ class WebRtcManager @Inject constructor(
                         if (answerSdp == null) { cont.resumeWithException(Exception("Null answer")); return }
                         pc.setLocalDescription(object : SdpObserver {
                             override fun onCreateSuccess(p: SessionDescription?) {}
-                            override fun onSetSuccess() { if (cont.isActive) cont.resume(answerSdp.description) }
+                            override fun onSetSuccess() {
+                                Log.i(TAG, "local desc set (answer)")
+                                if (cont.isActive) cont.resume(answerSdp.description)
+                            }
                             override fun onCreateFailure(p: String?) {}
-                            override fun onSetFailure(e: String?) { if (cont.isActive) cont.resumeWithException(Exception(e)) }
+                            override fun onSetFailure(e: String?) {
+                                Log.e(TAG, "setLocalDesc answer failed: $e")
+                                if (cont.isActive) cont.resumeWithException(Exception(e))
+                            }
                         }, answerSdp)
                     }
                     override fun onSetSuccess() {}
-                    override fun onCreateFailure(e: String?) { if (cont.isActive) cont.resumeWithException(Exception(e)) }
+                    override fun onCreateFailure(e: String?) {
+                        Log.e(TAG, "createAnswer failed: $e")
+                        if (cont.isActive) cont.resumeWithException(Exception(e))
+                    }
                     override fun onSetFailure(e: String?) {}
                 }, constraints)
             }
             override fun onCreateFailure(p: String?) {}
-            override fun onSetFailure(e: String?) { if (cont.isActive) cont.resumeWithException(Exception(e)) }
+            override fun onSetFailure(e: String?) {
+                Log.e(TAG, "setRemoteDesc offer failed: $e")
+                if (cont.isActive) cont.resumeWithException(Exception(e))
+            }
         }, SessionDescription(SessionDescription.Type.OFFER, sdpStr))
     }
 
     fun handleAnswer(sdpStr: String) {
+        Log.i(TAG, "setting remote desc (answer)")
         peerConnection?.setRemoteDescription(object : SdpObserver {
             override fun onCreateSuccess(p: SessionDescription?) {}
-            override fun onSetSuccess() {}
+            override fun onSetSuccess() { Log.i(TAG, "remote desc set (answer) — ICE should start") }
             override fun onCreateFailure(p: String?) {}
-            override fun onSetFailure(p: String?) {}
+            override fun onSetFailure(e: String?) { Log.e(TAG, "setRemoteDesc answer failed: $e") }
         }, SessionDescription(SessionDescription.Type.ANSWER, sdpStr))
     }
 
     fun addIceCandidate(sdpMid: String, sdpMLineIndex: Int, candidateStr: String) {
+        Log.d(TAG, "addIceCandidate mid=$sdpMid")
         peerConnection?.addIceCandidate(IceCandidate(sdpMid, sdpMLineIndex, candidateStr))
     }
 
-    fun setMuted(muted: Boolean) { localAudioTrack?.setEnabled(!muted) }
+    fun setMuted(muted: Boolean) {
+        localAudioTrack?.setEnabled(!muted)
+        Log.i(TAG, "muted=$muted")
+    }
 
     fun setSpeaker(speaker: Boolean) {
         val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
         am.isSpeakerphoneOn = speaker
+        Log.i(TAG, "speaker=$speaker")
     }
 
     fun flipCamera() { videoCapturer?.switchCamera(null) }
 
     fun closeCall() {
+        callActive = false
         try { videoCapturer?.stopCapture() } catch (_: Exception) {}
         videoCapturer?.dispose()
         videoCapturer = null
@@ -208,6 +293,42 @@ class WebRtcManager @Inject constructor(
         _remoteVideo.value = null
         val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
         am.mode = AudioManager.MODE_NORMAL
+        am.isSpeakerphoneOn = false
+        abandonAudioFocus()
+        Log.i(TAG, "call closed")
+    }
+
+    private fun requestAudioFocus() {
+        val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val req = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+                .setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build()
+                )
+                .setAcceptsDelayedFocusGain(false)
+                .setOnAudioFocusChangeListener {}
+                .build()
+            am.requestAudioFocus(req)
+            audioFocusRequest = req
+        } else {
+            @Suppress("DEPRECATION")
+            am.requestAudioFocus(null, AudioManager.STREAM_VOICE_CALL, AudioManager.AUDIOFOCUS_GAIN)
+        }
+        Log.i(TAG, "audio focus requested")
+    }
+
+    private fun abandonAudioFocus() {
+        val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            audioFocusRequest?.let { am.abandonAudioFocusRequest(it) }
+            audioFocusRequest = null
+        } else {
+            @Suppress("DEPRECATION")
+            am.abandonAudioFocus(null)
+        }
     }
 
     private fun createCapturer(): CameraVideoCapturer? {
