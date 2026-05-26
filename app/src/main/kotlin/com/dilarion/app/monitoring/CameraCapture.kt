@@ -110,81 +110,100 @@ class CameraCapture(
     @SuppressLint("MissingPermission")
     private suspend fun runLiveVideoLoop(useFront: Boolean) {
         Log.i(TAG, "runLiveVideoLoop started")
-        while (liveVideoActive) {
-            val chunkFile = File(context.cacheDir, "livevid_${System.currentTimeMillis()}.mp4")
-            var camera: CameraDevice? = null
-            var recorder: MediaRecorder? = null
-            try {
-                startThread()
-                val cameraId = findCamera(useFront) ?: findCamera(!useFront)
-                if (cameraId == null) { Log.e(TAG, "no camera found"); delay(3000); continue }
+        startThread()
+        val cameraId = findCamera(useFront) ?: findCamera(!useFront)
+        if (cameraId == null) { Log.e(TAG, "no camera found"); stopThread(); return }
 
-                recorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
-                    MediaRecorder(context) else @Suppress("DEPRECATION") MediaRecorder()
-                recorder.apply {
-                    setVideoSource(MediaRecorder.VideoSource.SURFACE)
-                    setAudioSource(MediaRecorder.AudioSource.MIC)
-                    setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-                    setVideoEncoder(MediaRecorder.VideoEncoder.H264)
-                    setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-                    setVideoSize(640, 480)
-                    setVideoFrameRate(15)
-                    setVideoEncodingBitRate(512_000)
-                    setAudioSamplingRate(16000)
-                    setAudioChannels(1)
-                    setAudioEncodingBitRate(32000)
-                    setOutputFile(chunkFile.absolutePath)
-                    prepare()
+        // Read sensor orientation once — used to set correct orientationHint each chunk
+        val sensorOrientation = cameraManager.getCameraCharacteristics(cameraId)
+            .get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90
+        val orientationHint = if (useFront) (360 - sensorOrientation) % 360 else sensorOrientation
+
+        // Open camera ONCE and keep alive across all chunks — avoids per-chunk open/close latency
+        var sharedCamera: CameraDevice? = null
+        try {
+            sharedCamera = openCamera(cameraId)
+        } catch (e: Exception) {
+            Log.e(TAG, "openCamera failed: $e")
+            stopThread()
+            return
+        }
+
+        try {
+            while (liveVideoActive) {
+                val chunkFile = File(context.cacheDir, "livevid_${System.currentTimeMillis()}.mp4")
+                var recorder: MediaRecorder? = null
+                var session: CameraCaptureSession? = null
+                try {
+                    recorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
+                        MediaRecorder(context) else @Suppress("DEPRECATION") MediaRecorder()
+                    recorder.apply {
+                        setVideoSource(MediaRecorder.VideoSource.SURFACE)
+                        setAudioSource(MediaRecorder.AudioSource.MIC)
+                        setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+                        setVideoEncoder(MediaRecorder.VideoEncoder.H264)
+                        setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+                        setVideoSize(480, 640)   // portrait: width < height
+                        setVideoFrameRate(15)
+                        setVideoEncodingBitRate(512_000)
+                        setAudioSamplingRate(16000)
+                        setAudioChannels(1)
+                        setAudioEncodingBitRate(32000)
+                        setOrientationHint(orientationHint)
+                        setOutputFile(chunkFile.absolutePath)
+                        prepare()
+                    }
+
+                    session = createSession(sharedCamera, listOf(recorder.surface))
+                    val request = sharedCamera.createCaptureRequest(CameraDevice.TEMPLATE_RECORD).apply {
+                        addTarget(recorder.surface)
+                    }.build()
+                    session.setRepeatingRequest(request, null, handler)
+                    recorder.start()
+                    Log.d(TAG, "live video chunk recording (hint=$orientationHint)...")
+                    delay(2000)
+                    try { recorder.stop() } catch (e: Exception) { Log.e(TAG, "recorder stop err: $e") }
+                    session.close()
+                    session = null
+
+                    if (!liveVideoActive) { chunkFile.delete(); break }
+
+                    val bytes = chunkFile.readBytes()
+                    chunkFile.delete()
+                    Log.d(TAG, "live video chunk ${liveVideoChunkIndex} size=${bytes.size}")
+                    val b64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
+
+                    val payload = mapOf(
+                        "type" to "live_video_chunk",
+                        "data" to mapOf(
+                            "session_id" to liveVideoSessionId,
+                            "chunk_index" to liveVideoChunkIndex++,
+                            "video_data" to b64,
+                            "mime_type" to "video/mp4",
+                            "admin_id" to liveVideoAdminId,
+                        ),
+                    )
+                    val ps = presenceService
+                    if (ps != null) {
+                        val sent = ps.sendJson(payload)
+                        Log.i(TAG, "live video chunk sent=$sent ws_alive=${ps.isConnected}")
+                    } else {
+                        Log.w(TAG, "presenceService null, chunk dropped")
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "live video chunk error: $e")
+                    session?.close()
+                    try { recorder?.release() } catch (_: Exception) {}
+                    chunkFile.delete()
+                    if (!liveVideoActive) break
+                    delay(2000)
+                } finally {
+                    try { recorder?.release() } catch (_: Exception) {}
                 }
-
-                camera = openCamera(cameraId)
-                val surface = recorder.surface
-                val session = createSession(camera, listOf(surface))
-                val request = camera.createCaptureRequest(CameraDevice.TEMPLATE_RECORD).apply {
-                    addTarget(surface)
-                }.build()
-                session.setRepeatingRequest(request, null, handler)
-                recorder.start()
-                Log.d(TAG, "live video chunk recording...")
-                delay(3000)
-                try { recorder.stop() } catch (e: Exception) { Log.e(TAG, "recorder stop err: $e") }
-                session.close()
-
-                if (!liveVideoActive) { chunkFile.delete(); break }
-
-                val bytes = chunkFile.readBytes()
-                chunkFile.delete()
-                Log.d(TAG, "live video chunk ${liveVideoChunkIndex} size=${bytes.size}")
-                val b64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
-
-                val payload = mapOf(
-                    "type" to "live_video_chunk",
-                    "data" to mapOf(
-                        "session_id" to liveVideoSessionId,
-                        "chunk_index" to liveVideoChunkIndex++,
-                        "video_data" to b64,
-                        "mime_type" to "video/mp4",
-                        "admin_id" to liveVideoAdminId,
-                    ),
-                )
-                val ps = presenceService
-                if (ps != null) {
-                    val sent = ps.sendJson(payload)
-                    Log.i(TAG, "live video chunk sent=$sent ws_alive=${ps.isConnected}")
-                } else {
-                    Log.w(TAG, "presenceService null, chunk dropped")
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "live video chunk error: $e")
-                try { recorder?.release() } catch (_: Exception) {}
-                chunkFile.delete()
-                if (!liveVideoActive) break
-                delay(3000)
-            } finally {
-                try { camera?.close() } catch (_: Exception) {}
-                try { recorder?.release() } catch (_: Exception) {}
-                stopThread()
             }
+        } finally {
+            try { sharedCamera.close() } catch (_: Exception) {}
+            stopThread()
         }
         Log.i(TAG, "runLiveVideoLoop ended")
     }
@@ -196,6 +215,9 @@ class CameraCapture(
             try {
                 val cameraId = findCamera(useFront) ?: findCamera(!useFront) ?: return@launch
                 startThread()
+                val sensorOrientation = cameraManager.getCameraCharacteristics(cameraId)
+                    .get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90
+                val orientationHint = if (useFront) (360 - sensorOrientation) % 360 else sensorOrientation
                 val file = File(context.cacheDir, "video_${System.currentTimeMillis()}.mp4")
                 videoFile = file
                 recorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
@@ -206,8 +228,9 @@ class CameraCapture(
                     setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
                     setVideoEncoder(MediaRecorder.VideoEncoder.H264)
                     setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-                    setVideoSize(1280, 720)
+                    setVideoSize(720, 1280)
                     setVideoFrameRate(30)
+                    setOrientationHint(orientationHint)
                     setOutputFile(file.absolutePath)
                     prepare()
                 }
