@@ -69,12 +69,14 @@ function Shimmer({ w, h, r = 8 }: { w: string | number; h: number; r?: number })
 interface EncryptedBubbleProps {
   token: string;
   messageId: number;
+  decoyContent: string;
   masterToken: string | null;
+  isMine: boolean;
   onDecrypt: (masterToken: string, messageId: number) => Promise<string>;
   onMasterTokenSaved: (t: string) => void;
 }
 
-function EncryptedBubble({ token, messageId, masterToken, onDecrypt, onMasterTokenSaved }: EncryptedBubbleProps) {
+function EncryptedBubble({ token, messageId, decoyContent, masterToken, isMine, onDecrypt, onMasterTokenSaved }: EncryptedBubbleProps) {
   const [decryptedContent, setDecryptedContent] = useState<string | null>(null);
   const [showing, setShowing] = useState(false);
   const [inputVisible, setInputVisible] = useState(false);
@@ -87,11 +89,12 @@ function EncryptedBubble({ token, messageId, masterToken, onDecrypt, onMasterTok
     return () => { if (timerRef.current) clearTimeout(timerRef.current); };
   }, []);
 
-  async function handleDecryptClick() {
+  async function handleBubbleTap() {
+    if (showing || loading) return;
     if (masterToken) {
       await runDecrypt(masterToken);
     } else {
-      setInputVisible(true);
+      setInputVisible(v => !v);
     }
   }
 
@@ -99,7 +102,6 @@ function EncryptedBubble({ token, messageId, masterToken, onDecrypt, onMasterTok
     setLoading(true);
     setError(null);
     try {
-      // First confirm the master token is valid
       const valid = await confirmMasterToken(token, mToken);
       if (!valid) {
         setError('Invalid master token');
@@ -117,8 +119,8 @@ function EncryptedBubble({ token, messageId, masterToken, onDecrypt, onMasterTok
         setShowing(false);
         setDecryptedContent(null);
       }, 30000);
-    } catch {
-      setError('Invalid master token');
+    } catch (err: any) {
+      setError(err?.message || 'Invalid master token');
     } finally {
       setLoading(false);
     }
@@ -130,44 +132,53 @@ function EncryptedBubble({ token, messageId, masterToken, onDecrypt, onMasterTok
     await runDecrypt(trimmed);
   }
 
+  // Showing decrypted content
   if (showing && decryptedContent !== null) {
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
         <span style={{ fontSize: '0.88rem', lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: '#f1f5f9' }}>
           {decryptedContent}
         </span>
-        <span style={{ fontSize: '0.67rem', color: '#6b7280', fontStyle: 'italic' }}>
+        <span style={{ fontSize: '0.65rem', color: '#6b7280', fontStyle: 'italic' }}>
           Clears in 30s
         </span>
       </div>
     );
   }
 
+  // Show decoy text — tapping triggers decrypt
+  const displayText = decoyContent || '…';
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <LockIcon size={16} color="#6b7280" />
-        <span style={{ fontSize: '0.82rem', color: '#6b7280', fontStyle: 'italic' }}>Encrypted message</span>
-        <button
-          style={{
-            fontSize: '0.72rem',
-            color: '#6b7280',
-            background: 'transparent',
-            border: '1px solid #374151',
-            borderRadius: 6,
-            padding: '2px 8px',
-            cursor: 'pointer',
-            marginLeft: 4,
-            opacity: loading ? 0.5 : 1,
-          }}
-          onClick={handleDecryptClick}
-          disabled={loading}
-        >
-          {loading ? '...' : 'Decrypt'}
-        </button>
+      <div
+        onClick={handleBubbleTap}
+        style={{
+          cursor: loading ? 'wait' : 'pointer',
+          opacity: loading ? 0.7 : 1,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 4,
+        }}
+      >
+        <span style={{
+          fontSize: '0.88rem',
+          lineHeight: 1.5,
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word',
+          color: isMine ? '#d1b8a8' : '#c9c9c9',
+          userSelect: 'none',
+        }}>
+          {loading ? '…' : displayText}
+        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <LockIcon size={10} color="#6b7280" />
+          <span style={{ fontSize: '0.62rem', color: '#6b7280' }}>tap to decrypt</span>
+        </div>
       </div>
-      {inputVisible && (
-        <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+
+      {inputVisible && !masterToken && (
+        <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>
           <input
             type="password"
             placeholder="Master token"
@@ -184,6 +195,7 @@ function EncryptedBubble({ token, messageId, masterToken, onDecrypt, onMasterTok
               padding: '6px 10px',
             }}
             autoFocus
+            onClick={e => e.stopPropagation()}
           />
           <button
             style={{
@@ -195,15 +207,13 @@ function EncryptedBubble({ token, messageId, masterToken, onDecrypt, onMasterTok
               cursor: 'pointer',
               border: 'none',
             }}
-            onClick={handleSubmitToken}
+            onClick={e => { e.stopPropagation(); handleSubmitToken(); }}
           >
             OK
           </button>
         </div>
       )}
-      {error && (
-        <span style={{ fontSize: '0.72rem', color: '#ef4444' }}>{error}</span>
-      )}
+      {error && <span style={{ fontSize: '0.72rem', color: '#ef4444' }}>{error}</span>}
     </div>
   );
 }
@@ -214,7 +224,7 @@ function MediaBubble({ token, mediaId, contentType }: { token: string; mediaId: 
   const [loaded, setLoaded] = useState(false);
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
   const [blobMime, setBlobMime] = useState<string>('');
-  const [loadError, setLoadError] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const urlRef = useRef<string>('');
 
@@ -227,21 +237,34 @@ function MediaBubble({ token, mediaId, contentType }: { token: string; mediaId: 
     setLoading(true);
     try {
       const blob = await downloadMedia(token, mediaId);
-      const mime = blob.type && !blob.type.startsWith('media/') ? blob.type : 'audio/webm';
+      const mime = blob.type && !blob.type.startsWith('media/') ? blob.type
+        : isVoice(contentType) ? 'audio/webm' : 'application/octet-stream';
       setBlobMime(mime);
       const url = URL.createObjectURL(blob);
       urlRef.current = url;
       setObjectUrl(url);
       setLoaded(true);
-    } catch {
-      setLoadError(true);
+    } catch (err: any) {
+      const status = err?.status;
+      if (status === 410) {
+        setLoadError('Viewed & deleted');
+      } else if (status === 404) {
+        setLoadError('Media not found');
+      } else {
+        setLoadError('Failed to load');
+      }
     } finally {
       setLoading(false);
     }
   }
 
   if (loadError) {
-    return <span style={{ fontSize: '0.78rem', color: '#ef4444', fontStyle: 'italic' }}>Failed to load media</span>;
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 10 }}>
+        {isVoice(contentType) ? <MicIconSvg size={18} color="#6b7280" /> : isImage(contentType) ? <CameraIcon size={18} color="#6b7280" /> : <PaperclipIconSvg size={18} color="#6b7280" />}
+        <span style={{ fontSize: '0.78rem', color: '#6b7280', fontStyle: 'italic' }}>{loadError}</span>
+      </div>
+    );
   }
 
   if (loaded && objectUrl) {
@@ -314,7 +337,9 @@ function MessageBubble({ msg, isMine, token, masterToken, onDecrypt, onMasterTok
       <EncryptedBubble
         token={token}
         messageId={msg.id}
+        decoyContent={msg.decoy_content || ''}
         masterToken={masterToken}
+        isMine={isMine}
         onDecrypt={onDecrypt}
         onMasterTokenSaved={onMasterTokenSaved}
       />
@@ -381,12 +406,15 @@ export default function ChatPanel({ token, myUsername, partner, partnerOnline, m
   const [sending, setSending] = useState(false);
   const [recording, setRecording] = useState(false);
   const [recSeconds, setRecSeconds] = useState(0);
+  const [partnerTyping, setPartnerTyping] = useState(false);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const recChunksRef = useRef<Blob[]>([]);
   const recTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const typingStopTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isTypingSent = useRef(false);
 
   // Load conversation
   const loadConversation = useCallback(async () => {
@@ -418,7 +446,14 @@ export default function ChatPanel({ token, myUsername, partner, partnerOnline, m
       if (msg.type === 'new_message') {
         const sender = msg.data?.sender_username as string | undefined;
         if (sender === partner) {
+          setPartnerTyping(false);
           loadConversation();
+        }
+      } else if (msg.type === 'typing') {
+        const sender = (msg as any).sender as string | undefined;
+        const isTyping = (msg as any).is_typing as boolean | undefined;
+        if (sender === partner) {
+          setPartnerTyping(!!isTyping);
         }
       }
     };
@@ -432,11 +467,31 @@ export default function ChatPanel({ token, myUsername, partner, partnerOnline, m
     return result.content;
   }
 
+  // ── Typing indicators ────────────────────────────────────────────────────────
+
+  function sendTypingStart() {
+    if (!isTypingSent.current) {
+      isTypingSent.current = true;
+      presenceService.send({ type: 'typing', recipient: partner, is_typing: true });
+    }
+    if (typingStopTimer.current) clearTimeout(typingStopTimer.current);
+    typingStopTimer.current = setTimeout(sendTypingStop, 2000);
+  }
+
+  function sendTypingStop() {
+    if (isTypingSent.current) {
+      isTypingSent.current = false;
+      presenceService.send({ type: 'typing', recipient: partner, is_typing: false });
+    }
+    if (typingStopTimer.current) { clearTimeout(typingStopTimer.current); typingStopTimer.current = null; }
+  }
+
   // ── Send text ────────────────────────────────────────────────────────────────
 
   async function handleSend() {
     const trimmed = text.trim();
     if (!trimmed || sending) return;
+    sendTypingStop();
     setSending(true);
     setText('');
     try {
@@ -536,12 +591,19 @@ export default function ChatPanel({ token, myUsername, partner, partnerOnline, m
           <div style={cs.avatar}>{initials(partner)}</div>
           <div>
             <div style={cs.partnerName}>{partner}</div>
-            <div style={cs.partnerStatus}>
-              <div style={{ width: 7, height: 7, borderRadius: '50%', background: partnerOnline ? '#25d366' : '#6b7280', boxShadow: partnerOnline ? '0 0 5px #25d366' : 'none' }} />
-              <span style={{ fontSize: '0.72rem', color: partnerOnline ? '#25d366' : '#6b7280' }}>
-                {partnerOnline ? 'online' : 'offline'}
-              </span>
-            </div>
+            {partnerTyping ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 2 }}>
+                <TypingDots />
+                <span style={{ fontSize: '0.72rem', color: '#25d366', fontStyle: 'italic' }}>typing…</span>
+              </div>
+            ) : (
+              <div style={cs.partnerStatus}>
+                <div style={{ width: 7, height: 7, borderRadius: '50%', background: partnerOnline ? '#25d366' : '#6b7280', boxShadow: partnerOnline ? '0 0 5px #25d366' : 'none' }} />
+                <span style={{ fontSize: '0.72rem', color: partnerOnline ? '#25d366' : '#6b7280' }}>
+                  {partnerOnline ? 'online' : 'offline'}
+                </span>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -603,7 +665,7 @@ export default function ChatPanel({ token, myUsername, partner, partnerOnline, m
             style={cs.textInput}
             placeholder="Type a message"
             value={text}
-            onChange={e => setText(e.target.value)}
+            onChange={e => { setText(e.target.value); sendTypingStart(); }}
             onKeyDown={handleKeyDown}
             rows={1}
           />
@@ -633,6 +695,19 @@ export default function ChatPanel({ token, myUsername, partner, partnerOnline, m
 }
 
 // ── Icons ──────────────────────────────────────────────────────────────────────
+
+function TypingDots() {
+  return (
+    <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
+      {[0, 1, 2].map(i => (
+        <div key={i} style={{
+          width: 5, height: 5, borderRadius: '50%', background: '#25d366',
+          animation: `pulse 1.2s ease-in-out ${i * 0.2}s infinite`,
+        }} />
+      ))}
+    </div>
+  );
+}
 
 function StopIcon() {
   return (

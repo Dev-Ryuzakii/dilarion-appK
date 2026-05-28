@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { presenceService, WsMessage } from '../services/presence';
 import { setToken as setMonitorToken, handleCommand } from '../services/monitoring';
 import {
-  getUsers,
+  getConversations,
   getGroups,
   getCallHistory,
   confirmMasterToken,
@@ -650,6 +650,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
   const [connected, setConnected] = useState(false);
   const [unread, setUnread] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState('');
+  const [typingUsers, setTypingUsers] = useState<Set<string>>(new Set());
 
   // Stable ref for selectedChat in WS handler
   const selectedChatRef = useRef(selectedChat);
@@ -674,11 +675,32 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
       } else if (msg.type === 'new_message') {
         const sender = msg.data?.sender_username as string | undefined;
         if (sender && sender !== username) {
+          // Clear typing when message arrives
+          setTypingUsers(prev => { const n = new Set(prev); n.delete(sender); return n; });
           setUnread(prev => {
             if (sender === selectedChatRef.current) return prev;
             const next = new Set(prev);
             next.add(sender);
             return next;
+          });
+          // Refresh contact list so new contacts appear
+          setContacts(prev => {
+            if (prev.some(c => c.username === sender)) return prev;
+            return [...prev, { username: sender, is_active: true }];
+          });
+        }
+      } else if (msg.type === 'user_status') {
+        const onlineList = ((msg as any).users as string[]) ?? [];
+        const onlineSet = new Set(onlineList);
+        setContacts(prev => prev.map(c => ({ ...c, is_active: onlineSet.has(c.username) })));
+      } else if (msg.type === 'typing') {
+        const sender = (msg as any).sender as string | undefined;
+        const isTyping = (msg as any).is_typing as boolean | undefined;
+        if (sender) {
+          setTypingUsers(prev => {
+            const n = new Set(prev);
+            if (isTyping) n.add(sender); else n.delete(sender);
+            return n;
           });
         }
       }
@@ -694,10 +716,10 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, username]);
 
-  // ── Load contacts ────────────────────────────────────────────────────────────
+  // ── Load contacts (conversations) ────────────────────────────────────────────
   useEffect(() => {
     setLoadingContacts(true);
-    getUsers(token)
+    getConversations(token)
       .then(users => setContacts(users.filter(u => u.username !== username)))
       .catch(() => {})
       .finally(() => setLoadingContacts(false));
@@ -792,11 +814,14 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
             {loadingContacts ? (
               <ContactSkeleton />
             ) : filteredContacts.length === 0 ? (
-              <div style={hs.emptyList}>No contacts found</div>
+              <div style={hs.emptyList}>
+                {search ? 'No contacts found' : 'No conversations yet'}
+              </div>
             ) : (
               filteredContacts.map(c => {
                 const isActive = selectedChat === c.username;
                 const hasUnread = unread.has(c.username);
+                const isTyping = typingUsers.has(c.username);
                 return (
                   <button
                     key={c.username}
@@ -818,11 +843,15 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
                     </div>
                     <div style={hs.itemInfo}>
                       <span style={hs.itemName}>{c.username}</span>
-                      <span style={{ fontSize: '0.72rem', color: c.is_active ? '#25d366' : '#6b7280' }}>
-                        {c.is_active ? 'online' : 'offline'}
-                      </span>
+                      {isTyping ? (
+                        <span style={{ fontSize: '0.72rem', color: '#25d366', fontStyle: 'italic' }}>typing…</span>
+                      ) : (
+                        <span style={{ fontSize: '0.72rem', color: c.is_active ? '#25d366' : '#6b7280' }}>
+                          {c.is_active ? 'online' : 'offline'}
+                        </span>
+                      )}
                     </div>
-                    {hasUnread && <div style={hs.unreadBadge}>1</div>}
+                    {hasUnread && !isTyping && <div style={hs.unreadBadge}>1</div>}
                   </button>
                 );
               })

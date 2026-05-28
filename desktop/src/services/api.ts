@@ -55,6 +55,20 @@ export async function getUsers(token: string): Promise<Contact[]> {
   return res.json();
 }
 
+export async function getConversations(token: string): Promise<Contact[]> {
+  const res = await fetch(`${BASE}/messages/conversations`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error('Failed to fetch conversations');
+  return res.json();
+}
+
+export async function searchUsers(token: string, query: string): Promise<Contact[]> {
+  const all = await getUsers(token);
+  const q = query.toLowerCase();
+  return all.filter(u => u.username.toLowerCase().includes(q));
+}
+
 // ── Conversation ───────────────────────────────────────────────────────────────
 
 export async function getConversation(token: string, partner: string): Promise<ChatMessage[]> {
@@ -108,7 +122,9 @@ export async function downloadMedia(token: string, mediaId: string): Promise<Blo
   const res = await fetch(`${BASE}/media/download/${encodeURIComponent(mediaId)}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
-  if (!res.ok) throw new Error('Failed to download media');
+  if (res.status === 410) throw Object.assign(new Error('Media was already viewed and deleted'), { status: 410 });
+  if (res.status === 404) throw Object.assign(new Error('Media not found'), { status: 404 });
+  if (!res.ok) throw Object.assign(new Error('Failed to download media'), { status: res.status });
   return res.blob();
 }
 
@@ -260,7 +276,13 @@ export async function confirmMasterToken(token: string, masterToken: string): Pr
     },
     body: JSON.stringify({ mastertoken: masterToken }),
   });
-  return res.ok;
+  if (res.status === 401) return false;
+  if (!res.ok) {
+    let detail = 'Server error';
+    try { const b = await res.json(); detail = b.detail || detail; } catch {}
+    throw new Error(detail);
+  }
+  return true;
 }
 
 export async function createMasterToken(token: string, masterToken: string): Promise<void> {

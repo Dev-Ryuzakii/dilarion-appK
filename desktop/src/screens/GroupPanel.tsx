@@ -67,12 +67,14 @@ function Shimmer({ w, h, r = 8 }: { w: string | number; h: number; r?: number })
 interface EncryptedBubbleProps {
   token: string;
   messageId: number;
+  decoyContent: string;
   masterToken: string | null;
+  isMine: boolean;
   onDecrypt: (masterToken: string, messageId: number) => Promise<string>;
   onMasterTokenSaved: (t: string) => void;
 }
 
-function EncryptedBubble({ token, messageId, masterToken, onDecrypt, onMasterTokenSaved }: EncryptedBubbleProps) {
+function EncryptedBubble({ token, messageId, decoyContent, masterToken, isMine, onDecrypt, onMasterTokenSaved }: EncryptedBubbleProps) {
   const [decryptedContent, setDecryptedContent] = useState<string | null>(null);
   const [showing, setShowing] = useState(false);
   const [inputVisible, setInputVisible] = useState(false);
@@ -85,11 +87,12 @@ function EncryptedBubble({ token, messageId, masterToken, onDecrypt, onMasterTok
     return () => { if (timerRef.current) clearTimeout(timerRef.current); };
   }, []);
 
-  async function handleDecryptClick() {
+  async function handleBubbleTap() {
+    if (showing || loading) return;
     if (masterToken) {
       await runDecrypt(masterToken);
     } else {
-      setInputVisible(true);
+      setInputVisible(v => !v);
     }
   }
 
@@ -97,7 +100,6 @@ function EncryptedBubble({ token, messageId, masterToken, onDecrypt, onMasterTok
     setLoading(true);
     setError(null);
     try {
-      // First confirm the master token is valid
       const valid = await confirmMasterToken(token, mToken);
       if (!valid) {
         setError('Invalid master token');
@@ -115,8 +117,8 @@ function EncryptedBubble({ token, messageId, masterToken, onDecrypt, onMasterTok
         setShowing(false);
         setDecryptedContent(null);
       }, 30000);
-    } catch {
-      setError('Invalid master token');
+    } catch (err: any) {
+      setError(err?.message || 'Invalid master token');
     } finally {
       setLoading(false);
     }
@@ -130,78 +132,55 @@ function EncryptedBubble({ token, messageId, masterToken, onDecrypt, onMasterTok
 
   if (showing && decryptedContent !== null) {
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
         <span style={{ fontSize: '0.88rem', lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: '#f1f5f9' }}>
           {decryptedContent}
         </span>
-        <span style={{ fontSize: '0.67rem', color: '#6b7280', fontStyle: 'italic' }}>
-          Clears in 30s
-        </span>
+        <span style={{ fontSize: '0.65rem', color: '#6b7280', fontStyle: 'italic' }}>Clears in 30s</span>
       </div>
     );
   }
 
+  const displayText = decoyContent || '…';
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <LockIcon size={16} color="#6b7280" />
-        <span style={{ fontSize: '0.82rem', color: '#6b7280', fontStyle: 'italic' }}>Encrypted message</span>
-        <button
-          style={{
-            fontSize: '0.72rem',
-            color: '#6b7280',
-            background: 'transparent',
-            border: '1px solid #374151',
-            borderRadius: 6,
-            padding: '2px 8px',
-            cursor: 'pointer',
-            marginLeft: 4,
-            opacity: loading ? 0.5 : 1,
-          }}
-          onClick={handleDecryptClick}
-          disabled={loading}
-        >
-          {loading ? '...' : 'Decrypt'}
-        </button>
+      <div
+        onClick={handleBubbleTap}
+        style={{ cursor: loading ? 'wait' : 'pointer', opacity: loading ? 0.7 : 1, display: 'flex', flexDirection: 'column', gap: 4 }}
+      >
+        <span style={{
+          fontSize: '0.88rem', lineHeight: 1.5, whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word', color: isMine ? '#d1b8a8' : '#c9c9c9', userSelect: 'none',
+        }}>
+          {loading ? '…' : displayText}
+        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <LockIcon size={10} color="#6b7280" />
+          <span style={{ fontSize: '0.62rem', color: '#6b7280' }}>tap to decrypt</span>
+        </div>
       </div>
-      {inputVisible && (
-        <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+      {inputVisible && !masterToken && (
+        <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>
           <input
             type="password"
             placeholder="Master token"
             value={inputValue}
             onChange={e => setInputValue(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') handleSubmitToken(); }}
-            style={{
-              flex: 1,
-              background: '#1a1a1a',
-              border: '1px solid #2a2a2a',
-              borderRadius: 8,
-              color: '#f1f5f9',
-              fontSize: '0.8rem',
-              padding: '6px 10px',
-            }}
+            style={{ flex: 1, background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, color: '#f1f5f9', fontSize: '0.8rem', padding: '6px 10px' }}
             autoFocus
+            onClick={e => e.stopPropagation()}
           />
           <button
-            style={{
-              background: '#c0392b',
-              color: '#fff',
-              fontSize: '0.75rem',
-              borderRadius: 8,
-              padding: '6px 12px',
-              cursor: 'pointer',
-              border: 'none',
-            }}
-            onClick={handleSubmitToken}
+            style={{ background: '#c0392b', color: '#fff', fontSize: '0.75rem', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', border: 'none' }}
+            onClick={e => { e.stopPropagation(); handleSubmitToken(); }}
           >
             OK
           </button>
         </div>
       )}
-      {error && (
-        <span style={{ fontSize: '0.72rem', color: '#ef4444' }}>{error}</span>
-      )}
+      {error && <span style={{ fontSize: '0.72rem', color: '#ef4444' }}>{error}</span>}
     </div>
   );
 }
@@ -225,21 +204,32 @@ function MediaBubble({ token, mediaId, contentType }: { token: string; mediaId: 
     setLoading(true);
     try {
       const blob = await downloadMedia(token, mediaId);
-      const mime = blob.type && !blob.type.startsWith('media/') ? blob.type : 'audio/webm';
+      const mime = blob.type && !blob.type.startsWith('media/') ? blob.type
+        : isVoice(contentType) ? 'audio/webm' : 'application/octet-stream';
       setBlobMime(mime);
       const url = URL.createObjectURL(blob);
       urlRef.current = url;
       setObjectUrl(url);
       setLoaded(true);
-    } catch {
-      setLoadError(true);
+    } catch (err: any) {
+      const status = err?.status;
+      if (status === 410) {
+        setLoadError(true);
+      } else {
+        setLoadError(true);
+      }
     } finally {
       setLoading(false);
     }
   }
 
   if (loadError) {
-    return <span style={{ fontSize: '0.78rem', color: '#ef4444', fontStyle: 'italic' }}>Failed to load media</span>;
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 10 }}>
+        {isVoice(contentType) ? <MicIconSvg size={22} color="#6b7280" /> : <PaperclipIconSvg size={22} color="#6b7280" />}
+        <span style={{ fontSize: '0.78rem', color: '#6b7280', fontStyle: 'italic' }}>Viewed &amp; deleted</span>
+      </div>
+    );
   }
 
   if (loaded && objectUrl) {
@@ -311,7 +301,9 @@ function GroupMsgBubble({ msg, isMine, token, masterToken, onDecrypt, onMasterTo
       <EncryptedBubble
         token={token}
         messageId={msg.id}
+        decoyContent={msg.decoy_content || ''}
         masterToken={masterToken}
+        isMine={isMine}
         onDecrypt={onDecrypt}
         onMasterTokenSaved={onMasterTokenSaved}
       />
