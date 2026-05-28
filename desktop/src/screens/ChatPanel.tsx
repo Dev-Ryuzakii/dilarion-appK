@@ -920,6 +920,9 @@ const cs: Record<string, React.CSSProperties> = {
     display: 'flex',
     flexDirection: 'column',
     gap: 2,
+    backgroundImage: 'url(/chat_bg.png)',
+    backgroundSize: '512px 512px',
+    backgroundRepeat: 'repeat',
   },
   emptyChat: {
     flex: 1,
