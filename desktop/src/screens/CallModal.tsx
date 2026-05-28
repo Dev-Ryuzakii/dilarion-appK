@@ -186,6 +186,17 @@ export default function CallModal({ partner, callType, isIncoming, onEnd }: Prop
     return () => presenceService.removeListener(handler);
   }, [partner]);
 
+  function stopAllMedia() {
+    if (localVideoRef.current) localVideoRef.current.srcObject = null;
+    if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
+    localStreamRef.current?.getTracks().forEach(t => t.stop());
+    screenStreamRef.current?.getTracks().forEach(t => t.stop());
+    localStreamRef.current = null;
+    screenStreamRef.current = null;
+    pcRef.current?.close();
+    pcRef.current = null;
+  }
+
   // Start outgoing call on mount
   useEffect(() => {
     if (!isIncoming) {
@@ -194,9 +205,7 @@ export default function CallModal({ partner, callType, isIncoming, onEnd }: Prop
     }
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
-      localStreamRef.current?.getTracks().forEach(t => t.stop());
-      screenStreamRef.current?.getTracks().forEach(t => t.stop());
-      pcRef.current?.close();
+      stopAllMedia();
     };
   }, []);
 
@@ -206,9 +215,7 @@ export default function CallModal({ partner, callType, isIncoming, onEnd }: Prop
     presenceService.send({ type: 'call_end', recipient: partner });
     setState('ended');
     if (timerRef.current) clearInterval(timerRef.current);
-    localStreamRef.current?.getTracks().forEach(t => t.stop());
-    screenStreamRef.current?.getTracks().forEach(t => t.stop());
-    pcRef.current?.close();
+    stopAllMedia();
     setTimeout(onEnd, 400);
   }
 

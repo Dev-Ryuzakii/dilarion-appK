@@ -804,10 +804,9 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
     setShowNewChat(false);
     setUserSearch('');
     setActiveTab('chats');
-    openContact(u);
-    if (!contacts.some(c => c.username === u)) {
-      setContacts(prev => [...prev, { username: u, is_active: false }]);
-    }
+    setSelectedChat(u);
+    setUnread(prev => { const n = new Set(prev); n.delete(u); return n; });
+    // Do NOT add to contacts here — they appear only after a message is exchanged
   }
 
   const filteredContacts = contacts.filter(c =>

@@ -31,7 +31,10 @@ function isVoice(ct: string | null | undefined): boolean {
   return !!(ct === 'media/voice' || ct?.startsWith('audio/'));
 }
 function isImage(ct: string | null | undefined): boolean {
-  return !!ct?.startsWith('image/');
+  return !!(ct?.startsWith('image/') || ct === 'media/photo');
+}
+function isVideoMedia(ct: string | null | undefined): boolean {
+  return !!(ct?.startsWith('video/') || ct === 'media/video');
 }
 function isMedia(ct: string | null | undefined): boolean {
   return !!(ct?.startsWith('media/') || ct?.startsWith('application/'));
@@ -266,7 +269,7 @@ function EncryptedBubble({ token, messageId, decoyContent, masterToken, isMine, 
 
 // ── MediaBubble ────────────────────────────────────────────────────────────────
 
-function MediaBubble({ token, mediaId, contentType }: { token: string; mediaId: string; contentType: string }) {
+function MediaBubble({ token, mediaId, contentType, onRemove }: { token: string; mediaId: string; contentType: string; onRemove?: () => void }) {
   const [loaded, setLoaded] = useState(false);
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
   const [, setBlobMime] = useState<string>('');
@@ -287,7 +290,7 @@ function MediaBubble({ token, mediaId, contentType }: { token: string; mediaId: 
         : isVoice(contentType) ? 'audio/webm' : 'application/octet-stream';
       setBlobMime(mime);
 
-      if (isVoice(contentType)) {
+      if (isVoice(contentType) || isImage(contentType) || isVideoMedia(contentType)) {
         // Data URL avoids blob: protocol issues in Tauri WebView
         const dataUrl = await new Promise<string>((resolve, reject) => {
           const reader = new FileReader();
@@ -302,12 +305,13 @@ function MediaBubble({ token, mediaId, contentType }: { token: string; mediaId: 
         setObjectUrl(url);
       }
       setLoaded(true);
+      // Remove bubble after 10s — media is view-once
+      setTimeout(() => onRemove?.(), 10_000);
     } catch (err: any) {
       const status = err?.status;
-      if (status === 410) {
-        setLoadError('Viewed & deleted');
-      } else if (status === 404) {
-        setLoadError('Media not found');
+      if (status === 410 || status === 404) {
+        // Server already deleted it — remove bubble immediately
+        onRemove?.();
       } else {
         setLoadError('Failed to load');
       }
@@ -319,7 +323,7 @@ function MediaBubble({ token, mediaId, contentType }: { token: string; mediaId: 
   if (loadError) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 10 }}>
-        {isVoice(contentType) ? <MicIconSvg size={18} color="#6b7280" /> : isImage(contentType) ? <CameraIcon size={18} color="#6b7280" /> : <PaperclipIconSvg size={18} color="#6b7280" />}
+        {isVoice(contentType) ? <MicIconSvg size={18} color="#6b7280" /> : (isImage(contentType) || isVideoMedia(contentType)) ? <CameraIcon size={18} color="#6b7280" /> : <PaperclipIconSvg size={18} color="#6b7280" />}
         <span style={{ fontSize: '0.78rem', color: '#6b7280', fontStyle: 'italic' }}>{loadError}</span>
       </div>
     );
@@ -328,6 +332,16 @@ function MediaBubble({ token, mediaId, contentType }: { token: string; mediaId: 
   if (loaded && objectUrl) {
     if (isImage(contentType)) {
       return <img src={objectUrl} alt="photo" style={{ maxWidth: 260, maxHeight: 260, borderRadius: 10, display: 'block' }} />;
+    }
+    if (isVideoMedia(contentType)) {
+      return (
+        <video
+          controls
+          src={objectUrl}
+          preload="metadata"
+          style={{ maxWidth: 280, maxHeight: 220, borderRadius: 10, display: 'block', background: '#000' }}
+        />
+      );
     }
     if (isVoice(contentType)) {
       return (
@@ -345,6 +359,7 @@ function MediaBubble({ token, mediaId, contentType }: { token: string; mediaId: 
   let label = 'File';
   let iconEl: React.ReactNode = <PaperclipIconSvg size={22} color="#9ca3af" />;
   if (isImage(contentType)) { iconEl = <CameraIcon size={22} color="#9ca3af" />; label = 'Photo'; }
+  else if (isVideoMedia(contentType)) { iconEl = <CameraIcon size={22} color="#9ca3af" />; label = 'Video'; }
   else if (isVoice(contentType)) { iconEl = <MicIconSvg size={22} color="#9ca3af" />; label = 'Voice note'; }
 
   return (
@@ -380,9 +395,10 @@ interface MessageBubbleProps {
   masterToken: string | null;
   onDecrypt: (masterToken: string, messageId: number) => Promise<string>;
   onMasterTokenSaved: (t: string) => void;
+  onRemoveMessage: (id: number) => void;
 }
 
-function MessageBubble({ msg, isMine, token, masterToken, onDecrypt, onMasterTokenSaved }: MessageBubbleProps) {
+function MessageBubble({ msg, isMine, token, masterToken, onDecrypt, onMasterTokenSaved, onRemoveMessage }: MessageBubbleProps) {
   const ct = msg.content_type;
   const mediaId = msg.content;
 
@@ -400,7 +416,7 @@ function MessageBubble({ msg, isMine, token, masterToken, onDecrypt, onMasterTok
       />
     );
   } else if (isImage(ct) || isVoice(ct) || isMedia(ct)) {
-    body = <MediaBubble token={token} mediaId={mediaId} contentType={ct} />;
+    body = <MediaBubble token={token} mediaId={mediaId} contentType={ct} onRemove={() => onRemoveMessage(msg.id)} />;
   } else {
     body = (
       <span style={{ fontSize: '0.88rem', lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
@@ -737,6 +753,7 @@ export default function ChatPanel({ token, myUsername, partner, partnerOnline, m
                     masterToken={masterToken}
                     onDecrypt={handleDecrypt}
                     onMasterTokenSaved={onMasterTokenSaved}
+                    onRemoveMessage={id => setMessages(prev => prev.filter(m => m.id !== id))}
                   />
                 </React.Fragment>
               );
