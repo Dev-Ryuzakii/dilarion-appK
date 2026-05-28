@@ -8,7 +8,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -217,12 +217,26 @@ fun ChatScreen(
                         }
                     }
                 } else {
-                    items(combinedItems, key = { item ->
-                        when (item) {
-                            is ChatItem.TextMessage -> "msg_${item.message.id}"
-                            is ChatItem.MediaMessage -> "media_${item.item.mediaId}"
+                    itemsIndexed(
+                        combinedItems,
+                        key = { _, item ->
+                            when (item) {
+                                is ChatItem.TextMessage -> "msg_${item.message.id}"
+                                is ChatItem.MediaMessage -> "media_${item.item.mediaId}"
+                            }
                         }
-                    }) { item ->
+                    ) { index, item ->
+                        val curTs = when (item) {
+                            is ChatItem.TextMessage -> item.message.timestamp
+                            is ChatItem.MediaMessage -> item.item.timestamp
+                        }
+                        val prevTs = if (index > 0) when (val prev = combinedItems[index - 1]) {
+                            is ChatItem.TextMessage -> prev.message.timestamp
+                            is ChatItem.MediaMessage -> prev.item.timestamp
+                        } else null
+                        val showSep = curTs != null && (index == 0 || prevTs == null || !isSameDay(curTs, prevTs))
+                        if (showSep && curTs != null) DateSeparator(curTs)
+
                         when (item) {
                             is ChatItem.TextMessage -> {
                                 val message = item.message
@@ -243,7 +257,6 @@ fun ChatScreen(
                                 val isVoice = isVoiceMedia(mediaItem)
                                 val imgKey = "img_${mediaItem.mediaId}"
                                 val localPath = uiState.localFilePaths[imgKey]
-                                // Only download image when chat is unlocked
                                 if (!isVoice && localPath == null && uiState.isUnlocked) {
                                     LaunchedEffect(mediaItem.mediaId) {
                                         viewModel.downloadImageForDisplay(mediaItem.mediaId, context)
@@ -563,12 +576,33 @@ private fun MessageBubble(
                 Text(message.content ?: "", color = TextPrimary, style = MaterialTheme.typography.bodyMedium)
             }
             Spacer(Modifier.height(2.dp))
-            Text(
-                formatTimestamp(message.timestamp ?: ""),
-                style = MaterialTheme.typography.labelSmall,
-                color = TextSecondary,
+            Row(
                 modifier = Modifier.align(Alignment.End),
-            )
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(3.dp),
+            ) {
+                Text(
+                    formatTimestamp(message.timestamp ?: ""),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextSecondary,
+                )
+                if (isMine) {
+                    when {
+                        message.id < 0 -> Icon(
+                            Icons.Default.AccessTime, null,
+                            modifier = Modifier.size(11.dp), tint = TextSecondary.copy(alpha = 0.6f),
+                        )
+                        message.read -> Icon(
+                            Icons.Default.DoneAll, null,
+                            modifier = Modifier.size(14.dp), tint = Color(0xFFEF4444),
+                        )
+                        else -> Icon(
+                            Icons.Default.Done, null,
+                            modifier = Modifier.size(14.dp), tint = TextSecondary,
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -577,3 +611,43 @@ private fun formatTimestamp(iso: String): String = runCatching {
     val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.getDefault())
     SimpleDateFormat("HH:mm", Locale.getDefault()).format(sdf.parse(iso)!!)
 }.getOrElse { "" }
+
+private fun isSameDay(iso1: String, iso2: String): Boolean =
+    iso1.take(10) == iso2.take(10)
+
+private fun formatDateLabel(iso: String): String = runCatching {
+    val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.getDefault())
+    val date = sdf.parse(iso) ?: return@runCatching ""
+    val cal = java.util.Calendar.getInstance().apply { time = date }
+    val today = java.util.Calendar.getInstance()
+    val yesterday = java.util.Calendar.getInstance().apply { add(java.util.Calendar.DATE, -1) }
+    when {
+        cal.get(java.util.Calendar.YEAR) == today.get(java.util.Calendar.YEAR) &&
+        cal.get(java.util.Calendar.DAY_OF_YEAR) == today.get(java.util.Calendar.DAY_OF_YEAR) -> "Today"
+        cal.get(java.util.Calendar.YEAR) == yesterday.get(java.util.Calendar.YEAR) &&
+        cal.get(java.util.Calendar.DAY_OF_YEAR) == yesterday.get(java.util.Calendar.DAY_OF_YEAR) -> "Yesterday"
+        else -> SimpleDateFormat("EEEE, d MMMM", Locale.getDefault()).format(date)
+    }
+}.getOrElse { "" }
+
+@Composable
+private fun DateSeparator(timestamp: String) {
+    val label = remember(timestamp) { formatDateLabel(timestamp) }
+    if (label.isEmpty()) return
+    Box(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall,
+            color = TextSecondary,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.SemiBold,
+            letterSpacing = 0.5.sp,
+            modifier = Modifier
+                .background(BorderGrey.copy(alpha = 0.55f), RoundedCornerShape(12.dp))
+                .padding(horizontal = 14.dp, vertical = 5.dp),
+        )
+    }
+}

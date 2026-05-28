@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import {
   ChatMessage,
   getConversation,
@@ -51,6 +51,40 @@ function fmtTime(ts: string): string {
   } catch {
     return '';
   }
+}
+
+// ── Date helpers ──────────────────────────────────────────────────────────────
+
+function isSameDay(a: string, b: string): boolean {
+  return new Date(a).toDateString() === new Date(b).toDateString();
+}
+
+function dateSepLabel(ts: string): string {
+  const d = new Date(ts);
+  const today = new Date();
+  const yest = new Date();
+  yest.setDate(today.getDate() - 1);
+  if (d.toDateString() === today.toDateString()) return 'Today';
+  if (d.toDateString() === yest.toDateString()) return 'Yesterday';
+  return d.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' });
+}
+
+function DateSeparator({ ts }: { ts: string }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'center', margin: '14px 0 8px' }}>
+      <span style={{
+        background: '#1a1f2e',
+        color: '#6b7280',
+        fontSize: '0.68rem',
+        fontWeight: 600,
+        padding: '4px 14px',
+        borderRadius: 12,
+        letterSpacing: '0.4px',
+        textTransform: 'uppercase',
+        userSelect: 'none',
+      }}>{dateSepLabel(ts)}</span>
+    </div>
+  );
 }
 
 // ── Shimmer ────────────────────────────────────────────────────────────────────
@@ -240,9 +274,21 @@ function MediaBubble({ token, mediaId, contentType }: { token: string; mediaId: 
       const mime = blob.type && !blob.type.startsWith('media/') ? blob.type
         : isVoice(contentType) ? 'audio/webm' : 'application/octet-stream';
       setBlobMime(mime);
-      const url = URL.createObjectURL(blob);
-      urlRef.current = url;
-      setObjectUrl(url);
+
+      if (isVoice(contentType)) {
+        // Data URL avoids blob: protocol issues in Tauri WebView
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = () => reject(new Error('read failed'));
+          reader.readAsDataURL(blob);
+        });
+        setObjectUrl(dataUrl);
+      } else {
+        const url = URL.createObjectURL(blob);
+        urlRef.current = url;
+        setObjectUrl(url);
+      }
       setLoaded(true);
     } catch (err: any) {
       const status = err?.status;
@@ -273,10 +319,7 @@ function MediaBubble({ token, mediaId, contentType }: { token: string; mediaId: 
     }
     if (isVoice(contentType)) {
       return (
-        <audio controls style={{ maxWidth: 240, display: 'block' }}>
-          <source src={objectUrl} type={blobMime || 'audio/webm'} />
-          Your browser does not support audio playback.
-        </audio>
+        <audio controls src={objectUrl} preload="auto" style={{ maxWidth: 240, display: 'block' }} />
       );
     }
     return (
@@ -371,7 +414,28 @@ function MessageBubble({ msg, isMine, token, masterToken, onDecrypt, onMasterTok
       }>
         {body}
       </div>
-      <span style={ms.ts}>{fmtTime(msg.timestamp)}</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 3, marginTop: 3, justifyContent: isMine ? 'flex-end' : 'flex-start' }}>
+        <span style={ms.ts}>{fmtTime(msg.timestamp)}</span>
+        {isMine && <MsgStatusIcon delivered={msg.delivered} read={msg.read} />}
+      </div>
+    </div>
+  );
+}
+
+// ── Pending bubble (clock icon while sending) ──────────────────────────────────
+
+function PendingBubble({ content, timestamp }: { content: string; timestamp: string }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', marginBottom: 4 }}>
+      <div style={{ ...ms.bubbleMine, opacity: 0.65 }}>
+        <span style={{ fontSize: '0.88rem', lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+          {content}
+        </span>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 3, marginTop: 3 }}>
+        <span style={ms.ts}>{fmtTime(timestamp)}</span>
+        <ClockSvgIcon />
+      </div>
     </div>
   );
 }
@@ -399,8 +463,16 @@ function MessageSkeleton() {
 
 // ── Main ChatPanel ─────────────────────────────────────────────────────────────
 
+// Fake pending message while sending
+interface PendingMsg {
+  localId: string;
+  content: string;
+  timestamp: string;
+}
+
 export default function ChatPanel({ token, myUsername, partner, partnerOnline, masterToken, onMasterTokenSaved }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [pending, setPending] = useState<PendingMsg[]>([]);
   const [loading, setLoading] = useState(true);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
@@ -492,15 +564,19 @@ export default function ChatPanel({ token, myUsername, partner, partnerOnline, m
     const trimmed = text.trim();
     if (!trimmed || sending) return;
     sendTypingStop();
-    setSending(true);
     setText('');
+
+    const localId = `pending-${Date.now()}`;
+    const pendingMsg: PendingMsg = { localId, content: trimmed, timestamp: new Date().toISOString() };
+    setPending(prev => [...prev, pendingMsg]);
+
     try {
       await sendText(token, partner, trimmed);
+      setPending(prev => prev.filter(p => p.localId !== localId));
       await loadConversation();
     } catch {
+      setPending(prev => prev.filter(p => p.localId !== localId));
       setText(trimmed);
-    } finally {
-      setSending(false);
     }
   }
 
@@ -612,7 +688,7 @@ export default function ChatPanel({ token, myUsername, partner, partnerOnline, m
       <div style={cs.messagesArea}>
         {loading ? (
           <MessageSkeleton />
-        ) : messages.length === 0 ? (
+        ) : messages.length === 0 && pending.length === 0 ? (
           <div style={cs.emptyChat}>
             <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#374151" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
@@ -620,17 +696,27 @@ export default function ChatPanel({ token, myUsername, partner, partnerOnline, m
             <p style={{ color: '#6b7280', fontSize: '0.85rem', marginTop: 8 }}>No messages yet. Say hello!</p>
           </div>
         ) : (
-          messages.map(msg => (
-            <MessageBubble
-              key={msg.id}
-              msg={msg}
-              isMine={msg.sender === myUsername}
-              token={token}
-              masterToken={masterToken}
-              onDecrypt={handleDecrypt}
-              onMasterTokenSaved={onMasterTokenSaved}
-            />
-          ))
+          <>
+            {messages.map((msg, i) => {
+              const showSep = i === 0 || !isSameDay(msg.timestamp, messages[i - 1].timestamp);
+              return (
+                <React.Fragment key={msg.id}>
+                  {showSep && <DateSeparator ts={msg.timestamp} />}
+                  <MessageBubble
+                    msg={msg}
+                    isMine={msg.sender === myUsername}
+                    token={token}
+                    masterToken={masterToken}
+                    onDecrypt={handleDecrypt}
+                    onMasterTokenSaved={onMasterTokenSaved}
+                  />
+                </React.Fragment>
+              );
+            })}
+            {pending.map(p => (
+              <PendingBubble key={p.localId} content={p.content} timestamp={p.timestamp} />
+            ))}
+          </>
         )}
         <div ref={bottomRef} />
       </div>
@@ -695,6 +781,31 @@ export default function ChatPanel({ token, myUsername, partner, partnerOnline, m
 }
 
 // ── Icons ──────────────────────────────────────────────────────────────────────
+
+function ClockSvgIcon() {
+  return (
+    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#4b5563" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="10"/>
+      <polyline points="12 6 12 12 16 14"/>
+    </svg>
+  );
+}
+
+function MsgStatusIcon({ delivered, read }: { delivered: boolean; read: boolean }) {
+  if (read) {
+    return (
+      <svg width="18" height="11" viewBox="0 0 26 14" fill="none">
+        <polyline points="1,7 5,11 13,1" stroke="#ef4444" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/>
+        <polyline points="7,7 11,11 19,1" stroke="#ef4444" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/>
+      </svg>
+    );
+  }
+  return (
+    <svg width="13" height="11" viewBox="0 0 16 14" fill="none">
+      <polyline points="1,7 6,12 15,1" stroke={delivered ? '#6b7280' : '#4b5563'} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  );
+}
 
 function TypingDots() {
   return (
