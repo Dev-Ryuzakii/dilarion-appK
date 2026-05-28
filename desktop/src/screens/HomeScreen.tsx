@@ -5,6 +5,7 @@ import {
   getConversations,
   getGroups,
   getCallHistory,
+  getUsers,
   confirmMasterToken,
   createMasterToken,
   Contact,
@@ -13,6 +14,7 @@ import {
 } from '../services/api';
 import ChatPanel from './ChatPanel';
 import GroupPanel from './GroupPanel';
+import CallModal, { CallType, IncomingCall } from './CallModal';
 import {
   PhoneIncomingIcon,
   PhoneOutgoingIcon,
@@ -652,6 +654,16 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
   const [search, setSearch] = useState('');
   const [typingUsers, setTypingUsers] = useState<Set<string>>(new Set());
 
+  // ── Call state ───────────────────────────────────────────────────────────────
+  const [activeCall, setActiveCall] = useState<{ partner: string; callType: CallType; isIncoming: boolean } | null>(null);
+  const [incomingCall, setIncomingCall] = useState<IncomingCall | null>(null);
+
+  // ── New-chat modal state ─────────────────────────────────────────────────────
+  const [showNewChat, setShowNewChat] = useState(false);
+  const [allUsers, setAllUsers] = useState<Contact[]>([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
+  const [userSearch, setUserSearch] = useState('');
+
   // Stable ref for selectedChat in WS handler
   const selectedChatRef = useRef(selectedChat);
   selectedChatRef.current = selectedChat;
@@ -703,6 +715,14 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
             return n;
           });
         }
+      } else if (msg.type === 'call_invite') {
+        const sender = (msg as any).sender as string;
+        const callType = ((msg as any).call_type as CallType) ?? 'audio';
+        if (sender) setIncomingCall({ from: sender, callType });
+      } else if (msg.type === 'call_end') {
+        const sender = (msg as any).sender as string;
+        if (activeCall?.partner === sender) setActiveCall(null);
+        if (incomingCall?.from === sender) setIncomingCall(null);
       }
     };
 
@@ -766,6 +786,30 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
     setSelectedGroup(id);
   }
 
+  function handleCall(partner: string, callType: CallType) {
+    setActiveCall({ partner, callType, isIncoming: false });
+  }
+
+  async function openNewChat() {
+    setShowNewChat(true);
+    setLoadingUsers(true);
+    try {
+      const users = await getUsers(token);
+      setAllUsers(users.filter(u => u.username !== username));
+    } catch {}
+    finally { setLoadingUsers(false); }
+  }
+
+  function startChatWith(u: string) {
+    setShowNewChat(false);
+    setUserSearch('');
+    setActiveTab('chats');
+    openContact(u);
+    if (!contacts.some(c => c.username === u)) {
+      setContacts(prev => [...prev, { username: u, is_active: false }]);
+    }
+  }
+
   const filteredContacts = contacts.filter(c =>
     c.username.toLowerCase().includes(search.toLowerCase()),
   );
@@ -786,12 +830,34 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
     return (
       <div style={hs.listHeader}>
         <span style={hs.listHeaderTitle}>{titles[activeTab]}</span>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <div style={{
             width: 7, height: 7, borderRadius: '50%',
             background: connected ? '#25d366' : '#f59e0b',
             boxShadow: connected ? '0 0 5px #25d366' : 'none',
           }} />
+          {activeTab === 'chats' && (
+            <button
+              onClick={openNewChat}
+              title="New chat"
+              style={{
+                background: '#c0392b',
+                border: 'none',
+                borderRadius: '50%',
+                width: 28,
+                height: 28,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                flexShrink: 0,
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round">
+                <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+              </svg>
+            </button>
+          )}
         </div>
       </div>
     );
@@ -941,6 +1007,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
             partnerOnline={partnerContact?.is_active ?? false}
             masterToken={masterToken}
             onMasterTokenSaved={setMasterToken}
+            onCall={handleCall}
           />
         );
       }
@@ -1050,6 +1117,168 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
       <main style={hs.mainPanel}>
         {renderMainContent()}
       </main>
+
+      {/* ── CALL MODAL ──────────────────────────────────────────────────── */}
+      {activeCall && (
+        <CallModal
+          token={token}
+          myUsername={username}
+          partner={activeCall.partner}
+          callType={activeCall.callType}
+          isIncoming={activeCall.isIncoming}
+          onEnd={() => setActiveCall(null)}
+        />
+      )}
+
+      {/* ── INCOMING CALL OVERLAY ────────────────────────────────────────── */}
+      {incomingCall && !activeCall && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 900,
+          display: 'flex', alignItems: 'flex-end', justifyContent: 'flex-end',
+          padding: 24, pointerEvents: 'none',
+        }}>
+          <div style={{
+            background: '#1a1a1a',
+            border: '1px solid #2a2a2a',
+            borderRadius: 16,
+            padding: '20px 24px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 14,
+            minWidth: 280,
+            boxShadow: '0 20px 60px rgba(0,0,0,0.8)',
+            pointerEvents: 'all',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{
+                width: 46, height: 46, borderRadius: '50%',
+                background: '#2a2a2a', color: '#d1d5db',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontWeight: 700, fontSize: '0.9rem', flexShrink: 0,
+              }}>
+                {initials(incomingCall.from)}
+              </div>
+              <div>
+                <div style={{ fontSize: '0.95rem', fontWeight: 700, color: '#f1f5f9' }}>{incomingCall.from}</div>
+                <div style={{ fontSize: '0.78rem', color: '#9ca3af', marginTop: 2 }}>
+                  Incoming {incomingCall.callType} call…
+                </div>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button
+                onClick={() => setIncomingCall(null)}
+                style={{
+                  flex: 1, background: '#ef4444', border: 'none', borderRadius: 10,
+                  color: '#fff', fontWeight: 700, fontSize: '0.85rem',
+                  padding: '10px 0', cursor: 'pointer',
+                }}
+              >
+                Decline
+              </button>
+              <button
+                onClick={() => {
+                  setActiveCall({ partner: incomingCall.from, callType: incomingCall.callType, isIncoming: true });
+                  setIncomingCall(null);
+                }}
+                style={{
+                  flex: 1, background: '#25d366', border: 'none', borderRadius: 10,
+                  color: '#fff', fontWeight: 700, fontSize: '0.85rem',
+                  padding: '10px 0', cursor: 'pointer',
+                }}
+              >
+                Accept
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── NEW CHAT MODAL ───────────────────────────────────────────────── */}
+      {showNewChat && (
+        <div
+          style={{
+            position: 'fixed', inset: 0, zIndex: 800,
+            background: 'rgba(0,0,0,0.7)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}
+          onClick={e => { if (e.target === e.currentTarget) { setShowNewChat(false); setUserSearch(''); } }}
+        >
+          <div style={{
+            background: '#111',
+            border: '1px solid #2a2a2a',
+            borderRadius: 16,
+            width: 380,
+            maxHeight: '70vh',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+            boxShadow: '0 24px 80px rgba(0,0,0,0.8)',
+          }}>
+            {/* Header */}
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '16px 20px', borderBottom: '1px solid #1e1e1e', flexShrink: 0,
+            }}>
+              <span style={{ fontWeight: 800, fontSize: '1rem', color: '#f1f5f9' }}>New Chat</span>
+              <button
+                onClick={() => { setShowNewChat(false); setUserSearch(''); }}
+                style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#6b7280', fontSize: '1.1rem', lineHeight: 1 }}
+              >✕</button>
+            </div>
+            {/* Search */}
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 8,
+              margin: '10px 12px', background: '#1a1a1a',
+              border: '1px solid #222', borderRadius: 10, padding: '8px 12px', flexShrink: 0,
+            }}>
+              <SearchIconSvg />
+              <input
+                autoFocus
+                style={{ flex: 1, background: 'transparent', border: 'none', color: '#d1d5db', fontSize: '0.85rem' }}
+                placeholder="Search users"
+                value={userSearch}
+                onChange={e => setUserSearch(e.target.value)}
+              />
+            </div>
+            {/* User list */}
+            <div style={{ flex: 1, overflowY: 'auto' }}>
+              {loadingUsers ? (
+                <ContactSkeleton />
+              ) : (
+                allUsers
+                  .filter(u => u.username.toLowerCase().includes(userSearch.toLowerCase()))
+                  .map(u => (
+                    <button
+                      key={u.username}
+                      style={{ ...hs.listItem }}
+                      onClick={() => startChatWith(u.username)}
+                    >
+                      <div style={{ position: 'relative', flexShrink: 0 }}>
+                        <div style={hs.contactAvatar}>{initials(u.username)}</div>
+                        <div style={{
+                          position: 'absolute', bottom: 1, right: 1,
+                          width: 11, height: 11, borderRadius: '50%',
+                          background: u.is_active ? '#25d366' : '#374151',
+                          border: '2px solid #111',
+                        }} />
+                      </div>
+                      <div style={hs.itemInfo}>
+                        <span style={hs.itemName}>{u.username}</span>
+                        <span style={{ fontSize: '0.72rem', color: u.is_active ? '#25d366' : '#6b7280' }}>
+                          {u.is_active ? 'online' : 'offline'}
+                        </span>
+                      </div>
+                    </button>
+                  ))
+              )}
+              {!loadingUsers && allUsers.filter(u => u.username.toLowerCase().includes(userSearch.toLowerCase())).length === 0 && (
+                <div style={hs.emptyList}>{userSearch ? 'No users found' : 'No other users'}</div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

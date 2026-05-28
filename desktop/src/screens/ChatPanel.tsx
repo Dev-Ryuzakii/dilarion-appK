@@ -19,6 +19,7 @@ interface Props {
   partnerOnline: boolean;
   masterToken: string | null;
   onMasterTokenSaved: (t: string) => void;
+  onCall: (partner: string, type: 'audio' | 'video') => void;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -117,6 +118,8 @@ function EncryptedBubble({ token, messageId, decoyContent, masterToken, isMine, 
   const [inputValue, setInputValue] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  // Guard: only decrypt when user explicitly taps — never auto-decrypt on prop/state changes
+  const userTappedRef = useRef(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -125,6 +128,7 @@ function EncryptedBubble({ token, messageId, decoyContent, masterToken, isMine, 
 
   async function handleBubbleTap() {
     if (showing || loading) return;
+    userTappedRef.current = true;
     if (masterToken) {
       await runDecrypt(masterToken);
     } else {
@@ -133,13 +137,18 @@ function EncryptedBubble({ token, messageId, decoyContent, masterToken, isMine, 
   }
 
   async function runDecrypt(mToken: string) {
+    if (!userTappedRef.current) return;   // never decrypt without an explicit tap
     setLoading(true);
     setError(null);
     try {
-      const valid = await confirmMasterToken(token, mToken);
+      // If masterToken was already validated this session, skip the server round-trip
+      const valid = masterToken === mToken
+        ? true
+        : await confirmMasterToken(token, mToken);
       if (!valid) {
         setError('Invalid master token');
         setLoading(false);
+        userTappedRef.current = false;
         return;
       }
       const content = await onDecrypt(mToken, messageId);
@@ -152,17 +161,20 @@ function EncryptedBubble({ token, messageId, decoyContent, masterToken, isMine, 
       timerRef.current = setTimeout(() => {
         setShowing(false);
         setDecryptedContent(null);
+        userTappedRef.current = false;
       }, 30000);
     } catch (err: any) {
       setError(err?.message || 'Invalid master token');
     } finally {
       setLoading(false);
+      userTappedRef.current = false;
     }
   }
 
   async function handleSubmitToken() {
     const trimmed = inputValue.trim();
     if (!trimmed) return;
+    userTappedRef.current = true;
     await runDecrypt(trimmed);
   }
 
@@ -257,7 +269,7 @@ function EncryptedBubble({ token, messageId, decoyContent, masterToken, isMine, 
 function MediaBubble({ token, mediaId, contentType }: { token: string; mediaId: string; contentType: string }) {
   const [loaded, setLoaded] = useState(false);
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
-  const [blobMime, setBlobMime] = useState<string>('');
+  const [, setBlobMime] = useState<string>('');
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const urlRef = useRef<string>('');
@@ -470,12 +482,12 @@ interface PendingMsg {
   timestamp: string;
 }
 
-export default function ChatPanel({ token, myUsername, partner, partnerOnline, masterToken, onMasterTokenSaved }: Props) {
+export default function ChatPanel({ token, myUsername, partner, partnerOnline, masterToken, onMasterTokenSaved, onCall }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [pending, setPending] = useState<PendingMsg[]>([]);
   const [loading, setLoading] = useState(true);
   const [text, setText] = useState('');
-  const [sending, setSending] = useState(false);
+  const [isSending, setIsSending] = useState(false);
   const [recording, setRecording] = useState(false);
   const [recSeconds, setRecSeconds] = useState(0);
   const [partnerTyping, setPartnerTyping] = useState(false);
@@ -562,9 +574,10 @@ export default function ChatPanel({ token, myUsername, partner, partnerOnline, m
 
   async function handleSend() {
     const trimmed = text.trim();
-    if (!trimmed || sending) return;
+    if (!trimmed || isSending) return;
     sendTypingStop();
     setText('');
+    setIsSending(true);
 
     const localId = `pending-${Date.now()}`;
     const pendingMsg: PendingMsg = { localId, content: trimmed, timestamp: new Date().toISOString() };
@@ -577,6 +590,8 @@ export default function ChatPanel({ token, myUsername, partner, partnerOnline, m
     } catch {
       setPending(prev => prev.filter(p => p.localId !== localId));
       setText(trimmed);
+    } finally {
+      setIsSending(false);
     }
   }
 
@@ -682,6 +697,19 @@ export default function ChatPanel({ token, myUsername, partner, partnerOnline, m
             )}
           </div>
         </div>
+        {/* Call buttons */}
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button onClick={() => onCall(partner, 'audio')} style={cs.callBtn} title="Voice call">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 1h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.64a16 16 0 0 0 6 6l.95-.95a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/>
+            </svg>
+          </button>
+          <button onClick={() => onCall(partner, 'video')} style={cs.callBtn} title="Video call">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M15 10l4.553-2.553A1 1 0 0 1 21 8.382v7.236a1 1 0 0 1-1.447.894L15 14M3 8a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+            </svg>
+          </button>
+        </div>
       </div>
 
       {/* Messages area */}
@@ -769,7 +797,7 @@ export default function ChatPanel({ token, myUsername, partner, partnerOnline, m
           <button
             style={cs.sendBtn}
             onClick={handleSend}
-            disabled={sending}
+            disabled={isSending}
             title="Send"
           >
             <SendIcon />
@@ -991,6 +1019,18 @@ const cs: Record<string, React.CSSProperties> = {
     background: '#1a1a1a',
     border: '1px solid #2a2a2a',
     borderRadius: 24,
+  },
+  callBtn: {
+    background: 'transparent',
+    border: 'none',
+    borderRadius: '50%',
+    width: 36,
+    height: 36,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    transition: 'background 0.15s',
   },
   recDot: {
     width: 10,
