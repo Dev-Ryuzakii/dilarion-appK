@@ -267,6 +267,129 @@ function EncryptedBubble({ token, messageId, decoyContent, masterToken, isMine, 
   );
 }
 
+// ── LockedContent ──────────────────────────────────────────────────────────────
+
+interface LockedContentProps {
+  apiToken: string;
+  masterToken: string | null;
+  onMasterTokenSaved: (t: string) => void;
+  isMine: boolean;
+  children: React.ReactNode;
+}
+
+function LockedContent({ apiToken, masterToken, onMasterTokenSaved, isMine, children }: LockedContentProps) {
+  const [showing, setShowing] = useState(false);
+  const [inputVisible, setInputVisible] = useState(false);
+  const [inputValue, setInputValue] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [countdown, setCountdown] = useState(30);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+      if (countdownRef.current) clearInterval(countdownRef.current);
+    };
+  }, []);
+
+  function startHideTimer() {
+    setCountdown(30);
+    if (timerRef.current) clearTimeout(timerRef.current);
+    if (countdownRef.current) clearInterval(countdownRef.current);
+    timerRef.current = setTimeout(() => { setShowing(false); setInputVisible(false); }, 30000);
+    countdownRef.current = setInterval(() => {
+      setCountdown(c => {
+        if (c <= 1) { if (countdownRef.current) clearInterval(countdownRef.current); return 0; }
+        return c - 1;
+      });
+    }, 1000);
+  }
+
+  function handleTap() {
+    if (showing || loading) return;
+    if (masterToken) {
+      setShowing(true);
+      startHideTimer();
+    } else {
+      setInputVisible(v => !v);
+    }
+  }
+
+  async function handleSubmit() {
+    const trimmed = inputValue.trim();
+    if (!trimmed) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const valid = await confirmMasterToken(apiToken, trimmed);
+      if (!valid) { setError('Invalid master token'); setLoading(false); return; }
+      onMasterTokenSaved(trimmed);
+      setInputVisible(false);
+      setInputValue('');
+      setShowing(true);
+      startHideTimer();
+    } catch {
+      setError('Invalid master token');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  if (showing) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        {children}
+        <span style={{ fontSize: '0.62rem', color: isMine ? 'rgba(255,255,255,0.6)' : '#6b7280', fontStyle: 'italic' }}>
+          Hides in {countdown}s
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <div
+        onClick={handleTap}
+        style={{ cursor: loading ? 'wait' : 'pointer', opacity: loading ? 0.7 : 1, display: 'flex', alignItems: 'center', gap: 6, padding: '2px 0' }}
+      >
+        <LockIcon size={12} color={isMine ? 'rgba(255,255,255,0.75)' : '#6b7280'} />
+        <span style={{ fontSize: '0.82rem', color: isMine ? 'rgba(255,255,255,0.75)' : '#6b7280', userSelect: 'none' }}>
+          {loading ? 'Verifying…' : 'Tap to view'}
+        </span>
+      </div>
+      {inputVisible && (
+        <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>
+          <input
+            type="password"
+            placeholder="Master token"
+            value={inputValue}
+            onChange={e => setInputValue(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') handleSubmit(); }}
+            style={{
+              flex: 1,
+              background: 'var(--input-field-bg)',
+              border: '1px solid var(--border-color)',
+              borderRadius: 8,
+              color: 'var(--text-primary)',
+              fontSize: '0.8rem',
+              padding: '6px 10px',
+            }}
+            autoFocus
+            onClick={e => e.stopPropagation()}
+          />
+          <button
+            style={{ background: 'var(--accent)', color: '#fff', fontSize: '0.75rem', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', border: 'none' }}
+            onClick={e => { e.stopPropagation(); handleSubmit(); }}
+          >OK</button>
+        </div>
+      )}
+      {error && <span style={{ fontSize: '0.72rem', color: '#ef4444' }}>{error}</span>}
+    </div>
+  );
+}
+
 // ── MediaBubble ────────────────────────────────────────────────────────────────
 
 function MediaBubble({ token, mediaId, contentType, onRemove }: { token: string; mediaId: string; contentType: string; onRemove?: () => void }) {
@@ -416,12 +539,18 @@ function MessageBubble({ msg, isMine, token, masterToken, onDecrypt, onMasterTok
       />
     );
   } else if (isImage(ct) || isVoice(ct) || isMedia(ct)) {
-    body = <MediaBubble token={token} mediaId={mediaId} contentType={ct} onRemove={() => onRemoveMessage(msg.id)} />;
+    body = (
+      <LockedContent apiToken={token} masterToken={masterToken} onMasterTokenSaved={onMasterTokenSaved} isMine={isMine}>
+        <MediaBubble token={token} mediaId={mediaId} contentType={ct} onRemove={() => onRemoveMessage(msg.id)} />
+      </LockedContent>
+    );
   } else {
     body = (
-      <span style={{ fontSize: '0.88rem', lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-        {msg.content}
-      </span>
+      <LockedContent apiToken={token} masterToken={masterToken} onMasterTokenSaved={onMasterTokenSaved} isMine={isMine}>
+        <span style={{ fontSize: '0.88rem', lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+          {msg.content}
+        </span>
+      </LockedContent>
     );
   }
 
