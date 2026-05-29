@@ -1,3 +1,5 @@
+import { invoke } from '@tauri-apps/api/core';
+
 const WS_BASE = 'ws://187.124.208.16:8010/ws';
 
 export type WsMessage = {
@@ -7,12 +9,37 @@ export type WsMessage = {
 
 type Listener = (msg: WsMessage) => void;
 
+// ── Persistent device identity ─────────────────────────────────────────────────
+
+function getOrCreateDeviceId(): string {
+  const KEY = 'dilarion_device_id';
+  let id = localStorage.getItem(KEY);
+  if (!id) {
+    id = crypto.randomUUID();
+    localStorage.setItem(KEY, id);
+  }
+  return id;
+}
+
+async function getDeviceName(): Promise<string> {
+  try {
+    const info = await invoke<{ hostname: string }>('get_device_info');
+    return info.hostname || 'Desktop';
+  } catch {
+    return 'Desktop';
+  }
+}
+
+// ── PresenceService ────────────────────────────────────────────────────────────
+
 class PresenceService {
   private ws: WebSocket | null = null;
   private token: string | null = null;
   private listeners: Listener[] = [];
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private pingTimer: ReturnType<typeof setInterval> | null = null;
+  private deviceId: string = getOrCreateDeviceId();
+  private deviceName: string = 'Desktop';
 
   get isConnected() {
     return this.ws?.readyState === WebSocket.OPEN;
@@ -20,12 +47,21 @@ class PresenceService {
 
   connect(token: string) {
     this.token = token;
-    this._open();
+    getDeviceName().then(name => {
+      this.deviceName = name;
+      this._open();
+    });
   }
 
   private _open() {
     if (!this.token) return;
-    this.ws = new WebSocket(`${WS_BASE}?token=${this.token}`);
+    const params = new URLSearchParams({
+      token: this.token,
+      device_id: this.deviceId,
+      device_type: 'desktop',
+      device_name: this.deviceName,
+    });
+    this.ws = new WebSocket(`${WS_BASE}?${params.toString()}`);
 
     this.ws.onopen = () => {
       console.log('[WS] connected');
