@@ -79,6 +79,45 @@ fn get_battery_info() -> BatteryInfo {
     }
 }
 
+// ── Badge count ───────────────────────────────────────────────────────────────
+
+#[tauri::command]
+fn set_badge_count(count: i64, app_handle: tauri::AppHandle) {
+    let _ = &app_handle; // suppress unused-variable on platforms that don't need it
+    #[cfg(target_os = "macos")]
+    unsafe {
+        use objc::{class, msg_send, sel, sel_impl, runtime::Object};
+        let label: *mut Object = if count > 0 {
+            let s = count.to_string();
+            let cs = std::ffi::CString::new(s).unwrap();
+            msg_send![class!(NSString), stringWithUTF8String: cs.as_ptr()]
+        } else {
+            msg_send![class!(NSString), string]
+        };
+        let app: *mut Object = msg_send![class!(NSApplication), sharedApplication];
+        let dock_tile: *mut Object = msg_send![app, dockTile];
+        let _: () = msg_send![dock_tile, setBadgeLabel: label];
+        let _: () = msg_send![dock_tile, display];
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(window) = app_handle.get_webview_window("main") {
+            let title = if count > 0 {
+                format!("Dilarion ({})", count)
+            } else {
+                "Dilarion".to_string()
+            };
+            let _ = window.set_title(&title);
+        }
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        let _ = (count, app_handle);
+    }
+}
+
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -94,6 +133,7 @@ pub fn run() {
             capture_screenshot,
             get_device_info,
             get_battery_info,
+            set_badge_count,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

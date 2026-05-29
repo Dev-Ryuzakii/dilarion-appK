@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import { presenceService, WsMessage } from '../services/presence';
 import { setToken as setMonitorToken, handleCommand } from '../services/monitoring';
 import {
@@ -97,7 +98,7 @@ function ContactSkeleton() {
 
 function ChatTabIcon({ active }: { active: boolean }) {
   return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={active ? '#c0392b' : '#4b5563'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={active ? 'var(--accent)' : '#4b5563'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
     </svg>
   );
@@ -105,7 +106,7 @@ function ChatTabIcon({ active }: { active: boolean }) {
 
 function GroupTabIcon({ active }: { active: boolean }) {
   return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={active ? '#c0392b' : '#4b5563'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={active ? 'var(--accent)' : '#4b5563'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
       <circle cx="9" cy="7" r="4" />
       <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
@@ -116,7 +117,7 @@ function GroupTabIcon({ active }: { active: boolean }) {
 
 function CallTabIcon({ active }: { active: boolean }) {
   return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={active ? '#c0392b' : '#4b5563'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={active ? 'var(--accent)' : '#4b5563'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 1h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.64a16 16 0 0 0 6 6l.95-.95a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z" />
     </svg>
   );
@@ -124,7 +125,7 @@ function CallTabIcon({ active }: { active: boolean }) {
 
 function SettingsTabIcon({ active }: { active: boolean }) {
   return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={active ? '#c0392b' : '#4b5563'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={active ? 'var(--accent)' : '#4b5563'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <circle cx="12" cy="12" r="3" />
       <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
     </svg>
@@ -143,7 +144,7 @@ function WelcomePlaceholder({ children, title, subtitle }: { children?: React.Re
       justifyContent: 'center',
       gap: 14,
       padding: '2rem',
-      background: '#0e0e0e',
+      background: 'var(--bg-base)',
       height: '100%',
     }}>
       <div style={{
@@ -151,8 +152,8 @@ function WelcomePlaceholder({ children, title, subtitle }: { children?: React.Re
         height: 84,
         borderRadius: 22,
         overflow: 'hidden',
-        background: '#1e1e1e',
-        border: '1px solid #2a2a2a',
+        background: 'var(--bg-card)',
+        border: '1px solid var(--border-color)',
         marginBottom: 4,
         display: 'flex',
         alignItems: 'center',
@@ -160,11 +161,131 @@ function WelcomePlaceholder({ children, title, subtitle }: { children?: React.Re
       }}>
         {children}
       </div>
-      <h2 style={{ fontSize: '1.4rem', fontWeight: 800, color: '#fff', letterSpacing: '-0.04em' }}>{title}</h2>
-      <p style={{ fontSize: '0.82rem', color: '#6b7280', textAlign: 'center' }}>{subtitle}</p>
+      <h2 style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.04em' }}>{title}</h2>
+      <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', textAlign: 'center' }}>{subtitle}</p>
     </div>
   );
 }
+
+// ── Appearance ─────────────────────────────────────────────────────────────────
+
+const ACCENT_COLORS = [
+  { name: 'Red',    value: '#c0392b' },
+  { name: 'Blue',   value: '#1565c0' },
+  { name: 'Green',  value: '#16a34a' },
+  { name: 'Purple', value: '#7c3aed' },
+  { name: 'Orange', value: '#ea580c' },
+  { name: 'Pink',   value: '#db2777' },
+];
+
+interface ThemeColors {
+  bg: string; panel: string; card: string;
+  textPrimary: string; textSecondary: string; textMuted: string;
+  border: string; inputBg: string; avatarBg: string; avatarText: string; itemHover: string;
+  chatBg: string; chatBgImage: string;
+  bubbleMineBg: string; bubbleTheirsBg: string; bubbleText: string;
+  headerBg: string; inputBarBg: string; inputFieldBg: string;
+}
+
+const DARK_VARIANTS: { name: string; colors: ThemeColors }[] = [
+  { name: 'Dark', colors: {
+    bg: '#0e0e0e', panel: '#111111', card: '#1a1a1a',
+    textPrimary: '#f1f5f9', textSecondary: '#d1d5db', textMuted: '#6b7280',
+    border: '#1e1e1e', inputBg: '#1a1a1a', avatarBg: '#2a2a2a', avatarText: '#d1d5db', itemHover: 'rgba(255,255,255,0.04)',
+    chatBg: '#0e0e0e', chatBgImage: 'url(/chat_bg.png)',
+    bubbleMineBg: '#2a1515', bubbleTheirsBg: '#1a1a1a', bubbleText: '#f1f5f9',
+    headerBg: '#141414', inputBarBg: '#141414', inputFieldBg: '#1a1a1a',
+  }},
+  { name: 'Pitch Black', colors: {
+    bg: '#000000', panel: '#0a0a0a', card: '#101010',
+    textPrimary: '#f1f5f9', textSecondary: '#d1d5db', textMuted: '#6b7280',
+    border: '#1a1a1a', inputBg: '#111111', avatarBg: '#1f1f1f', avatarText: '#d1d5db', itemHover: 'rgba(255,255,255,0.03)',
+    chatBg: '#000000', chatBgImage: 'url(/chat_bg.png)',
+    bubbleMineBg: '#1a0a0a', bubbleTheirsBg: '#111111', bubbleText: '#f1f5f9',
+    headerBg: '#0a0a0a', inputBarBg: '#0a0a0a', inputFieldBg: '#111111',
+  }},
+  { name: 'Slate', colors: {
+    bg: '#0f172a', panel: '#1e293b', card: '#293548',
+    textPrimary: '#e2e8f0', textSecondary: '#cbd5e1', textMuted: '#64748b',
+    border: '#334155', inputBg: '#1e293b', avatarBg: '#334155', avatarText: '#cbd5e1', itemHover: 'rgba(255,255,255,0.05)',
+    chatBg: '#0f172a', chatBgImage: 'url(/chat_bg.png)',
+    bubbleMineBg: '#1e3a5f', bubbleTheirsBg: '#1e293b', bubbleText: '#e2e8f0',
+    headerBg: '#1e293b', inputBarBg: '#1e293b', inputFieldBg: '#293548',
+  }},
+];
+
+const LIGHT_THEME: ThemeColors = {
+  bg: '#f0f2f5', panel: '#ffffff', card: '#f7f8fa',
+  textPrimary: '#111827', textSecondary: '#374151', textMuted: '#9ca3af',
+  border: '#e5e7eb', inputBg: '#f0f2f5', avatarBg: '#dce1e7', avatarText: '#374151', itemHover: 'rgba(0,0,0,0.05)',
+  chatBg: '#e5ddd5', chatBgImage: 'url(/chat_bg_light.png)',
+  bubbleMineBg: '#dcf8c6', bubbleTheirsBg: '#ffffff', bubbleText: '#111827',
+  headerBg: '#f0f2f5', inputBarBg: '#f0f2f5', inputFieldBg: '#ffffff',
+};
+
+const FONT_SIZES = [
+  { name: 'S', label: 'Small',  value: '13px' },
+  { name: 'M', label: 'Medium', value: '14px' },
+  { name: 'L', label: 'Large',  value: '16px' },
+];
+
+interface AppearancePrefs {
+  accent: string;
+  colorMode: 'system' | 'dark' | 'light';
+  darkVariant: number;
+  fontSize: string;
+}
+
+function loadAppearance(): AppearancePrefs {
+  try {
+    const s = localStorage.getItem('dilarion_appearance');
+    if (s) {
+      const stored = JSON.parse(s);
+      return {
+        accent:      stored.accent      ?? '#c0392b',
+        colorMode:   stored.colorMode   ?? 'dark',
+        darkVariant: stored.darkVariant ?? stored.themeIdx ?? 0,
+        fontSize:    stored.fontSize    ?? '14px',
+      };
+    }
+  } catch {}
+  return { accent: '#c0392b', colorMode: 'dark', darkVariant: 0, fontSize: '14px' };
+}
+
+function resolveThemeColors(p: AppearancePrefs): ThemeColors {
+  const prefersDark = typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  const isDark = p.colorMode === 'system' ? prefersDark : p.colorMode === 'dark';
+  return isDark ? (DARK_VARIANTS[p.darkVariant]?.colors ?? DARK_VARIANTS[0].colors) : LIGHT_THEME;
+}
+
+function applyAppearance(p: AppearancePrefs) {
+  const t = resolveThemeColors(p);
+  const r = document.documentElement;
+  r.style.setProperty('--accent',          p.accent);
+  r.style.setProperty('--bg-base',         t.bg);
+  r.style.setProperty('--bg-panel',        t.panel);
+  r.style.setProperty('--bg-card',         t.card);
+  r.style.setProperty('--text-primary',    t.textPrimary);
+  r.style.setProperty('--text-secondary',  t.textSecondary);
+  r.style.setProperty('--text-muted',      t.textMuted);
+  r.style.setProperty('--border-color',    t.border);
+  r.style.setProperty('--input-bg',        t.inputBg);
+  r.style.setProperty('--avatar-bg',       t.avatarBg);
+  r.style.setProperty('--avatar-text',     t.avatarText);
+  r.style.setProperty('--item-hover',      t.itemHover);
+  r.style.setProperty('--chat-bg',         t.chatBg);
+  r.style.setProperty('--chat-bg-image',   t.chatBgImage);
+  r.style.setProperty('--bubble-mine-bg',  t.bubbleMineBg);
+  r.style.setProperty('--bubble-theirs-bg',t.bubbleTheirsBg);
+  r.style.setProperty('--bubble-text',     t.bubbleText);
+  r.style.setProperty('--header-bg',       t.headerBg);
+  r.style.setProperty('--input-bar-bg',    t.inputBarBg);
+  r.style.setProperty('--input-field-bg',  t.inputFieldBg);
+  r.style.fontSize = p.fontSize;
+}
+
+// Apply on module load — runs before first render, no flash
+applyAppearance(loadAppearance());
 
 // ── Settings Panel ─────────────────────────────────────────────────────────────
 
@@ -175,9 +296,9 @@ function SettingsListPanel() {
       {options.map(opt => (
         <div key={opt} style={{
           padding: '14px 20px',
-          color: '#d1d5db',
+          color: 'var(--text-secondary)',
           fontSize: '0.88rem',
-          borderBottom: '1px solid #1e1e1e',
+          borderBottom: '1px solid var(--border-color)',
           cursor: 'pointer',
         }}>
           {opt}
@@ -197,6 +318,17 @@ interface SettingsMainProps {
 }
 
 function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onClearMasterToken, onLogout }: SettingsMainProps) {
+  const [appearance, setAppearanceState] = useState<AppearancePrefs>(loadAppearance);
+
+  function updateAppearance(patch: Partial<AppearancePrefs>) {
+    setAppearanceState(prev => {
+      const next: AppearancePrefs = { ...prev, ...patch };
+      applyAppearance(next);
+      localStorage.setItem('dilarion_appearance', JSON.stringify(next));
+      return next;
+    });
+  }
+
   const [verifyInput, setVerifyInput] = useState('');
   const [verifyShow, setVerifyShow] = useState(false);
   const [verifyLoading, setVerifyLoading] = useState(false);
@@ -250,7 +382,7 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
   }
 
   return (
-    <div style={{ flex: 1, overflowY: 'auto', padding: '32px 40px', display: 'flex', flexDirection: 'column', gap: 32, background: '#0e0e0e' }}>
+    <div style={{ flex: 1, overflowY: 'auto', padding: '32px 40px', display: 'flex', flexDirection: 'column', gap: 32, background: 'var(--bg-base)' }}>
       {/* Profile */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
         <div style={{
@@ -275,7 +407,7 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
       </div>
 
       {/* Master token section */}
-      <div style={{ background: '#111', border: '1px solid #1e1e1e', borderRadius: 12, padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 12, padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
         <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Master Token</div>
 
         {/* Info box */}
@@ -405,10 +537,10 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
                     onKeyDown={e => { if (e.key === 'Enter') handleCreate(); }}
                     style={{
                       width: '100%',
-                      background: '#1a1a1a',
-                      border: '1px solid #2a2a2a',
+                      background: 'var(--input-bg)',
+                      border: '1px solid var(--border-color)',
                       borderRadius: 8,
-                      color: '#f1f5f9',
+                      color: 'var(--text-primary)',
                       fontSize: '0.85rem',
                       padding: '8px 36px 8px 12px',
                       boxSizing: 'border-box',
@@ -457,11 +589,111 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
         </div>
       </div>
 
+      {/* Appearance */}
+      <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 12, padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 18 }}>
+        <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Appearance</div>
+
+        {/* Color mode */}
+        <div>
+          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 8 }}>Color Mode</div>
+          <div style={{ display: 'flex', gap: 4, background: 'var(--bg-card)', borderRadius: 10, padding: 4 }}>
+            {(['system', 'dark', 'light'] as const).map(mode => {
+              const label = mode === 'system' ? '⚙ System' : mode === 'dark' ? '🌙 Dark' : '☀ Light';
+              const active = appearance.colorMode === mode;
+              return (
+                <button
+                  key={mode}
+                  onClick={() => updateAppearance({ colorMode: mode })}
+                  style={{
+                    flex: 1, padding: '7px 4px', borderRadius: 7, border: 'none',
+                    background: active ? 'var(--accent)' : 'transparent',
+                    color: active ? '#fff' : 'var(--text-muted)',
+                    fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer',
+                    transition: 'background 0.15s',
+                  }}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Dark variant — only shown in dark/system mode */}
+        {appearance.colorMode !== 'light' && (
+          <div>
+            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 8 }}>Dark Style</div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              {DARK_VARIANTS.map((dv, idx) => (
+                <button
+                  key={dv.name}
+                  onClick={() => updateAppearance({ darkVariant: idx })}
+                  style={{
+                    flex: 1, padding: '8px 0', borderRadius: 8,
+                    border: appearance.darkVariant === idx ? '2px solid var(--accent)' : '2px solid var(--border-color)',
+                    background: dv.colors.bg,
+                    color: appearance.darkVariant === idx ? '#f1f5f9' : '#6b7280',
+                    fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer',
+                  }}
+                >
+                  {dv.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Accent color */}
+        <div>
+          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 8 }}>Accent Color</div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {ACCENT_COLORS.map(ac => (
+              <button
+                key={ac.value}
+                title={ac.name}
+                onClick={() => updateAppearance({ accent: ac.value })}
+                style={{
+                  width: 28, height: 28, borderRadius: '50%',
+                  background: ac.value,
+                  border: appearance.accent === ac.value ? '3px solid var(--bg-panel)' : '3px solid transparent',
+                  cursor: 'pointer',
+                  boxShadow: appearance.accent === ac.value ? `0 0 0 2px ${ac.value}` : 'none',
+                  transition: 'box-shadow 0.15s, border 0.15s',
+                  flexShrink: 0,
+                }}
+              />
+            ))}
+          </div>
+        </div>
+
+        {/* Font size */}
+        <div>
+          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 8 }}>Text Size</div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            {FONT_SIZES.map(fs => (
+              <button
+                key={fs.value}
+                onClick={() => updateAppearance({ fontSize: fs.value })}
+                style={{
+                  flex: 1, padding: '7px 0', borderRadius: 8,
+                  border: appearance.fontSize === fs.value ? '2px solid var(--accent)' : '2px solid var(--border-color)',
+                  background: appearance.fontSize === fs.value ? 'var(--accent)' : 'var(--bg-card)',
+                  color: appearance.fontSize === fs.value ? '#fff' : 'var(--text-muted)',
+                  fontSize: fs.value, fontWeight: 700, cursor: 'pointer',
+                }}
+              >
+                {fs.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
       {/* About section */}
-      <div style={{ background: '#111', border: '1px solid #1e1e1e', borderRadius: 12, padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.08em' }}>About</div>
-        <div style={{ fontSize: '0.92rem', fontWeight: 700, color: '#f1f5f9' }}>Dilarion — End-to-end encrypted</div>
-        <div style={{ fontSize: '0.8rem', color: '#6b7280', lineHeight: 1.5 }}>
+      <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 12, padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>About</div>
+        <div style={{ fontSize: '0.92rem', fontWeight: 700, color: 'var(--text-primary)' }}>Dilarion — End-to-end encrypted</div>
+        <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: 1.5 }}>
           Your messages are protected with AES-256-GCM + RSA-4096
         </div>
       </div>
@@ -529,7 +761,7 @@ function CallsList({ calls, loading, selectedCallId, onSelectCall }: CallsListPr
             style={{
               ...hs.listItem,
               background: isActive ? '#1e1e1e' : 'transparent',
-              borderLeft: `3px solid ${isActive ? '#c0392b' : 'transparent'}`,
+              borderLeft: `3px solid ${isActive ? 'var(--accent)' : 'transparent'}`,
             }}
             onClick={() => onSelectCall(call.id)}
           >
@@ -663,6 +895,22 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
   const [allUsers, setAllUsers] = useState<Contact[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [userSearch, setUserSearch] = useState('');
+
+  // ── Badge count — update dock/taskbar icon when unread changes ─────────────────
+  useEffect(() => {
+    invoke('set_badge_count', { count: unread.size }).catch(() => {});
+  }, [unread.size]);
+
+  // ── System color scheme change listener ────────────────────────────────────────
+  useEffect(() => {
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const handler = () => {
+      const prefs = loadAppearance();
+      if (prefs.colorMode === 'system') applyAppearance(prefs);
+    };
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
 
   // Stable ref for selectedChat in WS handler
   const selectedChatRef = useRef(selectedChat);
@@ -840,7 +1088,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
               onClick={openNewChat}
               title="New chat"
               style={{
-                background: '#c0392b',
+                background: 'var(--accent)',
                 border: 'none',
                 borderRadius: '50%',
                 width: 28,
@@ -893,7 +1141,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
                     style={{
                       ...hs.listItem,
                       background: isActive ? '#1e1e1e' : 'transparent',
-                      borderLeft: `3px solid ${isActive ? '#c0392b' : 'transparent'}`,
+                      borderLeft: `3px solid ${isActive ? 'var(--accent)' : 'transparent'}`,
                     }}
                     onClick={() => openContact(c.username)}
                   >
@@ -952,7 +1200,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
                     style={{
                       ...hs.listItem,
                       background: isActive ? '#1e1e1e' : 'transparent',
-                      borderLeft: `3px solid ${isActive ? '#c0392b' : 'transparent'}`,
+                      borderLeft: `3px solid ${isActive ? 'var(--accent)' : 'transparent'}`,
                     }}
                     onClick={() => openGroup(g.id)}
                   >
@@ -1301,7 +1549,7 @@ const hs: Record<string, React.CSSProperties> = {
     display: 'flex',
     flexDirection: 'row',
     height: '100vh',
-    background: '#0c0c0c',
+    background: 'var(--bg-base)',
     overflow: 'hidden',
   },
 
@@ -1316,8 +1564,8 @@ const hs: Record<string, React.CSSProperties> = {
     paddingTop: 16,
     paddingBottom: 16,
     gap: 4,
-    background: '#0d0d0d',
-    borderRight: '1px solid #1a1a1a',
+    background: 'var(--bg-base)',
+    borderRight: '1px solid var(--border-color)',
   },
   tabBtn: {
     width: 44,
@@ -1345,8 +1593,8 @@ const hs: Record<string, React.CSSProperties> = {
     flexShrink: 0,
     display: 'flex',
     flexDirection: 'column',
-    background: '#111',
-    borderRight: '1px solid #1e1e1e',
+    background: 'var(--bg-panel)',
+    borderRight: '1px solid var(--border-color)',
     overflow: 'hidden',
   },
   listHeader: {
@@ -1359,7 +1607,7 @@ const hs: Record<string, React.CSSProperties> = {
   listHeaderTitle: {
     fontSize: '1.1rem',
     fontWeight: 800,
-    color: '#f1f5f9',
+    color: 'var(--text-primary)',
     letterSpacing: '-0.03em',
   },
   searchWrap: {
@@ -1367,8 +1615,8 @@ const hs: Record<string, React.CSSProperties> = {
     alignItems: 'center',
     gap: 8,
     margin: '4px 12px 8px',
-    background: '#1a1a1a',
-    border: '1px solid #222',
+    background: 'var(--bg-card)',
+    border: '1px solid var(--border-color)',
     borderRadius: 10,
     padding: '8px 12px',
     flexShrink: 0,
@@ -1377,7 +1625,7 @@ const hs: Record<string, React.CSSProperties> = {
     flex: 1,
     background: 'transparent',
     border: 'none',
-    color: '#d1d5db',
+    color: 'var(--text-primary)',
     fontSize: '0.85rem',
   },
   listItems: {
@@ -1387,7 +1635,7 @@ const hs: Record<string, React.CSSProperties> = {
   emptyList: {
     padding: '24px 16px',
     textAlign: 'center',
-    color: '#4b5563',
+    color: 'var(--text-muted)',
     fontSize: '0.82rem',
   },
   listItem: {
@@ -1407,8 +1655,8 @@ const hs: Record<string, React.CSSProperties> = {
     width: 46,
     height: 46,
     borderRadius: '50%',
-    background: '#2a2a2a',
-    color: '#d1d5db',
+    background: 'var(--avatar-bg)',
+    color: 'var(--avatar-text)',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
@@ -1438,13 +1686,13 @@ const hs: Record<string, React.CSSProperties> = {
   itemName: {
     fontSize: '0.88rem',
     fontWeight: 600,
-    color: '#e5e7eb',
+    color: 'var(--text-primary)',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
   },
   unreadBadge: {
-    background: '#c0392b',
+    background: 'var(--accent)',
     color: '#fff',
     fontSize: '0.65rem',
     fontWeight: 700,
@@ -1461,6 +1709,6 @@ const hs: Record<string, React.CSSProperties> = {
     display: 'flex',
     flexDirection: 'column',
     overflow: 'hidden',
-    background: '#0e0e0e',
+    background: 'var(--bg-base)',
   },
 };

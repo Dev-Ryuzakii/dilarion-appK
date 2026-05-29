@@ -77,8 +77,8 @@ function DateSeparator({ ts }: { ts: string }) {
   return (
     <div style={{ display: 'flex', justifyContent: 'center', margin: '14px 0 8px' }}>
       <span style={{
-        background: '#1a1f2e',
-        color: '#6b7280',
+        background: 'var(--bg-card)',
+        color: 'var(--text-muted)',
         fontSize: '0.68rem',
         fontWeight: 600,
         padding: '4px 14px',
@@ -236,10 +236,10 @@ function EncryptedBubble({ token, messageId, decoyContent, masterToken, isMine, 
             onKeyDown={e => { if (e.key === 'Enter') handleSubmitToken(); }}
             style={{
               flex: 1,
-              background: '#1a1a1a',
-              border: '1px solid #2a2a2a',
+              background: 'var(--input-field-bg)',
+              border: '1px solid var(--border-color)',
               borderRadius: 8,
-              color: '#f1f5f9',
+              color: 'var(--text-primary)',
               fontSize: '0.8rem',
               padding: '6px 10px',
             }}
@@ -248,7 +248,7 @@ function EncryptedBubble({ token, messageId, decoyContent, masterToken, isMine, 
           />
           <button
             style={{
-              background: '#c0392b',
+              background: 'var(--accent)',
               color: '#fff',
               fontSize: '0.75rem',
               borderRadius: 8,
@@ -322,7 +322,7 @@ function MediaBubble({ token, mediaId, contentType, onRemove }: { token: string;
 
   if (loadError) {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', background: 'var(--input-field-bg)', border: '1px solid var(--border-color)', borderRadius: 10 }}>
         {isVoice(contentType) ? <MicIconSvg size={18} color="#6b7280" /> : (isImage(contentType) || isVideoMedia(contentType)) ? <CameraIcon size={18} color="#6b7280" /> : <PaperclipIconSvg size={18} color="#6b7280" />}
         <span style={{ fontSize: '0.78rem', color: '#6b7280', fontStyle: 'italic' }}>{loadError}</span>
       </div>
@@ -370,12 +370,12 @@ function MediaBubble({ token, mediaId, contentType, onRemove }: { token: string;
         display: 'flex',
         alignItems: 'center',
         gap: 10,
-        background: '#1e1e1e',
-        border: '1px solid #2a2a2a',
+        background: 'var(--bg-card)',
+        border: '1px solid var(--border-color)',
         borderRadius: 10,
         padding: '12px 16px',
         cursor: loading ? 'wait' : 'pointer',
-        color: '#9ca3af',
+        color: 'var(--text-muted)',
         fontSize: '0.85rem',
         opacity: loading ? 0.7 : 1,
       }}
@@ -886,24 +886,24 @@ function SendIcon() {
 
 const ms: Record<string, React.CSSProperties> = {
   bubbleMine: {
-    background: '#2a1515',
+    background: 'var(--bubble-mine-bg)',
     borderRadius: '18px 18px 4px 18px',
     padding: '10px 14px',
     maxWidth: '68%',
-    color: '#f1f5f9',
+    color: 'var(--bubble-text)',
     wordBreak: 'break-word',
   },
   bubbleTheirs: {
-    background: '#1a1a1a',
+    background: 'var(--bubble-theirs-bg)',
     borderRadius: '18px 18px 18px 4px',
     padding: '10px 14px',
     maxWidth: '68%',
-    color: '#f1f5f9',
+    color: 'var(--bubble-text)',
     wordBreak: 'break-word',
   },
   ts: {
     fontSize: '0.67rem',
-    color: '#4b5563',
+    color: 'var(--text-muted)',
     marginTop: 3,
     marginLeft: 4,
     marginRight: 4,
@@ -916,7 +916,7 @@ const cs: Record<string, React.CSSProperties> = {
     flexDirection: 'column',
     height: '100%',
     overflow: 'hidden',
-    background: '#0e0e0e',
+    background: 'var(--chat-bg)',
   },
 
   header: {
@@ -924,8 +924,8 @@ const cs: Record<string, React.CSSProperties> = {
     alignItems: 'center',
     justifyContent: 'space-between',
     padding: '12px 20px',
-    borderBottom: '1px solid #1e1e1e',
-    background: '#141414',
+    borderBottom: '1px solid var(--border-color)',
+    background: 'var(--header-bg)',
     flexShrink: 0,
   },
   headerLeft: {
@@ -937,7 +937,7 @@ const cs: Record<string, React.CSSProperties> = {
     width: 42,
     height: 42,
     borderRadius: '50%',
-    background: '#c0392b',
+    background: 'var(--accent)',
     color: '#fff',
     display: 'flex',
     alignItems: 'center',
@@ -949,7 +949,7 @@ const cs: Record<string, React.CSSProperties> = {
   partnerName: {
     fontSize: '0.92rem',
     fontWeight: 700,
-    color: '#f1f5f9',
+    color: 'var(--text-primary)',
   },
   partnerStatus: {
     display: 'flex',
@@ -965,7 +965,8 @@ const cs: Record<string, React.CSSProperties> = {
     display: 'flex',
     flexDirection: 'column',
     gap: 2,
-    backgroundImage: 'url(/chat_bg.png)',
+    background: 'var(--chat-bg)',
+    backgroundImage: 'var(--chat-bg-image)',
     backgroundSize: '512px 512px',
     backgroundRepeat: 'repeat',
   },
@@ -983,17 +984,17 @@ const cs: Record<string, React.CSSProperties> = {
     alignItems: 'center',
     gap: 8,
     padding: '10px 16px',
-    borderTop: '1px solid #1e1e1e',
-    background: '#141414',
+    borderTop: '1px solid var(--border-color)',
+    background: 'var(--input-bar-bg)',
     flexShrink: 0,
     minHeight: 60,
   },
   textInput: {
     flex: 1,
-    background: '#1a1a1a',
-    border: '1px solid #2a2a2a',
+    background: 'var(--input-field-bg)',
+    border: '1px solid var(--border-color)',
     borderRadius: 24,
-    color: '#f1f5f9',
+    color: 'var(--text-primary)',
     fontSize: '0.88rem',
     padding: '10px 16px',
     resize: 'none',
@@ -1015,7 +1016,7 @@ const cs: Record<string, React.CSSProperties> = {
     border: 'none',
   },
   sendBtn: {
-    background: '#c0392b',
+    background: 'var(--accent)',
     color: '#fff',
     width: 40,
     height: 40,
@@ -1033,8 +1034,8 @@ const cs: Record<string, React.CSSProperties> = {
     alignItems: 'center',
     gap: 10,
     padding: '10px 16px',
-    background: '#1a1a1a',
-    border: '1px solid #2a2a2a',
+    background: 'var(--input-field-bg)',
+    border: '1px solid var(--border-color)',
     borderRadius: 24,
   },
   callBtn: {
