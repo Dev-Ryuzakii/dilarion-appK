@@ -185,7 +185,7 @@ function EncryptedBubble({ token, messageId, decoyContent, masterToken, isMine, 
   if (showing && decryptedContent !== null) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-        <span style={{ fontSize: '0.88rem', lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: '#f1f5f9' }}>
+        <span style={{ fontSize: '0.88rem', lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
           {decryptedContent}
         </span>
         <span style={{ fontSize: '0.65rem', color: '#6b7280', fontStyle: 'italic' }}>
@@ -890,7 +890,7 @@ const ms: Record<string, React.CSSProperties> = {
     borderRadius: '18px 18px 4px 18px',
     padding: '10px 14px',
     maxWidth: '68%',
-    color: 'var(--bubble-text)',
+    color: 'var(--bubble-mine-text)',
     wordBreak: 'break-word',
   },
   bubbleTheirs: {
@@ -898,7 +898,7 @@ const ms: Record<string, React.CSSProperties> = {
     borderRadius: '18px 18px 18px 4px',
     padding: '10px 14px',
     maxWidth: '68%',
-    color: 'var(--bubble-text)',
+    color: 'var(--bubble-theirs-text)',
     wordBreak: 'break-word',
   },
   ts: {

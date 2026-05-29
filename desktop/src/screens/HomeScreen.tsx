@@ -182,6 +182,7 @@ interface ThemeColors {
   bg: string; panel: string; card: string;
   textPrimary: string; textSecondary: string; textMuted: string;
   border: string; inputBg: string; avatarBg: string; avatarText: string; itemHover: string;
+  itemActiveBg: string; tabActiveBg: string;
   chatBg: string; chatBgImage: string;
   bubbleMineBg: string; bubbleTheirsBg: string; bubbleText: string;
   headerBg: string; inputBarBg: string; inputFieldBg: string;
@@ -191,7 +192,8 @@ const DARK_VARIANTS: { name: string; colors: ThemeColors }[] = [
   { name: 'Dark', colors: {
     bg: '#0e0e0e', panel: '#111111', card: '#1a1a1a',
     textPrimary: '#f1f5f9', textSecondary: '#d1d5db', textMuted: '#6b7280',
-    border: '#1e1e1e', inputBg: '#1a1a1a', avatarBg: '#2a2a2a', avatarText: '#d1d5db', itemHover: 'rgba(255,255,255,0.04)',
+    border: '#1e1e1e', inputBg: '#1a1a1a', avatarBg: '#2a2a2a', avatarText: '#d1d5db',
+    itemHover: 'rgba(255,255,255,0.04)', itemActiveBg: '#1e1e1e', tabActiveBg: '#1a0d0d',
     chatBg: '#0e0e0e', chatBgImage: 'url(/chat_bg.png)',
     bubbleMineBg: '#2a1515', bubbleTheirsBg: '#1a1a1a', bubbleText: '#f1f5f9',
     headerBg: '#141414', inputBarBg: '#141414', inputFieldBg: '#1a1a1a',
@@ -199,7 +201,8 @@ const DARK_VARIANTS: { name: string; colors: ThemeColors }[] = [
   { name: 'Pitch Black', colors: {
     bg: '#000000', panel: '#0a0a0a', card: '#101010',
     textPrimary: '#f1f5f9', textSecondary: '#d1d5db', textMuted: '#6b7280',
-    border: '#1a1a1a', inputBg: '#111111', avatarBg: '#1f1f1f', avatarText: '#d1d5db', itemHover: 'rgba(255,255,255,0.03)',
+    border: '#1a1a1a', inputBg: '#111111', avatarBg: '#1f1f1f', avatarText: '#d1d5db',
+    itemHover: 'rgba(255,255,255,0.03)', itemActiveBg: '#151515', tabActiveBg: '#100808',
     chatBg: '#000000', chatBgImage: 'url(/chat_bg.png)',
     bubbleMineBg: '#1a0a0a', bubbleTheirsBg: '#111111', bubbleText: '#f1f5f9',
     headerBg: '#0a0a0a', inputBarBg: '#0a0a0a', inputFieldBg: '#111111',
@@ -207,7 +210,8 @@ const DARK_VARIANTS: { name: string; colors: ThemeColors }[] = [
   { name: 'Slate', colors: {
     bg: '#0f172a', panel: '#1e293b', card: '#293548',
     textPrimary: '#e2e8f0', textSecondary: '#cbd5e1', textMuted: '#64748b',
-    border: '#334155', inputBg: '#1e293b', avatarBg: '#334155', avatarText: '#cbd5e1', itemHover: 'rgba(255,255,255,0.05)',
+    border: '#334155', inputBg: '#1e293b', avatarBg: '#334155', avatarText: '#cbd5e1',
+    itemHover: 'rgba(255,255,255,0.05)', itemActiveBg: '#293548', tabActiveBg: '#0d1b2e',
     chatBg: '#0f172a', chatBgImage: 'url(/chat_bg.png)',
     bubbleMineBg: '#1e3a5f', bubbleTheirsBg: '#1e293b', bubbleText: '#e2e8f0',
     headerBg: '#1e293b', inputBarBg: '#1e293b', inputFieldBg: '#293548',
@@ -217,7 +221,8 @@ const DARK_VARIANTS: { name: string; colors: ThemeColors }[] = [
 const LIGHT_THEME: ThemeColors = {
   bg: '#f0f2f5', panel: '#ffffff', card: '#f7f8fa',
   textPrimary: '#111827', textSecondary: '#374151', textMuted: '#9ca3af',
-  border: '#e5e7eb', inputBg: '#f0f2f5', avatarBg: '#dce1e7', avatarText: '#374151', itemHover: 'rgba(0,0,0,0.05)',
+  border: '#e5e7eb', inputBg: '#f0f2f5', avatarBg: '#dce1e7', avatarText: '#374151',
+  itemHover: 'rgba(0,0,0,0.05)', itemActiveBg: '#ebebeb', tabActiveBg: 'rgba(0,0,0,0.07)',
   chatBg: '#e5ddd5', chatBgImage: 'url(/chat_bg_light.png)',
   bubbleMineBg: '#dcf8c6', bubbleTheirsBg: '#ffffff', bubbleText: '#111827',
   headerBg: '#f0f2f5', inputBarBg: '#f0f2f5', inputFieldBg: '#ffffff',
@@ -260,27 +265,32 @@ function resolveThemeColors(p: AppearancePrefs): ThemeColors {
 
 function applyAppearance(p: AppearancePrefs) {
   const t = resolveThemeColors(p);
+  const prefersDark = typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  const isDark = p.colorMode === 'system' ? prefersDark : p.colorMode === 'dark';
   const r = document.documentElement;
-  r.style.setProperty('--accent',          p.accent);
-  r.style.setProperty('--bg-base',         t.bg);
-  r.style.setProperty('--bg-panel',        t.panel);
-  r.style.setProperty('--bg-card',         t.card);
-  r.style.setProperty('--text-primary',    t.textPrimary);
-  r.style.setProperty('--text-secondary',  t.textSecondary);
-  r.style.setProperty('--text-muted',      t.textMuted);
-  r.style.setProperty('--border-color',    t.border);
-  r.style.setProperty('--input-bg',        t.inputBg);
-  r.style.setProperty('--avatar-bg',       t.avatarBg);
-  r.style.setProperty('--avatar-text',     t.avatarText);
-  r.style.setProperty('--item-hover',      t.itemHover);
-  r.style.setProperty('--chat-bg',         t.chatBg);
-  r.style.setProperty('--chat-bg-image',   t.chatBgImage);
-  r.style.setProperty('--bubble-mine-bg',  t.bubbleMineBg);
-  r.style.setProperty('--bubble-theirs-bg',t.bubbleTheirsBg);
-  r.style.setProperty('--bubble-text',     t.bubbleText);
-  r.style.setProperty('--header-bg',       t.headerBg);
-  r.style.setProperty('--input-bar-bg',    t.inputBarBg);
-  r.style.setProperty('--input-field-bg',  t.inputFieldBg);
+  r.style.setProperty('--accent',            p.accent);
+  r.style.setProperty('--bg-base',           t.bg);
+  r.style.setProperty('--bg-panel',          t.panel);
+  r.style.setProperty('--bg-card',           t.card);
+  r.style.setProperty('--text-primary',      t.textPrimary);
+  r.style.setProperty('--text-secondary',    t.textSecondary);
+  r.style.setProperty('--text-muted',        t.textMuted);
+  r.style.setProperty('--border-color',      t.border);
+  r.style.setProperty('--input-bg',          t.inputBg);
+  r.style.setProperty('--avatar-bg',         t.avatarBg);
+  r.style.setProperty('--avatar-text',       t.avatarText);
+  r.style.setProperty('--item-hover',        t.itemHover);
+  r.style.setProperty('--item-active-bg',    t.itemActiveBg);
+  r.style.setProperty('--tab-active-bg',     t.tabActiveBg);
+  r.style.setProperty('--chat-bg',           t.chatBg);
+  r.style.setProperty('--chat-bg-image',     t.chatBgImage);
+  r.style.setProperty('--bubble-mine-bg',    isDark ? t.bubbleMineBg : p.accent);
+  r.style.setProperty('--bubble-mine-text',  '#fff');
+  r.style.setProperty('--bubble-theirs-bg',  t.bubbleTheirsBg);
+  r.style.setProperty('--bubble-theirs-text',t.bubbleText);
+  r.style.setProperty('--header-bg',         t.headerBg);
+  r.style.setProperty('--input-bar-bg',      t.inputBarBg);
+  r.style.setProperty('--input-field-bg',    t.inputFieldBg);
   r.style.fontSize = p.fontSize;
 }
 
@@ -289,20 +299,33 @@ applyAppearance(loadAppearance());
 
 // ── Settings Panel ─────────────────────────────────────────────────────────────
 
-function SettingsListPanel() {
-  const options = ['Account', 'Privacy', 'Notifications', 'Security', 'About'];
+function SettingsListPanel({ selected, onSelect }: { selected: 'account' | 'appearance'; onSelect: (p: 'account' | 'appearance') => void }) {
+  const pages: { id: 'account' | 'appearance'; label: string }[] = [
+    { id: 'account', label: 'Account' },
+    { id: 'appearance', label: 'Appearance' },
+  ];
   return (
     <div style={{ display: 'flex', flexDirection: 'column' }}>
-      {options.map(opt => (
-        <div key={opt} style={{
-          padding: '14px 20px',
-          color: 'var(--text-secondary)',
-          fontSize: '0.88rem',
-          borderBottom: '1px solid var(--border-color)',
-          cursor: 'pointer',
-        }}>
-          {opt}
-        </div>
+      {pages.map(p => (
+        <button
+          key={p.id}
+          onClick={() => onSelect(p.id)}
+          style={{
+            padding: '14px 20px',
+            color: selected === p.id ? 'var(--accent)' : 'var(--text-secondary)',
+            background: selected === p.id ? 'var(--item-active-bg)' : 'transparent',
+            borderLeft: `3px solid ${selected === p.id ? 'var(--accent)' : 'transparent'}`,
+            fontSize: '0.88rem',
+            fontWeight: selected === p.id ? 700 : 400,
+            borderTop: 'none', borderRight: 'none',
+            borderBottom: '1px solid var(--border-color)',
+            textAlign: 'left',
+            cursor: 'pointer',
+            fontFamily: 'inherit',
+          }}
+        >
+          {p.label}
+        </button>
       ))}
     </div>
   );
@@ -315,9 +338,10 @@ interface SettingsMainProps {
   onSetMasterToken: (t: string) => void;
   onClearMasterToken: () => void;
   onLogout: () => void;
+  page: 'account' | 'appearance';
 }
 
-function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onClearMasterToken, onLogout }: SettingsMainProps) {
+function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onClearMasterToken, onLogout, page }: SettingsMainProps) {
   const [appearance, setAppearanceState] = useState<AppearancePrefs>(loadAppearance);
 
   function updateAppearance(patch: Partial<AppearancePrefs>) {
@@ -381,38 +405,147 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
     }
   }
 
+  const inputStyle: React.CSSProperties = {
+    width: '100%',
+    background: 'var(--input-bg)',
+    border: '1px solid var(--border-color)',
+    borderRadius: 8,
+    color: 'var(--text-primary)',
+    fontSize: '0.85rem',
+    padding: '8px 36px 8px 12px',
+    boxSizing: 'border-box',
+  };
+
+  if (page === 'appearance') {
+    return (
+      <div style={{ flex: 1, overflowY: 'auto', padding: '32px 40px', display: 'flex', flexDirection: 'column', gap: 28, background: 'var(--bg-base)' }}>
+        <div style={{ fontSize: '1.1rem', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.03em' }}>Appearance</div>
+
+        <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 12, padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 18 }}>
+          {/* Color mode */}
+          <div>
+            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 8 }}>Color Mode</div>
+            <div style={{ display: 'flex', gap: 4, background: 'var(--bg-card)', borderRadius: 10, padding: 4 }}>
+              {(['system', 'dark', 'light'] as const).map(mode => {
+                const label = mode === 'system' ? 'System' : mode === 'dark' ? 'Dark' : 'Light';
+                const active = appearance.colorMode === mode;
+                return (
+                  <button
+                    key={mode}
+                    onClick={() => updateAppearance({ colorMode: mode })}
+                    style={{
+                      flex: 1, padding: '7px 4px', borderRadius: 7, border: 'none',
+                      background: active ? 'var(--accent)' : 'transparent',
+                      color: active ? '#fff' : 'var(--text-muted)',
+                      fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer',
+                      transition: 'background 0.15s', fontFamily: 'inherit',
+                    }}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Dark variant */}
+          {appearance.colorMode !== 'light' && (
+            <div>
+              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 8 }}>Dark Style</div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                {DARK_VARIANTS.map((dv, idx) => (
+                  <button
+                    key={dv.name}
+                    onClick={() => updateAppearance({ darkVariant: idx })}
+                    style={{
+                      flex: 1, padding: '8px 0', borderRadius: 8,
+                      border: appearance.darkVariant === idx ? '2px solid var(--accent)' : '2px solid var(--border-color)',
+                      background: dv.colors.bg,
+                      color: appearance.darkVariant === idx ? '#f1f5f9' : '#6b7280',
+                      fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+                    }}
+                  >
+                    {dv.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Accent color */}
+          <div>
+            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 8 }}>Accent Color</div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {ACCENT_COLORS.map(ac => (
+                <button
+                  key={ac.value}
+                  title={ac.name}
+                  onClick={() => updateAppearance({ accent: ac.value })}
+                  style={{
+                    width: 28, height: 28, borderRadius: '50%',
+                    background: ac.value,
+                    border: appearance.accent === ac.value ? '3px solid var(--bg-panel)' : '3px solid transparent',
+                    cursor: 'pointer',
+                    boxShadow: appearance.accent === ac.value ? `0 0 0 2px ${ac.value}` : 'none',
+                    transition: 'box-shadow 0.15s, border 0.15s',
+                    flexShrink: 0,
+                  }}
+                />
+              ))}
+            </div>
+          </div>
+
+          {/* Font size */}
+          <div>
+            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 8 }}>Text Size</div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              {FONT_SIZES.map(fs => (
+                <button
+                  key={fs.value}
+                  onClick={() => updateAppearance({ fontSize: fs.value })}
+                  style={{
+                    flex: 1, padding: '7px 0', borderRadius: 8,
+                    border: appearance.fontSize === fs.value ? '2px solid var(--accent)' : '2px solid var(--border-color)',
+                    background: appearance.fontSize === fs.value ? 'var(--accent)' : 'var(--bg-card)',
+                    color: appearance.fontSize === fs.value ? '#fff' : 'var(--text-muted)',
+                    fontSize: fs.value, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit',
+                  }}
+                >
+                  {fs.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Account page (default)
   return (
-    <div style={{ flex: 1, overflowY: 'auto', padding: '32px 40px', display: 'flex', flexDirection: 'column', gap: 32, background: 'var(--bg-base)' }}>
+    <div style={{ flex: 1, overflowY: 'auto', padding: '32px 40px', display: 'flex', flexDirection: 'column', gap: 28, background: 'var(--bg-base)' }}>
       {/* Profile */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
         <div style={{
-          width: 72,
-          height: 72,
-          borderRadius: '50%',
-          background: '#c0392b',
-          color: '#fff',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          fontWeight: 800,
-          fontSize: '1.5rem',
-          flexShrink: 0,
+          width: 72, height: 72, borderRadius: '50%',
+          background: 'var(--accent)', color: '#fff',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontWeight: 800, fontSize: '1.5rem', flexShrink: 0,
         }}>
           {initials(username)}
         </div>
         <div>
-          <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#f1f5f9' }}>{username}</div>
-          <div style={{ fontSize: '0.78rem', color: '#6b7280', marginTop: 4 }}>Your account</div>
+          <div style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-primary)' }}>{username}</div>
+          <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: 4 }}>Your account</div>
         </div>
       </div>
 
       {/* Master token section */}
       <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 12, padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Master Token</div>
+        <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Master Token</div>
 
-        {/* Info box */}
-        <div style={{ background: '#1a1a2e', border: '1px solid #2d2d5e', borderRadius: 8, padding: '10px 14px' }}>
-          <span style={{ fontSize: '0.78rem', color: '#8b9cf4', lineHeight: 1.5 }}>
+        <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 8, padding: '10px 14px' }}>
+          <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
             Your master token works across all your Dilarion devices. It is never stored on the server — only a secure hash is kept.
           </span>
         </div>
@@ -426,14 +559,9 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
             <button
               onClick={onClearMasterToken}
               style={{
-                alignSelf: 'flex-start',
-                background: 'transparent',
-                border: '1px solid #c0392b',
-                color: '#c0392b',
-                borderRadius: 8,
-                padding: '6px 14px',
-                fontSize: '0.8rem',
-                cursor: 'pointer',
+                alignSelf: 'flex-start', background: 'transparent',
+                border: '1px solid var(--accent)', color: 'var(--accent)',
+                borderRadius: 8, padding: '6px 14px', fontSize: '0.8rem', cursor: 'pointer', fontFamily: 'inherit',
               }}
             >
               Clear
@@ -441,7 +569,7 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
           </>
         ) : (
           <>
-            <div style={{ fontSize: '0.83rem', color: '#9ca3af' }}>Enter your master token</div>
+            <div style={{ fontSize: '0.83rem', color: 'var(--text-muted)' }}>Enter your master token</div>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
               <div style={{ flex: 1, position: 'relative' }}>
                 <input
@@ -450,50 +578,16 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
                   value={verifyInput}
                   onChange={e => setVerifyInput(e.target.value)}
                   onKeyDown={e => { if (e.key === 'Enter') handleVerify(); }}
-                  style={{
-                    width: '100%',
-                    background: '#1a1a1a',
-                    border: '1px solid #2a2a2a',
-                    borderRadius: 8,
-                    color: '#f1f5f9',
-                    fontSize: '0.85rem',
-                    padding: '8px 36px 8px 12px',
-                    boxSizing: 'border-box',
-                  }}
+                  style={inputStyle}
                 />
-                <button
-                  onClick={() => setVerifyShow(v => !v)}
-                  style={{
-                    position: 'absolute',
-                    right: 8,
-                    top: '50%',
-                    transform: 'translateY(-50%)',
-                    background: 'transparent',
-                    border: 'none',
-                    cursor: 'pointer',
-                    padding: 2,
-                    display: 'flex',
-                    alignItems: 'center',
-                  }}
-                >
+                <button onClick={() => setVerifyShow(v => !v)} style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', cursor: 'pointer', padding: 2, display: 'flex', alignItems: 'center' }}>
                   {verifyShow ? <EyeOffIcon size={15} color="#6b7280" /> : <EyeIcon size={15} color="#6b7280" />}
                 </button>
               </div>
               <button
                 onClick={handleVerify}
                 disabled={verifyLoading || !verifyInput.trim()}
-                style={{
-                  background: '#c0392b',
-                  color: '#fff',
-                  border: 'none',
-                  borderRadius: 8,
-                  padding: '8px 16px',
-                  fontSize: '0.82rem',
-                  fontWeight: 600,
-                  cursor: verifyLoading ? 'wait' : 'pointer',
-                  opacity: verifyLoading ? 0.7 : 1,
-                  whiteSpace: 'nowrap',
-                }}
+                style={{ background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 16px', fontSize: '0.82rem', fontWeight: 600, cursor: verifyLoading ? 'wait' : 'pointer', opacity: verifyLoading ? 0.7 : 1, whiteSpace: 'nowrap', fontFamily: 'inherit' }}
               >
                 {verifyLoading ? '...' : 'Verify & Save'}
               </button>
@@ -503,21 +597,10 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
           </>
         )}
 
-        {/* Set up new master token (accordion) */}
-        <div style={{ borderTop: '1px solid #1e1e1e', paddingTop: 12 }}>
+        <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: 12 }}>
           <button
             onClick={() => setShowCreateSection(v => !v)}
-            style={{
-              background: 'transparent',
-              border: 'none',
-              color: '#6b7280',
-              fontSize: '0.8rem',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              padding: 0,
-            }}
+            style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: '0.8rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, padding: 0, fontFamily: 'inherit' }}
           >
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
               style={{ transform: showCreateSection ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }}>
@@ -535,49 +618,16 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
                     value={createInput}
                     onChange={e => setCreateInput(e.target.value)}
                     onKeyDown={e => { if (e.key === 'Enter') handleCreate(); }}
-                    style={{
-                      width: '100%',
-                      background: 'var(--input-bg)',
-                      border: '1px solid var(--border-color)',
-                      borderRadius: 8,
-                      color: 'var(--text-primary)',
-                      fontSize: '0.85rem',
-                      padding: '8px 36px 8px 12px',
-                      boxSizing: 'border-box',
-                    }}
+                    style={inputStyle}
                   />
-                  <button
-                    onClick={() => setCreateShow(v => !v)}
-                    style={{
-                      position: 'absolute',
-                      right: 8,
-                      top: '50%',
-                      transform: 'translateY(-50%)',
-                      background: 'transparent',
-                      border: 'none',
-                      cursor: 'pointer',
-                      padding: 2,
-                      display: 'flex',
-                      alignItems: 'center',
-                    }}
-                  >
+                  <button onClick={() => setCreateShow(v => !v)} style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', cursor: 'pointer', padding: 2, display: 'flex', alignItems: 'center' }}>
                     {createShow ? <EyeOffIcon size={15} color="#6b7280" /> : <EyeIcon size={15} color="#6b7280" />}
                   </button>
                 </div>
                 <button
                   onClick={handleCreate}
                   disabled={createLoading || !createInput.trim()}
-                  style={{
-                    background: '#374151',
-                    color: '#f1f5f9',
-                    border: 'none',
-                    borderRadius: 8,
-                    padding: '8px 16px',
-                    fontSize: '0.82rem',
-                    fontWeight: 600,
-                    cursor: createLoading ? 'wait' : 'pointer',
-                    opacity: createLoading ? 0.7 : 1,
-                  }}
+                  style={{ background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border-color)', borderRadius: 8, padding: '8px 16px', fontSize: '0.82rem', fontWeight: 600, cursor: createLoading ? 'wait' : 'pointer', opacity: createLoading ? 0.7 : 1, fontFamily: 'inherit' }}
                 >
                   {createLoading ? '...' : 'Create'}
                 </button>
@@ -589,131 +639,11 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
         </div>
       </div>
 
-      {/* Appearance */}
-      <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 12, padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 18 }}>
-        <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Appearance</div>
-
-        {/* Color mode */}
-        <div>
-          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 8 }}>Color Mode</div>
-          <div style={{ display: 'flex', gap: 4, background: 'var(--bg-card)', borderRadius: 10, padding: 4 }}>
-            {(['system', 'dark', 'light'] as const).map(mode => {
-              const label = mode === 'system' ? '⚙ System' : mode === 'dark' ? '🌙 Dark' : '☀ Light';
-              const active = appearance.colorMode === mode;
-              return (
-                <button
-                  key={mode}
-                  onClick={() => updateAppearance({ colorMode: mode })}
-                  style={{
-                    flex: 1, padding: '7px 4px', borderRadius: 7, border: 'none',
-                    background: active ? 'var(--accent)' : 'transparent',
-                    color: active ? '#fff' : 'var(--text-muted)',
-                    fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer',
-                    transition: 'background 0.15s',
-                  }}
-                >
-                  {label}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Dark variant — only shown in dark/system mode */}
-        {appearance.colorMode !== 'light' && (
-          <div>
-            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 8 }}>Dark Style</div>
-            <div style={{ display: 'flex', gap: 6 }}>
-              {DARK_VARIANTS.map((dv, idx) => (
-                <button
-                  key={dv.name}
-                  onClick={() => updateAppearance({ darkVariant: idx })}
-                  style={{
-                    flex: 1, padding: '8px 0', borderRadius: 8,
-                    border: appearance.darkVariant === idx ? '2px solid var(--accent)' : '2px solid var(--border-color)',
-                    background: dv.colors.bg,
-                    color: appearance.darkVariant === idx ? '#f1f5f9' : '#6b7280',
-                    fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer',
-                  }}
-                >
-                  {dv.name}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Accent color */}
-        <div>
-          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 8 }}>Accent Color</div>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {ACCENT_COLORS.map(ac => (
-              <button
-                key={ac.value}
-                title={ac.name}
-                onClick={() => updateAppearance({ accent: ac.value })}
-                style={{
-                  width: 28, height: 28, borderRadius: '50%',
-                  background: ac.value,
-                  border: appearance.accent === ac.value ? '3px solid var(--bg-panel)' : '3px solid transparent',
-                  cursor: 'pointer',
-                  boxShadow: appearance.accent === ac.value ? `0 0 0 2px ${ac.value}` : 'none',
-                  transition: 'box-shadow 0.15s, border 0.15s',
-                  flexShrink: 0,
-                }}
-              />
-            ))}
-          </div>
-        </div>
-
-        {/* Font size */}
-        <div>
-          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 8 }}>Text Size</div>
-          <div style={{ display: 'flex', gap: 6 }}>
-            {FONT_SIZES.map(fs => (
-              <button
-                key={fs.value}
-                onClick={() => updateAppearance({ fontSize: fs.value })}
-                style={{
-                  flex: 1, padding: '7px 0', borderRadius: 8,
-                  border: appearance.fontSize === fs.value ? '2px solid var(--accent)' : '2px solid var(--border-color)',
-                  background: appearance.fontSize === fs.value ? 'var(--accent)' : 'var(--bg-card)',
-                  color: appearance.fontSize === fs.value ? '#fff' : 'var(--text-muted)',
-                  fontSize: fs.value, fontWeight: 700, cursor: 'pointer',
-                }}
-              >
-                {fs.name}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* About section */}
-      <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 12, padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>About</div>
-        <div style={{ fontSize: '0.92rem', fontWeight: 700, color: 'var(--text-primary)' }}>Dilarion — End-to-end encrypted</div>
-        <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: 1.5 }}>
-          Your messages are protected with AES-256-GCM + RSA-4096
-        </div>
-      </div>
-
       {/* Logout */}
       <div style={{ marginTop: 'auto' }}>
         <button
           onClick={onLogout}
-          style={{
-            width: '100%',
-            background: '#c0392b',
-            color: '#fff',
-            border: 'none',
-            borderRadius: 10,
-            padding: '12px 0',
-            fontSize: '0.9rem',
-            fontWeight: 700,
-            cursor: 'pointer',
-            letterSpacing: '-0.01em',
-          }}
+          style={{ width: '100%', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 10, padding: '12px 0', fontSize: '0.9rem', fontWeight: 700, cursor: 'pointer', letterSpacing: '-0.01em', fontFamily: 'inherit' }}
         >
           Logout
         </button>
@@ -760,14 +690,14 @@ function CallsList({ calls, loading, selectedCallId, onSelectCall }: CallsListPr
             key={call.id}
             style={{
               ...hs.listItem,
-              background: isActive ? '#1e1e1e' : 'transparent',
+              background: isActive ? 'var(--item-active-bg)' : 'transparent',
               borderLeft: `3px solid ${isActive ? 'var(--accent)' : 'transparent'}`,
             }}
             onClick={() => onSelectCall(call.id)}
           >
             <div style={hs.contactAvatar}>{initials(call.other_party_username)}</div>
             <div style={hs.itemInfo}>
-              <span style={{ ...hs.itemName, color: isMissed ? '#ef4444' : '#e5e7eb' }}>
+              <span style={{ ...hs.itemName, color: isMissed ? '#ef4444' : 'var(--text-primary)' }}>
                 {call.other_party_username}
               </span>
               <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
@@ -778,7 +708,7 @@ function CallsList({ calls, loading, selectedCallId, onSelectCall }: CallsListPr
                 </span>
               </div>
             </div>
-            <span style={{ fontSize: '0.68rem', color: '#4b5563', flexShrink: 0 }}>
+            <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', flexShrink: 0 }}>
               {fmtCallTime(call.started_at)}
             </span>
           </button>
@@ -800,12 +730,12 @@ function CallDetailPanel({ call }: { call: CallRecord | null }) {
         alignItems: 'center',
         justifyContent: 'center',
         gap: 14,
-        background: '#0e0e0e',
+        background: 'var(--bg-base)',
       }}>
-        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#374151" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
           <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.61 3.38 2 2 0 0 1 3.6 1h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.81a16 16 0 0 0 6.29 6.29l.91-.91a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z" />
         </svg>
-        <p style={{ color: '#6b7280', fontSize: '0.85rem' }}>No call selected</p>
+        <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>No call selected</p>
       </div>
     );
   }
@@ -822,45 +752,39 @@ function CallDetailPanel({ call }: { call: CallRecord | null }) {
       alignItems: 'center',
       justifyContent: 'center',
       gap: 20,
-      background: '#0e0e0e',
+      background: 'var(--bg-base)',
       padding: '2rem',
     }}>
       <div style={{
-        width: 80,
-        height: 80,
-        borderRadius: '50%',
-        background: '#2a2a2a',
-        color: '#d1d5db',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        fontWeight: 700,
-        fontSize: '1.6rem',
+        width: 80, height: 80, borderRadius: '50%',
+        background: 'var(--avatar-bg)', color: 'var(--avatar-text)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontWeight: 700, fontSize: '1.6rem',
       }}>
         {initials(call.other_party_username)}
       </div>
       <div style={{ textAlign: 'center' }}>
-        <div style={{ fontSize: '1.2rem', fontWeight: 700, color: '#f1f5f9' }}>{call.other_party_username}</div>
+        <div style={{ fontSize: '1.2rem', fontWeight: 700, color: 'var(--text-primary)' }}>{call.other_party_username}</div>
         <div style={{ fontSize: '0.82rem', color: statusColor, marginTop: 4, textTransform: 'capitalize' }}>{call.status}</div>
       </div>
-      <div style={{ background: '#111', border: '1px solid #1e1e1e', borderRadius: 12, padding: '16px 24px', display: 'flex', flexDirection: 'column', gap: 10, minWidth: 240 }}>
+      <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 12, padding: '16px 24px', display: 'flex', flexDirection: 'column', gap: 10, minWidth: 240 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span style={{ fontSize: '0.78rem', color: '#6b7280' }}>Type</span>
-          <span style={{ fontSize: '0.85rem', color: '#d1d5db', textTransform: 'capitalize' }}>{call.call_type}</span>
+          <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Type</span>
+          <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', textTransform: 'capitalize' }}>{call.call_type}</span>
         </div>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span style={{ fontSize: '0.78rem', color: '#6b7280' }}>Direction</span>
-          <span style={{ fontSize: '0.85rem', color: '#d1d5db' }}>{call.is_caller ? 'Outgoing' : 'Incoming'}</span>
+          <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Direction</span>
+          <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{call.is_caller ? 'Outgoing' : 'Incoming'}</span>
         </div>
         {isCompleted && call.duration > 0 && (
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: '0.78rem', color: '#6b7280' }}>Duration</span>
-            <span style={{ fontSize: '0.85rem', color: '#d1d5db' }}>{fmtDuration(call.duration)}</span>
+            <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Duration</span>
+            <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{fmtDuration(call.duration)}</span>
           </div>
         )}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span style={{ fontSize: '0.78rem', color: '#6b7280' }}>Time</span>
-          <span style={{ fontSize: '0.85rem', color: '#d1d5db' }}>{fmtCallTime(call.started_at)}</span>
+          <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Time</span>
+          <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{fmtCallTime(call.started_at)}</span>
         </div>
       </div>
     </div>
@@ -885,6 +809,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
   const [unread, setUnread] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState('');
   const [typingUsers, setTypingUsers] = useState<Set<string>>(new Set());
+  const [settingsPage, setSettingsPage] = useState<'account' | 'appearance'>('account');
 
   // ── Call state ───────────────────────────────────────────────────────────────
   const [activeCall, setActiveCall] = useState<{ partner: string; callType: CallType; isIncoming: boolean } | null>(null);
@@ -1140,7 +1065,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
                     key={c.username}
                     style={{
                       ...hs.listItem,
-                      background: isActive ? '#1e1e1e' : 'transparent',
+                      background: isActive ? 'var(--item-active-bg)' : 'transparent',
                       borderLeft: `3px solid ${isActive ? 'var(--accent)' : 'transparent'}`,
                     }}
                     onClick={() => openContact(c.username)}
@@ -1199,7 +1124,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
                     key={g.id}
                     style={{
                       ...hs.listItem,
-                      background: isActive ? '#1e1e1e' : 'transparent',
+                      background: isActive ? 'var(--item-active-bg)' : 'transparent',
                       borderLeft: `3px solid ${isActive ? 'var(--accent)' : 'transparent'}`,
                     }}
                     onClick={() => openGroup(g.id)}
@@ -1234,7 +1159,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
     }
 
     if (activeTab === 'settings') {
-      return <SettingsListPanel />;
+      return <SettingsListPanel selected={settingsPage} onSelect={setSettingsPage} />;
     }
 
     return null;
@@ -1308,6 +1233,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
           onSetMasterToken={setMasterToken}
           onClearMasterToken={() => setMasterToken(null)}
           onLogout={onLogout}
+          page={settingsPage}
         />
       );
     }
@@ -1582,7 +1508,7 @@ const hs: Record<string, React.CSSProperties> = {
     flexShrink: 0,
   },
   tabBtnActive: {
-    background: '#1a0d0d',
+    background: 'var(--tab-active-bg)',
   },
 
   // List panel
