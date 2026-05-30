@@ -127,8 +127,8 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
       // Flush buffered ICE candidates now that we have the call_id
       const buffered = iceBufRef.current.splice(0);
       buffered.forEach(c => sendCallIceCandidate(token, call_id, partner, c).catch(() => {}));
-    } catch {
-      setError('Could not start call');
+    } catch (err: any) {
+      setError(err?.message || 'Could not start call');
     }
   }, [startLocalMedia, createPc, token, partner, callType]);
 

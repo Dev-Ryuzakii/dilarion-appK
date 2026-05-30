@@ -273,12 +273,17 @@ export async function initiateCall(
   callType: 'audio' | 'video',
   offerSdp?: string,
 ): Promise<{ call_id: number }> {
+  // Backend expects 'voice' not 'audio'
+  const backendCallType = callType === 'audio' ? 'voice' : 'video';
   const res = await fetch(`${BASE}/calls/initiate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ recipient_username: recipientUsername, call_type: callType, offer_sdp: offerSdp }),
+    body: JSON.stringify({ recipient_username: recipientUsername, call_type: backendCallType, offer_sdp: offerSdp }),
   });
-  if (!res.ok) throw new Error('Failed to initiate call');
+  if (!res.ok) {
+    const txt = await res.text().catch(() => res.status.toString());
+    throw new Error(`initiate call failed ${res.status}: ${txt}`);
+  }
   return res.json();
 }
 
