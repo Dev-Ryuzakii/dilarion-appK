@@ -71,12 +71,11 @@ interface EncryptedBubbleProps {
   messageId: number;
   decoyContent: string;
   masterToken: string | null;
-  isMine: boolean;
   onDecrypt: (masterToken: string, messageId: number) => Promise<string>;
   onMasterTokenSaved: (t: string) => void;
 }
 
-function EncryptedBubble({ token, messageId, decoyContent, masterToken, isMine, onDecrypt, onMasterTokenSaved }: EncryptedBubbleProps) {
+function EncryptedBubble({ token, messageId, decoyContent, masterToken, onDecrypt, onMasterTokenSaved }: EncryptedBubbleProps) {
   const [decryptedContent, setDecryptedContent] = useState<string | null>(null);
   const [showing, setShowing] = useState(false);
   const [inputVisible, setInputVisible] = useState(false);
@@ -324,7 +323,6 @@ function GroupMsgBubble({ msg, isMine, myUsername, token, masterToken, onDecrypt
         messageId={msg.id}
         decoyContent={msg.decoy_content || ''}
         masterToken={masterToken}
-        isMine={isMine}
         onDecrypt={onDecrypt}
         onMasterTokenSaved={onMasterTokenSaved}
       />
