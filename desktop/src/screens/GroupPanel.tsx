@@ -53,6 +53,45 @@ function fmtTime(ts: string): string {
   }
 }
 
+function fmtDateLabel(ts: string): string {
+  try {
+    const d = new Date(ts);
+    const today = new Date();
+    const yesterday = new Date(today);
+    yesterday.setDate(today.getDate() - 1);
+    const sameDay = (a: Date, b: Date) =>
+      a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+    if (sameDay(d, today)) return 'Today';
+    if (sameDay(d, yesterday)) return 'Yesterday';
+    return d.toLocaleDateString([], { month: 'long', day: 'numeric', year: d.getFullYear() !== today.getFullYear() ? 'numeric' : undefined });
+  } catch {
+    return '';
+  }
+}
+
+function msgDateKey(ts: string): string {
+  try {
+    const d = new Date(ts);
+    return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+  } catch {
+    return ts;
+  }
+}
+
+function DateSeparator({ label }: { label: string }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '12px 0' }}>
+      <div style={{ flex: 1, height: 1, background: 'var(--border-color)' }} />
+      <span style={{
+        fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 600,
+        background: 'var(--chat-bg)', padding: '2px 10px', borderRadius: 10,
+        border: '1px solid var(--border-color)', whiteSpace: 'nowrap',
+      }}>{label}</span>
+      <div style={{ flex: 1, height: 1, background: 'var(--border-color)' }} />
+    </div>
+  );
+}
+
 // ── Shimmer ────────────────────────────────────────────────────────────────────
 
 function Shimmer({ w, h, r = 8 }: { w: string | number; h: number; r?: number }) {
@@ -157,8 +196,8 @@ function EncryptedBubble({ token, messageId, decoyContent, masterToken, onDecryp
           {loading ? '…' : displayText}
         </span>
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <LockIcon size={10} color="#6b7280" />
-          <span style={{ fontSize: '0.62rem', color: '#6b7280' }}>tap to decrypt</span>
+          <LockIcon size={10} color="var(--text-muted)" />
+          <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)' }}>tap to decrypt</span>
         </div>
       </div>
       {inputVisible && !masterToken && (
@@ -531,18 +570,26 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
             <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: 8 }}>No messages yet.</p>
           </div>
         ) : (
-          messages.map(msg => (
-            <GroupMsgBubble
-              key={msg.id}
-              msg={msg}
-              isMine={msg.sender === myUsername}
-              myUsername={myUsername}
-              token={token}
-              masterToken={masterToken}
-              onDecrypt={handleDecrypt}
-              onMasterTokenSaved={onMasterTokenSaved}
-            />
-          ))
+          messages.reduce<React.ReactNode[]>((acc, msg, i) => {
+            const dateKey = msgDateKey(msg.timestamp);
+            const prevKey = i > 0 ? msgDateKey(messages[i - 1].timestamp) : null;
+            if (dateKey !== prevKey) {
+              acc.push(<DateSeparator key={`sep-${dateKey}`} label={fmtDateLabel(msg.timestamp)} />);
+            }
+            acc.push(
+              <GroupMsgBubble
+                key={msg.id}
+                msg={msg}
+                isMine={msg.sender === myUsername}
+                myUsername={myUsername}
+                token={token}
+                masterToken={masterToken}
+                onDecrypt={handleDecrypt}
+                onMasterTokenSaved={onMasterTokenSaved}
+              />
+            );
+            return acc;
+          }, [])
         )}
         <div ref={bottomRef} />
       </div>

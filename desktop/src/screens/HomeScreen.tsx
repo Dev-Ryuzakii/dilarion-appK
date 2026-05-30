@@ -1475,37 +1475,37 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
           onClick={e => { if (e.target === e.currentTarget) { setShowNewChat(false); setUserSearch(''); } }}
         >
           <div style={{
-            background: '#111',
-            border: '1px solid #2a2a2a',
+            background: 'var(--bg-panel)',
+            border: '1px solid var(--border-color)',
             borderRadius: 16,
             width: 380,
             maxHeight: '70vh',
             display: 'flex',
             flexDirection: 'column',
             overflow: 'hidden',
-            boxShadow: '0 24px 80px rgba(0,0,0,0.8)',
+            boxShadow: '0 24px 80px rgba(0,0,0,0.4)',
           }}>
             {/* Header */}
             <div style={{
               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              padding: '16px 20px', borderBottom: '1px solid #1e1e1e', flexShrink: 0,
+              padding: '16px 20px', borderBottom: '1px solid var(--border-color)', flexShrink: 0,
             }}>
-              <span style={{ fontWeight: 800, fontSize: '1rem', color: '#f1f5f9' }}>New Chat</span>
+              <span style={{ fontWeight: 800, fontSize: '1rem', color: 'var(--text-primary)' }}>New Chat</span>
               <button
                 onClick={() => { setShowNewChat(false); setUserSearch(''); }}
-                style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#6b7280', fontSize: '1.1rem', lineHeight: 1 }}
+                style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: '1.1rem', lineHeight: 1 }}
               >✕</button>
             </div>
             {/* Search */}
             <div style={{
               display: 'flex', alignItems: 'center', gap: 8,
-              margin: '10px 12px', background: '#1a1a1a',
-              border: '1px solid #222', borderRadius: 10, padding: '8px 12px', flexShrink: 0,
+              margin: '10px 12px', background: 'var(--input-field-bg)',
+              border: '1px solid var(--border-color)', borderRadius: 10, padding: '8px 12px', flexShrink: 0,
             }}>
               <SearchIconSvg />
               <input
                 autoFocus
-                style={{ flex: 1, background: 'transparent', border: 'none', color: '#d1d5db', fontSize: '0.85rem' }}
+                style={{ flex: 1, background: 'transparent', border: 'none', color: 'var(--text-primary)', fontSize: '0.85rem' }}
                 placeholder="Search users"
                 value={userSearch}
                 onChange={e => setUserSearch(e.target.value)}
@@ -1529,13 +1529,13 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
                         <div style={{
                           position: 'absolute', bottom: 1, right: 1,
                           width: 11, height: 11, borderRadius: '50%',
-                          background: u.is_active ? '#25d366' : '#374151',
-                          border: '2px solid #111',
+                          background: u.is_active ? '#25d366' : 'var(--text-muted)',
+                          border: '2px solid var(--bg-panel)',
                         }} />
                       </div>
                       <div style={hs.itemInfo}>
                         <span style={hs.itemName}>{u.username}</span>
-                        <span style={{ fontSize: '0.72rem', color: u.is_active ? '#25d366' : '#6b7280' }}>
+                        <span style={{ fontSize: '0.72rem', color: u.is_active ? '#25d366' : 'var(--text-muted)' }}>
                           {u.is_active ? 'online' : 'offline'}
                         </span>
                       </div>
