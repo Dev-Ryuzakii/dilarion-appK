@@ -135,10 +135,10 @@ function EncryptedBubble({ token, messageId, decoyContent, masterToken, isMine, 
   if (showing && decryptedContent !== null) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-        <span style={{ fontSize: '0.88rem', lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: '#f1f5f9' }}>
+        <span style={{ fontSize: '0.88rem', lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'var(--text-primary)' }}>
           {decryptedContent}
         </span>
-        <span style={{ fontSize: '0.65rem', color: '#6b7280', fontStyle: 'italic' }}>Clears in 30s</span>
+        <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>Clears in 30s</span>
       </div>
     );
   }
@@ -153,7 +153,7 @@ function EncryptedBubble({ token, messageId, decoyContent, masterToken, isMine, 
       >
         <span style={{
           fontSize: '0.88rem', lineHeight: 1.5, whiteSpace: 'pre-wrap',
-          wordBreak: 'break-word', color: isMine ? '#d1b8a8' : '#c9c9c9', userSelect: 'none',
+          wordBreak: 'break-word', color: 'var(--text-secondary)', userSelect: 'none',
         }}>
           {loading ? '…' : displayText}
         </span>
@@ -170,7 +170,7 @@ function EncryptedBubble({ token, messageId, decoyContent, masterToken, isMine, 
             value={inputValue}
             onChange={e => setInputValue(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') handleSubmitToken(); }}
-            style={{ flex: 1, background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, color: '#f1f5f9', fontSize: '0.8rem', padding: '6px 10px' }}
+            style={{ flex: 1, background: 'var(--input-field-bg)', border: '1px solid var(--border-color)', borderRadius: 8, color: 'var(--text-primary)', fontSize: '0.8rem', padding: '6px 10px' }}
             autoFocus
             onClick={e => e.stopPropagation()}
           />
@@ -191,7 +191,7 @@ function EncryptedBubble({ token, messageId, decoyContent, masterToken, isMine, 
 
 function PrivateTagBubble({ recipient }: { recipient: string }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px', background: '#1a1218', border: '1px solid #3b1f2b', borderRadius: 12 }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px', background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 12 }}>
       <LockIcon size={13} color="#a78bfa" />
       <span style={{ fontSize: '0.82rem', color: '#a78bfa', fontStyle: 'italic' }}>
         Private message for <strong style={{ color: '#c4b5fd' }}>@{recipient}</strong>
@@ -240,9 +240,9 @@ function MediaBubble({ token, mediaId, contentType }: { token: string; mediaId: 
 
   if (loadError) {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 10 }}>
-        {isVoice(contentType) ? <MicIconSvg size={22} color="#6b7280" /> : <PaperclipIconSvg size={22} color="#6b7280" />}
-        <span style={{ fontSize: '0.78rem', color: '#6b7280', fontStyle: 'italic' }}>Viewed &amp; deleted</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 10 }}>
+        {isVoice(contentType) ? <MicIconSvg size={22} color="var(--text-muted)" /> : <PaperclipIconSvg size={22} color="var(--text-muted)" />}
+        <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>Viewed &amp; deleted</span>
       </div>
     );
   }
@@ -260,16 +260,16 @@ function MediaBubble({ token, mediaId, contentType }: { token: string; mediaId: 
       );
     }
     return (
-      <a href={objectUrl} download={mediaId} style={{ color: '#93c5fd', fontSize: '0.83rem', textDecoration: 'underline' }}>
+      <a href={objectUrl} download={mediaId} style={{ color: 'var(--accent)', fontSize: '0.83rem', textDecoration: 'underline' }}>
         Download file
       </a>
     );
   }
 
   let label = 'File';
-  let iconEl: React.ReactNode = <PaperclipIconSvg size={22} color="#9ca3af" />;
-  if (isImage(contentType)) { iconEl = <CameraIcon size={22} color="#9ca3af" />; label = 'Photo'; }
-  else if (isVoice(contentType)) { iconEl = <MicIconSvg size={22} color="#9ca3af" />; label = 'Voice note'; }
+  let iconEl: React.ReactNode = <PaperclipIconSvg size={22} color="var(--text-muted)" />;
+  if (isImage(contentType)) { iconEl = <CameraIcon size={22} color="var(--text-muted)" />; label = 'Photo'; }
+  else if (isVoice(contentType)) { iconEl = <MicIconSvg size={22} color="var(--text-muted)" />; label = 'Voice note'; }
 
   return (
     <button
@@ -279,12 +279,12 @@ function MediaBubble({ token, mediaId, contentType }: { token: string; mediaId: 
         display: 'flex',
         alignItems: 'center',
         gap: 10,
-        background: '#1e1e1e',
-        border: '1px solid #2a2a2a',
+        background: 'var(--bg-card)',
+        border: '1px solid var(--border-color)',
         borderRadius: 10,
         padding: '12px 16px',
         cursor: loading ? 'wait' : 'pointer',
-        color: '#9ca3af',
+        color: 'var(--text-muted)',
         fontSize: '0.85rem',
         opacity: loading ? 0.7 : 1,
       }}
@@ -333,14 +333,14 @@ function GroupMsgBubble({ msg, isMine, myUsername, token, masterToken, onDecrypt
     body = <MediaBubble token={token} mediaId={mediaId} contentType={ct} />;
   } else {
     body = (
-      <span style={{ fontSize: '0.88rem', lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+      <span style={{ fontSize: '0.88rem', lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'inherit' }}>
         {msg.content}
       </span>
     );
   }
 
   const encryptedStyle: React.CSSProperties = isEncrypted(ct)
-    ? { background: isMine ? '#1a1218' : '#111827', border: '1px solid #374151' }
+    ? { background: 'var(--bg-card)', border: '1px solid var(--border-color)' }
     : {};
 
   return (
@@ -351,7 +351,7 @@ function GroupMsgBubble({ msg, isMine, myUsername, token, masterToken, onDecrypt
       marginBottom: 4,
     }}>
       {!isMine && (
-        <span style={{ fontSize: '0.68rem', color: '#6b7280', marginBottom: 2, marginLeft: 4 }}>
+        <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginBottom: 2, marginLeft: 4 }}>
           {msg.sender}
           {hasRecipient && !isPrivateTagged && (
             <span style={{ marginLeft: 4, color: '#a78bfa' }}>→ @{msg.recipient}</span>
@@ -524,13 +524,13 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
           <MessageSkeleton />
         ) : messages.length === 0 ? (
           <div style={gs.emptyChat}>
-            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#374151" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
               <circle cx="9" cy="7" r="4" />
               <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
               <path d="M16 3.13a4 4 0 0 1 0 7.75" />
             </svg>
-            <p style={{ color: '#6b7280', fontSize: '0.85rem', marginTop: 8 }}>No messages yet.</p>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: 8 }}>No messages yet.</p>
           </div>
         ) : (
           messages.map(msg => (
@@ -554,8 +554,8 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
         <div style={{ position: 'relative', flexShrink: 0 }}>
           <div style={{
             position: 'absolute', bottom: 0, left: 16, right: 16,
-            background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 10,
-            maxHeight: 180, overflowY: 'auto', zIndex: 10, boxShadow: '0 -4px 16px rgba(0,0,0,0.4)',
+            background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 10,
+            maxHeight: 180, overflowY: 'auto', zIndex: 10, boxShadow: '0 -4px 16px rgba(0,0,0,0.15)',
           }}>
             {members
               .filter(m => m.username !== myUsername && m.username.toLowerCase().includes(mentionQuery))
@@ -565,20 +565,20 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
                   onMouseDown={e => { e.preventDefault(); pickMember(m.username); }}
                   style={{
                     width: '100%', textAlign: 'left', padding: '10px 14px',
-                    background: 'transparent', border: 'none', color: '#f1f5f9',
+                    background: 'transparent', border: 'none', color: 'var(--text-primary)',
                     fontSize: '0.85rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8,
                   }}
-                  onMouseEnter={e => (e.currentTarget.style.background = '#252525')}
+                  onMouseEnter={e => (e.currentTarget.style.background = 'var(--item-hover)')}
                   onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
                 >
-                  <span style={{ fontSize: '0.7rem', background: '#374151', color: '#9ca3af', borderRadius: 4, padding: '1px 5px' }}>@</span>
+                  <span style={{ fontSize: '0.7rem', background: 'var(--bg-card)', color: 'var(--text-muted)', borderRadius: 4, padding: '1px 5px' }}>@</span>
                   {m.username}
-                  <span style={{ marginLeft: 'auto', fontSize: '0.67rem', color: '#4b5563' }}>{m.role}</span>
+                  <span style={{ marginLeft: 'auto', fontSize: '0.67rem', color: 'var(--text-muted)' }}>{m.role}</span>
                 </button>
               ))
             }
             {members.filter(m => m.username !== myUsername && m.username.toLowerCase().includes(mentionQuery)).length === 0 && (
-              <p style={{ padding: '10px 14px', color: '#4b5563', fontSize: '0.8rem' }}>No members match</p>
+              <p style={{ padding: '10px 14px', color: 'var(--text-muted)', fontSize: '0.8rem' }}>No members match</p>
             )}
           </div>
         </div>
@@ -588,13 +588,13 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
       <div style={{ ...gs.inputBar, flexDirection: 'column', gap: 6, alignItems: 'stretch' }}>
         {taggedUser && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ fontSize: '0.75rem', color: '#a78bfa', background: '#1e1a2e', border: '1px solid #4c1d95', borderRadius: 8, padding: '3px 10px', display: 'flex', alignItems: 'center', gap: 5 }}>
+            <span style={{ fontSize: '0.75rem', color: '#a78bfa', background: 'var(--bg-card)', border: '1px solid #4c1d95', borderRadius: 8, padding: '3px 10px', display: 'flex', alignItems: 'center', gap: 5 }}>
               <LockIcon size={10} color="#a78bfa" />
               Private → <strong>@{taggedUser}</strong>
             </span>
             <button
               onClick={() => setTaggedUser(null)}
-              style={{ background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer', fontSize: '0.75rem', padding: '2px 6px' }}
+              style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '0.75rem', padding: '2px 6px' }}
             >✕</button>
           </div>
         )}
@@ -634,24 +634,24 @@ function SendIcon() {
 
 const ms: Record<string, React.CSSProperties> = {
   bubbleMine: {
-    background: '#2a1515',
+    background: 'var(--bubble-mine-bg)',
     borderRadius: '18px 18px 4px 18px',
     padding: '10px 14px',
     maxWidth: '68%',
-    color: '#f1f5f9',
+    color: 'var(--bubble-mine-text)',
     wordBreak: 'break-word',
   },
   bubbleTheirs: {
-    background: '#1a1a1a',
+    background: 'var(--bubble-theirs-bg)',
     borderRadius: '18px 18px 18px 4px',
     padding: '10px 14px',
     maxWidth: '68%',
-    color: '#f1f5f9',
+    color: 'var(--bubble-theirs-text)',
     wordBreak: 'break-word',
   },
   ts: {
     fontSize: '0.67rem',
-    color: '#4b5563',
+    color: 'var(--text-muted)',
     marginTop: 3,
     marginLeft: 4,
     marginRight: 4,
@@ -664,15 +664,16 @@ const gs: Record<string, React.CSSProperties> = {
     flexDirection: 'column',
     height: '100%',
     overflow: 'hidden',
-    background: '#0e0e0e',
+    background: 'var(--chat-bg)',
+    backgroundImage: 'var(--chat-bg-image)',
   },
   header: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
     padding: '12px 20px',
-    borderBottom: '1px solid #1e1e1e',
-    background: '#141414',
+    borderBottom: '1px solid var(--border-color)',
+    background: 'var(--header-bg)',
     flexShrink: 0,
   },
   headerLeft: {
@@ -695,11 +696,11 @@ const gs: Record<string, React.CSSProperties> = {
   groupName: {
     fontSize: '0.92rem',
     fontWeight: 700,
-    color: '#f1f5f9',
+    color: 'var(--text-primary)',
   },
   groupMeta: {
     fontSize: '0.72rem',
-    color: '#6b7280',
+    color: 'var(--text-muted)',
     marginTop: 2,
   },
   messagesArea: {
@@ -723,17 +724,17 @@ const gs: Record<string, React.CSSProperties> = {
     alignItems: 'center',
     gap: 8,
     padding: '10px 16px',
-    borderTop: '1px solid #1e1e1e',
-    background: '#141414',
+    borderTop: '1px solid var(--border-color)',
+    background: 'var(--input-bar-bg)',
     flexShrink: 0,
     minHeight: 60,
   },
   textInput: {
     flex: 1,
-    background: '#1a1a1a',
-    border: '1px solid #2a2a2a',
+    background: 'var(--input-field-bg)',
+    border: '1px solid var(--border-color)',
     borderRadius: 24,
-    color: '#f1f5f9',
+    color: 'var(--text-primary)',
     fontSize: '0.88rem',
     padding: '10px 16px',
     resize: 'none',
@@ -743,7 +744,7 @@ const gs: Record<string, React.CSSProperties> = {
     fontFamily: 'inherit',
   },
   sendBtn: {
-    background: '#c0392b',
+    background: 'var(--accent)',
     color: '#fff',
     width: 40,
     height: 40,
