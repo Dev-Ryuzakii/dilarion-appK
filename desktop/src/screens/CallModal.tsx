@@ -63,8 +63,11 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
   const remoteAudioRef = useRef<HTMLAudioElement>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const callIdRef = useRef<number | null>(incomingCallId ?? null);
-  // Buffer ICE candidates generated before callIdRef is set
+  // Buffer outgoing ICE candidates before callId is set
   const iceBufRef = useRef<RTCIceCandidateInit[]>([]);
+  // Buffer incoming ICE candidates before remote description is set
+  const remoteIceBufRef = useRef<RTCIceCandidateInit[]>([]);
+  const remoteDescSetRef = useRef(false);
 
   // ── WebRTC setup ─────────────────────────────────────────────────────────────
 
@@ -92,13 +95,21 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
       }
     };
 
+    const markConnected = () => {
+      setState(s => {
+        if (s === 'connected') return s;
+        if (!timerRef.current) timerRef.current = setInterval(() => setDuration(d => d + 1), 1000);
+        return 'connected';
+      });
+    };
+
     pc.onconnectionstatechange = () => {
-      if (pc.connectionState === 'connected') {
-        setState('connected');
-        timerRef.current = setInterval(() => setDuration(d => d + 1), 1000);
-      } else if (['failed', 'disconnected', 'closed'].includes(pc.connectionState)) {
-        handleEnd();
-      }
+      if (pc.connectionState === 'connected') markConnected();
+      else if (['failed', 'disconnected', 'closed'].includes(pc.connectionState)) handleEnd();
+    };
+
+    pc.oniceconnectionstatechange = () => {
+      if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') markConnected();
     };
 
     pcRef.current = pc;
@@ -153,6 +164,7 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
     let answerSdp: string | undefined;
     if (incomingOfferSdp) {
       await pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: incomingOfferSdp }));
+      remoteDescSetRef.current = true;
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
       answerSdp = answer.sdp;
@@ -177,6 +189,12 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
               await pcRef.current.setRemoteDescription(
                 new RTCSessionDescription({ type: 'answer', sdp: data.answer_sdp }),
               );
+              remoteDescSetRef.current = true;
+              // Flush any ICE candidates that arrived before remote desc was set
+              const queued = remoteIceBufRef.current.splice(0);
+              for (const c of queued) {
+                try { await pcRef.current.addIceCandidate(new RTCIceCandidate(c)); } catch {}
+              }
             } catch {}
           }
         } else if (['declined', 'decline', 'end', 'busy'].includes(data.status)) {
@@ -185,11 +203,15 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
         return;
       }
 
-      // ice_candidate from backend
+      // ice_candidate from backend — queue if remote desc not yet set
       if (msg.type === 'ice_candidate' && Number(data.call_id) === callIdRef.current) {
         const pc = pcRef.current;
         if (!pc || !data.candidate) return;
-        try { await pc.addIceCandidate(new RTCIceCandidate(data.candidate)); } catch {}
+        if (!remoteDescSetRef.current) {
+          remoteIceBufRef.current.push(data.candidate);
+        } else {
+          try { await pc.addIceCandidate(new RTCIceCandidate(data.candidate)); } catch {}
+        }
         return;
       }
 
@@ -288,11 +310,12 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
         {/* Video area */}
         {isVideo && (
           <div style={cs.videoArea}>
-            {/* Remote */}
+            {/* Remote video — audio comes via remoteAudioRef to avoid WKWebView autoplay issues */}
             <video
               ref={remoteVideoRef}
               autoPlay
               playsInline
+              muted
               style={{ width: '100%', height: '100%', objectFit: 'cover', background: '#000', borderRadius: 14 }}
             />
             {/* Local PiP */}
@@ -303,6 +326,8 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
               muted
               style={cs.localPip}
             />
+            {/* Dedicated audio output for remote stream */}
+            <audio ref={remoteAudioRef} autoPlay style={{ display: 'none' }} />
           </div>
         )}
 
