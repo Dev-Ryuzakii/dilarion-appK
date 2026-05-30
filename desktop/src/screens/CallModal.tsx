@@ -29,6 +29,10 @@ interface Props {
 const ICE_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
+  // TURN relay — required for calls across different networks (WiFi ↔ mobile data)
+  { urls: 'turn:a.relay.metered.ca:80',             username: 'openrelayproject', credential: 'openrelayproject' },
+  { urls: 'turn:a.relay.metered.ca:443',            username: 'openrelayproject', credential: 'openrelayproject' },
+  { urls: 'turn:a.relay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
 ];
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -56,6 +60,7 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
   const screenStreamRef = useRef<MediaStream | null>(null);
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
+  const remoteAudioRef = useRef<HTMLAudioElement>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const callIdRef = useRef<number | null>(incomingCallId ?? null);
   // Buffer ICE candidates generated before callIdRef is set
@@ -77,8 +82,13 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
     };
 
     pc.ontrack = (e) => {
-      if (remoteVideoRef.current && e.streams[0]) {
-        remoteVideoRef.current.srcObject = e.streams[0];
+      const stream = e.streams[0];
+      if (!stream) return;
+      if (remoteVideoRef.current) remoteVideoRef.current.srcObject = stream;
+      // Dedicated audio element ensures audio plays even when video element is hidden
+      if (remoteAudioRef.current) {
+        remoteAudioRef.current.srcObject = stream;
+        remoteAudioRef.current.play().catch(() => {});
       }
     };
 
@@ -196,6 +206,7 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
   function stopAllMedia() {
     if (localVideoRef.current) localVideoRef.current.srcObject = null;
     if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
+    if (remoteAudioRef.current) { remoteAudioRef.current.pause(); remoteAudioRef.current.srcObject = null; }
     localStreamRef.current?.getTracks().forEach(t => t.stop());
     screenStreamRef.current?.getTracks().forEach(t => t.stop());
     localStreamRef.current = null;
@@ -301,8 +312,9 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
             <div style={cs.bigAvatar}>
               {partner.slice(0, 2).toUpperCase()}
             </div>
-            {localVideoRef && <video ref={localVideoRef} autoPlay playsInline muted style={{ display: 'none' }} />}
-            {remoteVideoRef && <video ref={remoteVideoRef} autoPlay playsInline style={{ display: 'none' }} />}
+            <video ref={localVideoRef} autoPlay playsInline muted style={{ display: 'none' }} />
+            <video ref={remoteVideoRef} autoPlay playsInline style={{ display: 'none' }} />
+            <audio ref={remoteAudioRef} autoPlay style={{ display: 'none' }} />
           </div>
         )}
 
