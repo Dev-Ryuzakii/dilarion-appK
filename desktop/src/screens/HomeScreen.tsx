@@ -851,6 +851,9 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
   // ── Call state ───────────────────────────────────────────────────────────────
   const [activeCall, setActiveCall] = useState<{ partner: string; callType: CallType; isIncoming: boolean; callId?: number; offerSdp?: string } | null>(null);
   const [incomingCall, setIncomingCall] = useState<IncomingCall | null>(null);
+  const [callTokenInput, setCallTokenInput] = useState('');
+  const [callTokenError, setCallTokenError] = useState<string | null>(null);
+  const [callTokenLoading, setCallTokenLoading] = useState(false);
 
   // ── New-chat modal state ─────────────────────────────────────────────────────
   const [showNewChat, setShowNewChat] = useState(false);
@@ -1367,7 +1370,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
             display: 'flex',
             flexDirection: 'column',
             gap: 14,
-            minWidth: 280,
+            minWidth: 300,
             boxShadow: '0 20px 60px rgba(0,0,0,0.8)',
             pointerEvents: 'all',
           }}>
@@ -1387,10 +1390,44 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
                 </div>
               </div>
             </div>
+
+            {/* Master token required to accept */}
+            {!masterToken && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <span style={{ fontSize: '0.72rem', color: '#9ca3af' }}>Enter master token to accept</span>
+                <input
+                  type="password"
+                  placeholder="Master token"
+                  value={callTokenInput}
+                  onChange={e => { setCallTokenInput(e.target.value); setCallTokenError(null); }}
+                  onKeyDown={async e => {
+                    if (e.key === 'Enter') {
+                      const trimmed = callTokenInput.trim();
+                      if (!trimmed) return;
+                      setCallTokenLoading(true);
+                      const ok = await confirmMasterToken(token, trimmed).catch(() => false);
+                      setCallTokenLoading(false);
+                      if (ok) { setMasterToken(trimmed); setCallTokenError(null); }
+                      else setCallTokenError('Invalid master token');
+                    }
+                  }}
+                  style={{
+                    background: '#2a2a2a', border: '1px solid #3a3a3a', borderRadius: 8,
+                    color: '#f1f5f9', fontSize: '0.82rem', padding: '8px 12px',
+                  }}
+                  autoFocus
+                />
+                {callTokenError && <span style={{ fontSize: '0.7rem', color: '#ef4444' }}>{callTokenError}</span>}
+                {callTokenLoading && <span style={{ fontSize: '0.7rem', color: '#9ca3af' }}>Verifying…</span>}
+              </div>
+            )}
+
             <div style={{ display: 'flex', gap: 10 }}>
               <button
                 onClick={() => {
                   stopRinging();
+                  setCallTokenInput('');
+                  setCallTokenError(null);
                   if (incomingCall.callId) {
                     performCallAction(token, incomingCall.callId, 'decline').catch(() => {});
                   }
@@ -1405,15 +1442,19 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
                 Decline
               </button>
               <button
+                disabled={!masterToken}
                 onClick={() => {
+                  if (!masterToken) return;
                   stopRinging();
+                  setCallTokenInput('');
+                  setCallTokenError(null);
                   setActiveCall({ partner: incomingCall.from, callType: incomingCall.callType, isIncoming: true, callId: incomingCall.callId, offerSdp: incomingCall.offerSdp });
                   setIncomingCall(null);
                 }}
                 style={{
-                  flex: 1, background: '#25d366', border: 'none', borderRadius: 10,
-                  color: '#fff', fontWeight: 700, fontSize: '0.85rem',
-                  padding: '10px 0', cursor: 'pointer',
+                  flex: 1, background: masterToken ? '#25d366' : '#1a3a2a', border: 'none', borderRadius: 10,
+                  color: masterToken ? '#fff' : '#6b7280', fontWeight: 700, fontSize: '0.85rem',
+                  padding: '10px 0', cursor: masterToken ? 'pointer' : 'not-allowed',
                 }}
               >
                 Accept

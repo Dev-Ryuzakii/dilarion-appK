@@ -7,5 +7,9 @@
         <key>NSAllowsArbitraryLoads</key>
         <true/>
     </dict>
+    <key>NSCameraUsageDescription</key>
+    <string>Dilarion needs camera access for video calls.</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Dilarion needs microphone access for calls.</string>
 </dict>
 </plist>
