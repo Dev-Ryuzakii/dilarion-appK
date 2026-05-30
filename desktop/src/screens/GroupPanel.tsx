@@ -2,7 +2,9 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import {
   ChatMessage,
   Group,
+  GroupMember,
   getGroupMessages,
+  getGroupMembers,
   sendGroupMessage,
   downloadMedia,
   decryptMessage,
@@ -185,6 +187,19 @@ function EncryptedBubble({ token, messageId, decoyContent, masterToken, isMine, 
   );
 }
 
+// ── PrivateTagBubble (shown to non-recipients) ────────────────────────────────
+
+function PrivateTagBubble({ recipient }: { recipient: string }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px', background: '#1a1218', border: '1px solid #3b1f2b', borderRadius: 12 }}>
+      <LockIcon size={13} color="#a78bfa" />
+      <span style={{ fontSize: '0.82rem', color: '#a78bfa', fontStyle: 'italic' }}>
+        Private message for <strong style={{ color: '#c4b5fd' }}>@{recipient}</strong>
+      </span>
+    </div>
+  );
+}
+
 // ── MediaBubble ────────────────────────────────────────────────────────────────
 
 function MediaBubble({ token, mediaId, contentType }: { token: string; mediaId: string; contentType: string }) {
@@ -285,18 +300,24 @@ function MediaBubble({ token, mediaId, contentType }: { token: string; mediaId: 
 interface GroupMsgBubbleProps {
   msg: ChatMessage;
   isMine: boolean;
+  myUsername: string;
   token: string;
   masterToken: string | null;
   onDecrypt: (masterToken: string, messageId: number) => Promise<string>;
   onMasterTokenSaved: (t: string) => void;
 }
 
-function GroupMsgBubble({ msg, isMine, token, masterToken, onDecrypt, onMasterTokenSaved }: GroupMsgBubbleProps) {
+function GroupMsgBubble({ msg, isMine, myUsername, token, masterToken, onDecrypt, onMasterTokenSaved }: GroupMsgBubbleProps) {
   const ct = msg.content_type;
   const mediaId = msg.content;
+  const isPrivateTagged = ct === 'private_tagged';
+  const hasRecipient = msg.recipient && msg.recipient !== 'group';
+  const isForMe = hasRecipient && msg.recipient === myUsername;
 
   let body: React.ReactNode;
-  if (isEncrypted(ct)) {
+  if (isPrivateTagged) {
+    body = <PrivateTagBubble recipient={msg.recipient || '?'} />;
+  } else if (isEncrypted(ct)) {
     body = (
       <EncryptedBubble
         token={token}
@@ -332,6 +353,19 @@ function GroupMsgBubble({ msg, isMine, token, masterToken, onDecrypt, onMasterTo
       {!isMine && (
         <span style={{ fontSize: '0.68rem', color: '#6b7280', marginBottom: 2, marginLeft: 4 }}>
           {msg.sender}
+          {hasRecipient && !isPrivateTagged && (
+            <span style={{ marginLeft: 4, color: '#a78bfa' }}>→ @{msg.recipient}</span>
+          )}
+        </span>
+      )}
+      {isMine && hasRecipient && !isPrivateTagged && (
+        <span style={{ fontSize: '0.67rem', color: '#a78bfa', marginBottom: 2, marginRight: 4 }}>
+          → @{msg.recipient}
+        </span>
+      )}
+      {isForMe && !isMine && (
+        <span style={{ fontSize: '0.67rem', color: '#a78bfa', marginBottom: 2, marginLeft: 4, display: 'flex', alignItems: 'center', gap: 3 }}>
+          <LockIcon size={9} color="#a78bfa" /> Only you can read this
         </span>
       )}
       <div style={isMine
@@ -373,7 +407,11 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
   const [loading, setLoading] = useState(true);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
+  const [taggedUser, setTaggedUser] = useState<string | null>(null);
+  const [members, setMembers] = useState<GroupMember[]>([]);
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const loadMessages = useCallback(async () => {
     try {
@@ -389,8 +427,11 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
   useEffect(() => {
     setLoading(true);
     setMessages([]);
+    setTaggedUser(null);
+    setText('');
     loadMessages();
-  }, [loadMessages]);
+    getGroupMembers(token, group.id).then(setMembers).catch(() => {});
+  }, [loadMessages, token, group.id]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -418,15 +459,39 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
     const trimmed = text.trim();
     if (!trimmed || sending) return;
     setSending(true);
+    const savedTagged = taggedUser;
     setText('');
+    setTaggedUser(null);
+    setMentionQuery(null);
     try {
-      await sendGroupMessage(token, group.id, trimmed);
+      await sendGroupMessage(token, group.id, trimmed, savedTagged ?? undefined);
       await loadMessages();
     } catch {
       setText(trimmed);
+      setTaggedUser(savedTagged);
     } finally {
       setSending(false);
     }
+  }
+
+  function handleTextChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
+    const val = e.target.value;
+    setText(val);
+    // detect @mention at end of input
+    const match = val.match(/@(\w*)$/);
+    if (match) {
+      setMentionQuery(match[1].toLowerCase());
+    } else {
+      setMentionQuery(null);
+    }
+  }
+
+  function pickMember(username: string) {
+    setTaggedUser(username);
+    // strip trailing @mention from text
+    setText(t => t.replace(/@\w*$/, ''));
+    setMentionQuery(null);
+    inputRef.current?.focus();
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -473,6 +538,7 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
               key={msg.id}
               msg={msg}
               isMine={msg.sender === myUsername}
+              myUsername={myUsername}
               token={token}
               masterToken={masterToken}
               onDecrypt={handleDecrypt}
@@ -483,21 +549,71 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
         <div ref={bottomRef} />
       </div>
 
+      {/* @mention dropdown */}
+      {mentionQuery !== null && (
+        <div style={{ position: 'relative', flexShrink: 0 }}>
+          <div style={{
+            position: 'absolute', bottom: 0, left: 16, right: 16,
+            background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 10,
+            maxHeight: 180, overflowY: 'auto', zIndex: 10, boxShadow: '0 -4px 16px rgba(0,0,0,0.4)',
+          }}>
+            {members
+              .filter(m => m.username !== myUsername && m.username.toLowerCase().includes(mentionQuery))
+              .map(m => (
+                <button
+                  key={m.username}
+                  onMouseDown={e => { e.preventDefault(); pickMember(m.username); }}
+                  style={{
+                    width: '100%', textAlign: 'left', padding: '10px 14px',
+                    background: 'transparent', border: 'none', color: '#f1f5f9',
+                    fontSize: '0.85rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8,
+                  }}
+                  onMouseEnter={e => (e.currentTarget.style.background = '#252525')}
+                  onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                >
+                  <span style={{ fontSize: '0.7rem', background: '#374151', color: '#9ca3af', borderRadius: 4, padding: '1px 5px' }}>@</span>
+                  {m.username}
+                  <span style={{ marginLeft: 'auto', fontSize: '0.67rem', color: '#4b5563' }}>{m.role}</span>
+                </button>
+              ))
+            }
+            {members.filter(m => m.username !== myUsername && m.username.toLowerCase().includes(mentionQuery)).length === 0 && (
+              <p style={{ padding: '10px 14px', color: '#4b5563', fontSize: '0.8rem' }}>No members match</p>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Input bar */}
-      <div style={gs.inputBar}>
-        <textarea
-          style={gs.textInput}
-          placeholder="Type a message"
-          value={text}
-          onChange={e => setText(e.target.value)}
-          onKeyDown={handleKeyDown}
-          rows={1}
-        />
-        {text.trim() && (
-          <button style={gs.sendBtn} onClick={handleSend} disabled={sending} title="Send">
-            <SendIcon />
-          </button>
+      <div style={{ ...gs.inputBar, flexDirection: 'column', gap: 6, alignItems: 'stretch' }}>
+        {taggedUser && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontSize: '0.75rem', color: '#a78bfa', background: '#1e1a2e', border: '1px solid #4c1d95', borderRadius: 8, padding: '3px 10px', display: 'flex', alignItems: 'center', gap: 5 }}>
+              <LockIcon size={10} color="#a78bfa" />
+              Private → <strong>@{taggedUser}</strong>
+            </span>
+            <button
+              onClick={() => setTaggedUser(null)}
+              style={{ background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer', fontSize: '0.75rem', padding: '2px 6px' }}
+            >✕</button>
+          </div>
         )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <textarea
+            ref={inputRef}
+            style={gs.textInput}
+            placeholder={taggedUser ? `Private message to @${taggedUser}…` : 'Type a message or @ to tag someone'}
+            value={text}
+            onChange={handleTextChange}
+            onKeyDown={handleKeyDown}
+            rows={1}
+          />
+          {text.trim() && (
+            <button style={gs.sendBtn} onClick={handleSend} disabled={sending} title="Send">
+              <SendIcon />
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );

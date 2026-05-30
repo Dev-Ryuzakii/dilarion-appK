@@ -8,6 +8,7 @@ import android.os.Build
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.dilarion.app.data.api.ApiService
+import com.dilarion.app.data.model.GroupMember
 import com.dilarion.app.data.model.MediaItem
 import com.dilarion.app.data.model.Message
 import com.dilarion.app.data.model.SendDmRequest
@@ -53,6 +54,9 @@ data class ChatUiState(
     val isRecording: Boolean = false,
     val recordingSeconds: Int = 0,
     val playingMediaId: String? = null,
+    val groupMembers: List<GroupMember> = emptyList(),
+    val taggedUser: String? = null,
+    val mentionQuery: String? = null,
 )
 
 @HiltViewModel
@@ -82,8 +86,27 @@ class ChatViewModel @Inject constructor(
             _uiState.value = _uiState.value.copy(currentUsername = me, savedMasterToken = masterToken)
             loadMessages()
             if (gId == null) loadMedia()
+            else loadGroupMembers(gId)
             observeWebSocket()
         }
+    }
+
+    private fun loadGroupMembers(gId: Int) {
+        viewModelScope.launch {
+            val token = sessionManager.sessionToken.first() ?: return@launch
+            runCatching {
+                val members = apiService.getGroupMembers("Bearer $token", gId).body() ?: emptyList()
+                _uiState.value = _uiState.value.copy(groupMembers = members)
+            }
+        }
+    }
+
+    fun setTaggedUser(username: String?) {
+        _uiState.value = _uiState.value.copy(taggedUser = username, mentionQuery = null)
+    }
+
+    fun setMentionQuery(query: String?) {
+        _uiState.value = _uiState.value.copy(mentionQuery = query)
     }
 
     fun unlock(enteredToken: String): Boolean {
@@ -136,17 +159,17 @@ class ChatViewModel @Inject constructor(
 
     fun sendMessage(text: String) {
         if (text.isBlank()) return
+        val tagged = _uiState.value.taggedUser
         viewModelScope.launch {
             val token = sessionManager.sessionToken.first() ?: return@launch
             val bearer = "Bearer $token"
             val me = _uiState.value.currentUsername
-            _uiState.value = _uiState.value.copy(isSending = true)
+            _uiState.value = _uiState.value.copy(isSending = true, taggedUser = null, mentionQuery = null)
 
-            // Optimistic: show message immediately before server confirms
             val optimistic = Message(
                 id = -System.currentTimeMillis().toInt(),
                 sender = me,
-                recipient = if (groupId == null) peerUsername else null,
+                recipient = if (groupId == null) peerUsername else (tagged ?: "group"),
                 content = text.trim(),
                 groupId = groupId,
                 timestamp = java.time.Instant.now().toString(),
@@ -157,7 +180,7 @@ class ChatViewModel @Inject constructor(
 
             runCatching {
                 if (groupId != null) {
-                    apiService.sendGroupMessage(bearer, SendGroupMessageRequest(groupId!!, text.trim()))
+                    apiService.sendGroupMessage(bearer, SendGroupMessageRequest(groupId!!, text.trim(), tagged))
                 } else {
                     apiService.sendDm(bearer, SendDmRequest(peerUsername, text.trim()))
                 }

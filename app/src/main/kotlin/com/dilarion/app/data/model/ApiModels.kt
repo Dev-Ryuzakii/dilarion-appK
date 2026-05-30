@@ -51,10 +51,18 @@ data class SendDmRequest(
     val message: String,
 )
 
-// Send group: POST /messages/group/send → {group_id, message}
+// Send group: POST /messages/group/send → {group_id, message, addressed_to_username?}
 data class SendGroupMessageRequest(
     @SerializedName("group_id") val groupId: Int,
     val message: String,
+    @SerializedName("addressed_to_username") val addressedToUsername: String? = null,
+)
+
+data class GroupMember(
+    @SerializedName("user_id") val userId: Int,
+    val username: String,
+    val role: String,
+    @SerializedName("joined_at") val joinedAt: String,
 )
 
 data class SendMessageResponse(

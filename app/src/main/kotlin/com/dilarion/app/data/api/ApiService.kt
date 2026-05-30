@@ -59,6 +59,12 @@ interface ApiService {
     @GET("groups")
     suspend fun getMyGroups(@Header("Authorization") bearer: String): Response<List<Group>>
 
+    @GET("groups/{groupId}/members")
+    suspend fun getGroupMembers(
+        @Header("Authorization") bearer: String,
+        @Path("groupId") groupId: Int,
+    ): Response<List<GroupMember>>
+
     // ─── Master token ──────────────────────────────────────────────────────────
 
     @POST("mastertoken/create")

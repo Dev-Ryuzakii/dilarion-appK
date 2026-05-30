@@ -267,16 +267,34 @@ export async function sendGroupMessage(
   token: string,
   groupId: number,
   message: string,
+  addressedToUsername?: string,
 ): Promise<void> {
+  const body: Record<string, unknown> = { group_id: groupId, message };
+  if (addressedToUsername) body.addressed_to_username = addressedToUsername;
   const res = await fetch(`${BASE}/messages/group/send`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify({ group_id: groupId, message }),
+    body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error('Failed to send group message');
+}
+
+export interface GroupMember {
+  user_id: number;
+  username: string;
+  role: string;
+  joined_at: string;
+}
+
+export async function getGroupMembers(token: string, groupId: number): Promise<GroupMember[]> {
+  const res = await fetch(`${BASE}/groups/${groupId}/members`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error('Failed to fetch group members');
+  return res.json();
 }
 
 // ── Call history ───────────────────────────────────────────────────────────────

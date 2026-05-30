@@ -249,6 +249,7 @@ fun ChatScreen(
                                     isMine = isMine,
                                     isUnlocked = uiState.isUnlocked,
                                     onTapLocked = { showUnlockDialog = true },
+                                    currentUsername = uiState.currentUsername,
                                 )
                             }
                             is ChatItem.MediaMessage -> {
@@ -306,22 +307,98 @@ fun ChatScreen(
                                 Icon(Icons.Default.AttachFile, "Attach", tint = TextSecondary)
                             }
                         }
-                        OutlinedTextField(
-                            value = inputText,
-                            onValueChange = { inputText = it },
-                            placeholder = { Text("Message", color = TextSecondary) },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(24.dp),
-                            maxLines = 5,
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = DilarionRed,
-                                unfocusedBorderColor = BorderGrey,
-                            ),
-                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            // @mention dropdown
+                            val mentionQuery = uiState.mentionQuery
+                            if (groupId != null && mentionQuery != null) {
+                                val filtered = uiState.groupMembers.filter {
+                                    it.username != uiState.currentUsername &&
+                                    it.username.contains(mentionQuery, ignoreCase = true)
+                                }
+                                if (filtered.isNotEmpty()) {
+                                    Surface(
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = Color(0xFF1A1A1A),
+                                        shadowElevation = 8.dp,
+                                        modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
+                                    ) {
+                                        Column {
+                                            filtered.forEach { member ->
+                                                Row(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .clickable {
+                                                            viewModel.setTaggedUser(member.username)
+                                                            inputText = inputText.replace(Regex("@\\w*$"), "")
+                                                        }
+                                                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                ) {
+                                                    Text("@", color = Color(0xFFA78BFA), fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                                    Text(member.username, color = Color(0xFFF1F5F9), fontSize = 14.sp)
+                                                    Spacer(Modifier.weight(1f))
+                                                    Text(member.role, color = TextSecondary, fontSize = 11.sp)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            // Tagged chip
+                            if (uiState.taggedUser != null) {
+                                Row(
+                                    modifier = Modifier.padding(bottom = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                ) {
+                                    Surface(
+                                        color = Color(0xFF1E1A2E),
+                                        shape = RoundedCornerShape(8.dp),
+                                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF4C1D95)),
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                        ) {
+                                            Icon(Icons.Default.Lock, null, tint = Color(0xFFA78BFA), modifier = Modifier.size(10.dp))
+                                            Text("Private → @${uiState.taggedUser}", color = Color(0xFFA78BFA), fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                                        }
+                                    }
+                                    IconButton(onClick = { viewModel.setTaggedUser(null) }, modifier = Modifier.size(20.dp)) {
+                                        Icon(Icons.Default.Close, null, tint = TextSecondary, modifier = Modifier.size(14.dp))
+                                    }
+                                }
+                            }
+                            OutlinedTextField(
+                                value = inputText,
+                                onValueChange = { v ->
+                                    inputText = v
+                                    if (groupId != null) {
+                                        val match = Regex("@(\\w*)$").find(v)
+                                        viewModel.setMentionQuery(match?.groupValues?.get(1)?.lowercase())
+                                    }
+                                },
+                                placeholder = {
+                                    Text(
+                                        if (uiState.taggedUser != null) "Private to @${uiState.taggedUser}…" else if (groupId != null) "Message or @ to tag…" else "Message",
+                                        color = TextSecondary,
+                                    )
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(24.dp),
+                                maxLines = 5,
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = if (uiState.taggedUser != null) Color(0xFF7C3AED) else DilarionRed,
+                                    unfocusedBorderColor = if (uiState.taggedUser != null) Color(0xFF4C1D95) else BorderGrey,
+                                ),
+                            )
+                        }
                         Spacer(Modifier.width(6.dp))
                         if (inputText.isNotBlank()) {
                             IconButton(
-                                onClick = { viewModel.sendMessage(inputText); inputText = "" },
+                                onClick = { viewModel.sendMessage(inputText); inputText = ""; viewModel.setMentionQuery(null) },
                                 enabled = !uiState.isSending,
                                 modifier = Modifier.size(48.dp).clip(CircleShape).background(DilarionRed),
                             ) {
@@ -546,14 +623,54 @@ private fun MessageBubble(
     isMine: Boolean,
     isUnlocked: Boolean,
     onTapLocked: () -> Unit,
+    currentUsername: String = "",
 ) {
-    val bubbleColor = if (isMine) ChatBubbleSelf else ChatBubbleOther
+    val isPrivateTagged = message.contentType == "private_tagged"
+    val hasRecipient = !message.recipient.isNullOrBlank() && message.recipient != "group"
+    val isForMe = hasRecipient && message.recipient == currentUsername
+    val privatePurple = Color(0xFFA78BFA)
+
+    val bubbleColor = when {
+        isPrivateTagged -> Color(0xFF1A1020)
+        isMine -> ChatBubbleSelf
+        else -> ChatBubbleOther
+    }
     val bubbleShape = if (isMine) {
         RoundedCornerShape(topStart = 18.dp, topEnd = 4.dp, bottomStart = 18.dp, bottomEnd = 18.dp)
     } else {
         RoundedCornerShape(topStart = 4.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 18.dp)
     }
 
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = if (isMine) Alignment.End else Alignment.Start,
+    ) {
+        if (!isMine && hasRecipient && !isPrivateTagged) {
+            Text(
+                "→ @${message.recipient}",
+                style = MaterialTheme.typography.labelSmall,
+                color = privatePurple,
+                modifier = Modifier.padding(start = 4.dp, bottom = 2.dp),
+            )
+        }
+        if (isMine && hasRecipient && !isPrivateTagged) {
+            Text(
+                "→ @${message.recipient}",
+                style = MaterialTheme.typography.labelSmall,
+                color = privatePurple,
+                modifier = Modifier.padding(end = 4.dp, bottom = 2.dp),
+            )
+        }
+        if (isForMe && !isMine) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(start = 4.dp, bottom = 2.dp),
+            ) {
+                Icon(Icons.Default.Lock, null, tint = privatePurple, modifier = Modifier.size(10.dp))
+                Spacer(Modifier.width(3.dp))
+                Text("Only you can read this", style = MaterialTheme.typography.labelSmall, color = privatePurple)
+            }
+        }
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = if (isMine) Arrangement.End else Arrangement.Start,
@@ -563,10 +680,20 @@ private fun MessageBubble(
                 .widthIn(max = 280.dp)
                 .clip(bubbleShape)
                 .background(bubbleColor)
-                .clickable(enabled = !isUnlocked) { onTapLocked() }
+                .then(if (!isPrivateTagged) Modifier.clickable(enabled = !isUnlocked) { onTapLocked() } else Modifier)
                 .padding(horizontal = 12.dp, vertical = 8.dp),
         ) {
-            if (!isUnlocked) {
+            if (isPrivateTagged) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Icon(Icons.Default.Lock, null, tint = privatePurple, modifier = Modifier.size(14.dp))
+                    Text(
+                        "Private message for @${message.recipient}",
+                        color = privatePurple,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
+            } else if (!isUnlocked) {
                 Text(
                     decoyFor(message.id),
                     color = TextPrimary.copy(alpha = 0.65f),
@@ -605,6 +732,7 @@ private fun MessageBubble(
             }
         }
     }
+    } // close outer Column
 }
 
 private fun formatTimestamp(iso: String): String = runCatching {
