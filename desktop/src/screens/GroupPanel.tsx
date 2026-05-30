@@ -453,7 +453,7 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
   const loadMessages = useCallback(async () => {
     try {
       const msgs = await getGroupMessages(token, group.id);
-      setMessages(msgs);
+      setMessages([...msgs].reverse());
     } catch {
       // silently fail
     } finally {

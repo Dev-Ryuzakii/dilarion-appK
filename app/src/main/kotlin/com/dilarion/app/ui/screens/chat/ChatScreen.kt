@@ -250,6 +250,8 @@ fun ChatScreen(
                                     isUnlocked = uiState.isUnlocked,
                                     onTapLocked = { showUnlockDialog = true },
                                     currentUsername = uiState.currentUsername,
+                                    isGroup = groupId != null,
+                                    senderName = if (groupId != null && !isMine) message.sender else null,
                                 )
                             }
                             is ChatItem.MediaMessage -> {
@@ -617,6 +619,39 @@ private fun UnlockDialog(
     )
 }
 
+private val AVATAR_COLORS = listOf(
+    Color(0xFF7C3AED), Color(0xFF0891B2), Color(0xFF059669),
+    Color(0xFFD97706), Color(0xFFC0392B), Color(0xFFDB2777),
+)
+
+private fun avatarColorFor(username: String): Color =
+    AVATAR_COLORS[username.hashCode().mod(AVATAR_COLORS.size).let { if (it < 0) it + AVATAR_COLORS.size else it }]
+
+private fun usernameInitials(name: String): String =
+    name.split(Regex("[\\s_\\-]+"))
+        .filter { it.isNotEmpty() }
+        .take(2)
+        .joinToString("") { it[0].uppercase() }
+        .ifEmpty { name.take(2).uppercase() }
+
+@Composable
+private fun SenderAvatar(username: String) {
+    Box(
+        modifier = Modifier
+            .size(32.dp)
+            .clip(CircleShape)
+            .background(avatarColorFor(username)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            usernameInitials(username),
+            color = Color.White,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+        )
+    }
+}
+
 @Composable
 private fun MessageBubble(
     message: Message,
@@ -624,11 +659,15 @@ private fun MessageBubble(
     isUnlocked: Boolean,
     onTapLocked: () -> Unit,
     currentUsername: String = "",
+    isGroup: Boolean = false,
+    senderName: String? = null,
 ) {
     val isPrivateTagged = message.contentType == "private_tagged"
+    val isEncrypted = message.contentType == "encrypted"
     val hasRecipient = !message.recipient.isNullOrBlank() && message.recipient != "group"
     val isForMe = hasRecipient && message.recipient == currentUsername
     val privatePurple = Color(0xFFA78BFA)
+    val showDecoy = isEncrypted && !isUnlocked
 
     val bubbleColor = when {
         isPrivateTagged -> Color(0xFF1A1020)
@@ -650,7 +689,7 @@ private fun MessageBubble(
                 "→ @${message.recipient}",
                 style = MaterialTheme.typography.labelSmall,
                 color = privatePurple,
-                modifier = Modifier.padding(start = 4.dp, bottom = 2.dp),
+                modifier = Modifier.padding(start = if (isGroup) 44.dp else 4.dp, bottom = 2.dp),
             )
         }
         if (isMine && hasRecipient && !isPrivateTagged) {
@@ -664,75 +703,107 @@ private fun MessageBubble(
         if (isForMe && !isMine) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(start = 4.dp, bottom = 2.dp),
+                modifier = Modifier.padding(start = if (isGroup) 44.dp else 4.dp, bottom = 2.dp),
             ) {
                 Icon(Icons.Default.Lock, null, tint = privatePurple, modifier = Modifier.size(10.dp))
                 Spacer(Modifier.width(3.dp))
                 Text("Only you can read this", style = MaterialTheme.typography.labelSmall, color = privatePurple)
             }
         }
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = if (isMine) Arrangement.End else Arrangement.Start,
-    ) {
-        Column(
-            modifier = Modifier
-                .widthIn(max = 280.dp)
-                .clip(bubbleShape)
-                .background(bubbleColor)
-                .then(if (!isPrivateTagged) Modifier.clickable(enabled = !isUnlocked) { onTapLocked() } else Modifier)
-                .padding(horizontal = 12.dp, vertical = 8.dp),
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = if (isMine) Arrangement.End else Arrangement.Start,
+            verticalAlignment = Alignment.Bottom,
         ) {
-            if (isPrivateTagged) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Icon(Icons.Default.Lock, null, tint = privatePurple, modifier = Modifier.size(14.dp))
+            // Sender avatar for group received messages
+            if (isGroup && !isMine) {
+                SenderAvatar(username = senderName ?: "?")
+                Spacer(Modifier.width(6.dp))
+            } else if (isGroup && isMine) {
+                // spacer to align mine bubbles
+            }
+            Column(horizontalAlignment = if (isMine) Alignment.End else Alignment.Start) {
+                // Sender name for group received messages
+                if (isGroup && !isMine && senderName != null) {
                     Text(
-                        "Private message for @${message.recipient}",
-                        color = privatePurple,
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.Medium,
+                        senderName,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = avatarColorFor(senderName),
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(start = 4.dp, bottom = 2.dp),
                     )
                 }
-            } else if (!isUnlocked) {
-                Text(
-                    decoyFor(message.id),
-                    color = TextPrimary.copy(alpha = 0.65f),
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-            } else {
-                Text(message.content ?: "", color = TextPrimary, style = MaterialTheme.typography.bodyMedium)
-            }
-            Spacer(Modifier.height(2.dp))
-            Row(
-                modifier = Modifier.align(Alignment.End),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(3.dp),
-            ) {
-                Text(
-                    formatTimestamp(message.timestamp ?: ""),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = TextSecondary,
-                )
-                if (isMine) {
-                    when {
-                        message.id < 0 -> Icon(
-                            Icons.Default.AccessTime, null,
-                            modifier = Modifier.size(11.dp), tint = TextSecondary.copy(alpha = 0.6f),
+                Column(
+                    modifier = Modifier
+                        .widthIn(max = 260.dp)
+                        .clip(bubbleShape)
+                        .background(bubbleColor)
+                        .then(
+                            if (!isPrivateTagged && isEncrypted)
+                                Modifier.clickable(enabled = !isUnlocked) { onTapLocked() }
+                            else Modifier
                         )
-                        message.read -> Icon(
-                            Icons.Default.DoneAll, null,
-                            modifier = Modifier.size(14.dp), tint = Color(0xFFEF4444),
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                ) {
+                    if (isPrivateTagged) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Icon(Icons.Default.Lock, null, tint = privatePurple, modifier = Modifier.size(14.dp))
+                            Text(
+                                "Private message for @${message.recipient}",
+                                color = privatePurple,
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Medium,
+                            )
+                        }
+                    } else if (showDecoy) {
+                        Text(
+                            decoyFor(message.id),
+                            color = TextPrimary.copy(alpha = 0.65f),
+                            style = MaterialTheme.typography.bodyMedium,
                         )
-                        else -> Icon(
-                            Icons.Default.Done, null,
-                            modifier = Modifier.size(14.dp), tint = TextSecondary,
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier.padding(top = 4.dp),
+                        ) {
+                            Icon(Icons.Default.Lock, null, tint = TextSecondary, modifier = Modifier.size(10.dp))
+                            Text("tap to decrypt", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+                        }
+                    } else {
+                        Text(message.content ?: "", color = TextPrimary, style = MaterialTheme.typography.bodyMedium)
+                    }
+                    Spacer(Modifier.height(2.dp))
+                    Row(
+                        modifier = Modifier.align(Alignment.End),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(3.dp),
+                    ) {
+                        Text(
+                            formatTimestamp(message.timestamp ?: ""),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = TextSecondary,
                         )
+                        if (isMine) {
+                            when {
+                                message.id < 0 -> Icon(
+                                    Icons.Default.AccessTime, null,
+                                    modifier = Modifier.size(11.dp), tint = TextSecondary.copy(alpha = 0.6f),
+                                )
+                                message.read -> Icon(
+                                    Icons.Default.DoneAll, null,
+                                    modifier = Modifier.size(14.dp), tint = Color(0xFFEF4444),
+                                )
+                                else -> Icon(
+                                    Icons.Default.Done, null,
+                                    modifier = Modifier.size(14.dp), tint = TextSecondary,
+                                )
+                            }
+                        }
                     }
                 }
             }
         }
     }
-    } // close outer Column
 }
 
 private fun formatTimestamp(iso: String): String = runCatching {
