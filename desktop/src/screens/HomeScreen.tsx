@@ -9,6 +9,7 @@ import {
   getUsers,
   confirmMasterToken,
   createMasterToken,
+  performCallAction,
   Contact,
   Group,
   CallRecord,
@@ -791,6 +792,42 @@ function CallDetailPanel({ call }: { call: CallRecord | null }) {
   );
 }
 
+// ── Sound helpers ──────────────────────────────────────────────────────────────
+
+let ringAudio: HTMLAudioElement | null = null;
+
+function playBeep() {
+  const a = new Audio('/beep.mp3');
+  a.volume = 0.6;
+  a.play().catch(() => {});
+}
+
+function startRinging() {
+  if (ringAudio) return;
+  ringAudio = new Audio('/ringingtone.mp3');
+  ringAudio.volume = 0.8;
+  ringAudio.loop = false;
+  let loops = 0;
+  ringAudio.onended = () => {
+    loops += 1;
+    if (loops < 5 && ringAudio) {
+      ringAudio.currentTime = 0;
+      ringAudio.play().catch(() => {});
+    } else {
+      stopRinging();
+    }
+  };
+  ringAudio.play().catch(() => {});
+}
+
+function stopRinging() {
+  if (ringAudio) {
+    ringAudio.pause();
+    ringAudio.onended = null;
+    ringAudio = null;
+  }
+}
+
 // ── Main HomeScreen ────────────────────────────────────────────────────────────
 
 export default function HomeScreen({ token, username, onLogout }: Props) {
@@ -812,7 +849,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
   const [settingsPage, setSettingsPage] = useState<'account' | 'appearance'>('account');
 
   // ── Call state ───────────────────────────────────────────────────────────────
-  const [activeCall, setActiveCall] = useState<{ partner: string; callType: CallType; isIncoming: boolean } | null>(null);
+  const [activeCall, setActiveCall] = useState<{ partner: string; callType: CallType; isIncoming: boolean; callId?: number; offerSdp?: string } | null>(null);
   const [incomingCall, setIncomingCall] = useState<IncomingCall | null>(null);
 
   // ── New-chat modal state ─────────────────────────────────────────────────────
@@ -860,6 +897,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
       } else if (msg.type === 'new_message') {
         const sender = msg.data?.sender_username as string | undefined;
         if (sender && sender !== username) {
+          playBeep();
           // Clear typing when message arrives
           setTypingUsers(prev => { const n = new Set(prev); n.delete(sender); return n; });
           setUnread(prev => {
@@ -888,14 +926,23 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
             return n;
           });
         }
-      } else if (msg.type === 'call_invite') {
-        const sender = (msg as any).sender as string;
-        const callType = ((msg as any).call_type as CallType) ?? 'audio';
-        if (sender) setIncomingCall({ from: sender, callType });
-      } else if (msg.type === 'call_end') {
-        const sender = (msg as any).sender as string;
-        if (activeCall?.partner === sender) setActiveCall(null);
-        if (incomingCall?.from === sender) setIncomingCall(null);
+      } else if (msg.type === 'incoming_call') {
+        const data = (msg as any).data || {};
+        const caller = data.caller_username as string;
+        const callType = (data.call_type === 'video' ? 'video' : 'audio') as CallType;
+        const callId = data.call_id as number;
+        const offerSdp = data.offer_sdp as string | undefined;
+        if (caller) {
+          startRinging();
+          setIncomingCall({ from: caller, callType, callId, offerSdp });
+        }
+      } else if (msg.type === 'call_status_update') {
+        const data = (msg as any).data || {};
+        if (['end', 'declined'].includes(data.status)) {
+          stopRinging();
+          setActiveCall(null);
+          setIncomingCall(null);
+        }
       }
     };
 
@@ -1299,6 +1346,8 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
           partner={activeCall.partner}
           callType={activeCall.callType}
           isIncoming={activeCall.isIncoming}
+          callId={activeCall.callId}
+          offerSdp={activeCall.offerSdp}
           onEnd={() => setActiveCall(null)}
         />
       )}
@@ -1340,7 +1389,13 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
             </div>
             <div style={{ display: 'flex', gap: 10 }}>
               <button
-                onClick={() => setIncomingCall(null)}
+                onClick={() => {
+                  stopRinging();
+                  if (incomingCall.callId) {
+                    performCallAction(token, incomingCall.callId, 'decline').catch(() => {});
+                  }
+                  setIncomingCall(null);
+                }}
                 style={{
                   flex: 1, background: '#ef4444', border: 'none', borderRadius: 10,
                   color: '#fff', fontWeight: 700, fontSize: '0.85rem',
@@ -1351,7 +1406,8 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
               </button>
               <button
                 onClick={() => {
-                  setActiveCall({ partner: incomingCall.from, callType: incomingCall.callType, isIncoming: true });
+                  stopRinging();
+                  setActiveCall({ partner: incomingCall.from, callType: incomingCall.callType, isIncoming: true, callId: incomingCall.callId, offerSdp: incomingCall.offerSdp });
                   setIncomingCall(null);
                 }}
                 style={{

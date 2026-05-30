@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { presenceService } from '../services/presence';
+import { initiateCall, performCallAction, sendCallIceCandidate } from '../services/api';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -8,6 +9,8 @@ export type CallType = 'audio' | 'video';
 export interface IncomingCall {
   from: string;
   callType: CallType;
+  callId: number;
+  offerSdp?: string;
 }
 
 interface Props {
@@ -16,6 +19,8 @@ interface Props {
   partner: string;
   callType: CallType;
   isIncoming: boolean;
+  callId?: number;       // set for incoming calls
+  offerSdp?: string;     // set for incoming calls
   onEnd: () => void;
 }
 
@@ -36,7 +41,7 @@ function fmtDur(s: number) {
 
 // ── CallModal ─────────────────────────────────────────────────────────────────
 
-export default function CallModal({ partner, callType, isIncoming, onEnd }: Props) {
+export default function CallModal({ token, partner, callType, isIncoming, callId: incomingCallId, offerSdp: incomingOfferSdp, onEnd }: Props) {
   const [state, setState] = useState<'ringing' | 'connecting' | 'connected' | 'ended'>(
     isIncoming ? 'ringing' : 'connecting',
   );
@@ -52,8 +57,7 @@ export default function CallModal({ partner, callType, isIncoming, onEnd }: Prop
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const makingOfferRef = useRef(false);
-  const ignoreOfferRef = useRef(false);
+  const callIdRef = useRef<number | null>(incomingCallId ?? null);
 
   // ── WebRTC setup ─────────────────────────────────────────────────────────────
 
@@ -61,34 +65,14 @@ export default function CallModal({ partner, callType, isIncoming, onEnd }: Prop
     const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
 
     pc.onicecandidate = ({ candidate }) => {
-      if (candidate) {
-        presenceService.send({
-          type: 'call_ice',
-          recipient: partner,
-          candidate: candidate.toJSON(),
-        });
+      if (candidate && callIdRef.current) {
+        sendCallIceCandidate(token, callIdRef.current, partner, candidate.toJSON()).catch(() => {});
       }
     };
 
     pc.ontrack = (e) => {
       if (remoteVideoRef.current && e.streams[0]) {
         remoteVideoRef.current.srcObject = e.streams[0];
-      }
-    };
-
-    pc.onnegotiationneeded = async () => {
-      try {
-        makingOfferRef.current = true;
-        await pc.setLocalDescription();
-        presenceService.send({
-          type: 'call_offer',
-          recipient: partner,
-          sdp: pc.localDescription,
-        });
-      } catch (err) {
-        console.error('[WebRTC] negotiation error', err);
-      } finally {
-        makingOfferRef.current = false;
       }
     };
 
@@ -103,7 +87,7 @@ export default function CallModal({ partner, callType, isIncoming, onEnd }: Prop
 
     pcRef.current = pc;
     return pc;
-  }, [partner]);
+  }, [partner, token]);
 
   const startLocalMedia = useCallback(async () => {
     try {
@@ -114,70 +98,84 @@ export default function CallModal({ partner, callType, isIncoming, onEnd }: Prop
       localStreamRef.current = stream;
       if (localVideoRef.current) localVideoRef.current.srcObject = stream;
       return stream;
-    } catch (err) {
+    } catch {
       setError('Could not access camera/microphone');
       return null;
     }
   }, [callType]);
 
-  // Caller: get media → create PC → wait for answer
+  // Caller: get media → create offer → POST /calls/initiate → wait for call_status_update
   const startCall = useCallback(async () => {
     const stream = await startLocalMedia();
     if (!stream) return;
     const pc = createPc();
     stream.getTracks().forEach(t => pc.addTrack(t, stream));
-    // offer is sent via onnegotiationneeded
-  }, [startLocalMedia, createPc]);
 
-  // Callee: accept → get media → create PC → handle offer
+    // Create offer SDP
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+
+    try {
+      const { call_id } = await initiateCall(token, partner, callType, offer.sdp);
+      callIdRef.current = call_id;
+    } catch {
+      setError('Could not start call');
+    }
+  }, [startLocalMedia, createPc, token, partner, callType]);
+
+  // Callee: accept → get media → handle offer SDP → POST /calls/action accept
   const acceptCall = useCallback(async () => {
     setState('connecting');
     const stream = await startLocalMedia();
     if (!stream) return;
     const pc = createPc();
     stream.getTracks().forEach(t => pc.addTrack(t, stream));
-    presenceService.send({ type: 'call_accept', recipient: partner });
-  }, [startLocalMedia, createPc, partner]);
 
-  // Handle incoming signaling
+    let answerSdp: string | undefined;
+    if (incomingOfferSdp) {
+      await pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: incomingOfferSdp }));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      answerSdp = answer.sdp;
+    }
+
+    if (callIdRef.current) {
+      await performCallAction(token, callIdRef.current, 'accept', answerSdp).catch(() => {});
+    }
+  }, [startLocalMedia, createPc, token, incomingOfferSdp]);
+
+  // Handle backend WebSocket signaling events
   useEffect(() => {
     const handler = async (msg: any) => {
-      if (msg.type === 'call_accept' && msg.sender === partner) {
-        setState('connecting');
-        return;
-      }
+      const data = msg.data || {};
 
-      if (msg.type === 'call_offer' && msg.sender === partner) {
-        const pc = pcRef.current;
-        if (!pc) return;
-        const offerCollision = makingOfferRef.current || pc.signalingState !== 'stable';
-        ignoreOfferRef.current = offerCollision;
-        if (ignoreOfferRef.current) return;
-        await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
-        await pc.setLocalDescription();
-        presenceService.send({ type: 'call_answer', recipient: partner, sdp: pc.localDescription });
-        return;
-      }
-
-      if (msg.type === 'call_answer' && msg.sender === partner) {
-        const pc = pcRef.current;
-        if (!pc) return;
-        if (pc.signalingState !== 'stable') {
-          await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
+      // call_status_update — caller gets answer_sdp when callee accepts
+      if (msg.type === 'call_status_update' && data.call_id === callIdRef.current) {
+        if (data.status === 'accept' || data.status === 'accepted') {
+          setState('connecting');
+          if (data.answer_sdp && pcRef.current) {
+            try {
+              await pcRef.current.setRemoteDescription(
+                new RTCSessionDescription({ type: 'answer', sdp: data.answer_sdp }),
+              );
+            } catch {}
+          }
+        } else if (['declined', 'decline', 'end', 'busy'].includes(data.status)) {
+          handleEnd();
         }
         return;
       }
 
-      if (msg.type === 'call_ice' && msg.sender === partner) {
+      // ice_candidate from backend
+      if (msg.type === 'ice_candidate' && data.call_id === callIdRef.current) {
         const pc = pcRef.current;
-        if (!pc || !msg.candidate) return;
-        try {
-          await pc.addIceCandidate(new RTCIceCandidate(msg.candidate));
-        } catch {}
+        if (!pc || !data.candidate) return;
+        try { await pc.addIceCandidate(new RTCIceCandidate(data.candidate)); } catch {}
         return;
       }
 
-      if (msg.type === 'call_end' && msg.sender === partner) {
+      // Legacy p2p fallback: call_end sent directly by other desktop client
+      if (msg.type === 'call_end' && (msg.sender === partner || msg.from === partner)) {
         handleEnd();
       }
     };
@@ -200,7 +198,6 @@ export default function CallModal({ partner, callType, isIncoming, onEnd }: Prop
   // Start outgoing call on mount
   useEffect(() => {
     if (!isIncoming) {
-      presenceService.send({ type: 'call_invite', recipient: partner, call_type: callType });
       startCall();
     }
     return () => {
@@ -212,7 +209,9 @@ export default function CallModal({ partner, callType, isIncoming, onEnd }: Prop
   // ── Controls ─────────────────────────────────────────────────────────────────
 
   function handleEnd() {
-    presenceService.send({ type: 'call_end', recipient: partner });
+    if (callIdRef.current) {
+      performCallAction(token, callIdRef.current, 'end').catch(() => {});
+    }
     setState('ended');
     if (timerRef.current) clearInterval(timerRef.current);
     stopAllMedia();

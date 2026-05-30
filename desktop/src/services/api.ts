@@ -265,6 +265,50 @@ export async function getCallHistory(token: string): Promise<CallRecord[]> {
   return body.calls ?? body;
 }
 
+// ── Call signaling (REST, compatible with mobile apps) ─────────────────────────
+
+export async function initiateCall(
+  token: string,
+  recipientUsername: string,
+  callType: 'audio' | 'video',
+  offerSdp?: string,
+): Promise<{ call_id: number }> {
+  const res = await fetch(`${BASE}/calls/initiate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ recipient_username: recipientUsername, call_type: callType, offer_sdp: offerSdp }),
+  });
+  if (!res.ok) throw new Error('Failed to initiate call');
+  return res.json();
+}
+
+export async function performCallAction(
+  token: string,
+  callId: number,
+  action: 'accept' | 'decline' | 'end' | 'busy',
+  answerSdp?: string,
+): Promise<void> {
+  const res = await fetch(`${BASE}/calls/action`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ call_id: callId, action, answer_sdp: answerSdp }),
+  });
+  if (!res.ok) throw new Error(`Call action ${action} failed`);
+}
+
+export async function sendCallIceCandidate(
+  token: string,
+  callId: number,
+  recipientUsername: string,
+  candidate: RTCIceCandidateInit,
+): Promise<void> {
+  await fetch(`${BASE}/calls/ice_candidate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ call_id: callId, recipient_username: recipientUsername, candidate }),
+  });
+}
+
 // ── Master token ───────────────────────────────────────────────────────────────
 
 export async function confirmMasterToken(token: string, masterToken: string): Promise<boolean> {
