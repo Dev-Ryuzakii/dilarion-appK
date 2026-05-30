@@ -58,6 +58,8 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const callIdRef = useRef<number | null>(incomingCallId ?? null);
+  // Buffer ICE candidates generated before callIdRef is set
+  const iceBufRef = useRef<RTCIceCandidateInit[]>([]);
 
   // ── WebRTC setup ─────────────────────────────────────────────────────────────
 
@@ -65,8 +67,12 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
     const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
 
     pc.onicecandidate = ({ candidate }) => {
-      if (candidate && callIdRef.current) {
+      if (!candidate) return;
+      if (callIdRef.current) {
         sendCallIceCandidate(token, callIdRef.current, partner, candidate.toJSON()).catch(() => {});
+      } else {
+        // callId not yet available — buffer until initiateCall() returns
+        iceBufRef.current.push(candidate.toJSON());
       }
     };
 
@@ -118,6 +124,9 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
     try {
       const { call_id } = await initiateCall(token, partner, callType, offer.sdp);
       callIdRef.current = call_id;
+      // Flush buffered ICE candidates now that we have the call_id
+      const buffered = iceBufRef.current.splice(0);
+      buffered.forEach(c => sendCallIceCandidate(token, call_id, partner, c).catch(() => {}));
     } catch {
       setError('Could not start call');
     }
@@ -150,7 +159,7 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
       const data = msg.data || {};
 
       // call_status_update — caller gets answer_sdp when callee accepts
-      if (msg.type === 'call_status_update' && data.call_id === callIdRef.current) {
+      if (msg.type === 'call_status_update' && Number(data.call_id) === callIdRef.current) {
         if (data.status === 'accept' || data.status === 'accepted') {
           setState('connecting');
           if (data.answer_sdp && pcRef.current) {
@@ -167,7 +176,7 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
       }
 
       // ice_candidate from backend
-      if (msg.type === 'ice_candidate' && data.call_id === callIdRef.current) {
+      if (msg.type === 'ice_candidate' && Number(data.call_id) === callIdRef.current) {
         const pc = pcRef.current;
         if (!pc || !data.candidate) return;
         try { await pc.addIceCandidate(new RTCIceCandidate(data.candidate)); } catch {}
