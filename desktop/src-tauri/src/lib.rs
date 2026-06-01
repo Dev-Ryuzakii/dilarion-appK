@@ -3,7 +3,7 @@ use screenshots::Screen;
 use screenshots::image::{DynamicImage, ImageFormat};
 use serde::Serialize;
 use sysinfo::System;
-use tauri::State;
+use tauri::{Manager, State};
 use std::sync::Mutex;
 use std::io::Cursor;
 
