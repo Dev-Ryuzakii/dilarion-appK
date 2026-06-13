@@ -346,11 +346,12 @@ export async function performCallAction(
   callId: number,
   action: 'accept' | 'decline' | 'end' | 'busy',
   answerSdp?: string,
+  masterToken?: string,
 ): Promise<void> {
   const res = await fetch(`${BASE}/calls/action`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ call_id: callId, action, answer_sdp: answerSdp }),
+    body: JSON.stringify({ call_id: callId, action, answer_sdp: answerSdp, mastertoken: masterToken }),
   });
   if (!res.ok) throw new Error(`Call action ${action} failed`);
 }

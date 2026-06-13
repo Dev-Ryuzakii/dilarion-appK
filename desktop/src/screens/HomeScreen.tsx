@@ -1351,6 +1351,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
           isIncoming={activeCall.isIncoming}
           callId={activeCall.callId}
           offerSdp={activeCall.offerSdp}
+          masterToken={masterToken ?? undefined}
           onEnd={() => setActiveCall(null)}
         />
       )}

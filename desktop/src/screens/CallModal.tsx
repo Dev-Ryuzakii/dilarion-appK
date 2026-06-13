@@ -21,6 +21,7 @@ interface Props {
   isIncoming: boolean;
   callId?: number;       // set for incoming calls
   offerSdp?: string;     // set for incoming calls
+  masterToken?: string;  // required by backend to accept calls
   onEnd: () => void;
 }
 
@@ -45,7 +46,7 @@ function fmtDur(s: number) {
 
 // ── CallModal ─────────────────────────────────────────────────────────────────
 
-export default function CallModal({ token, partner, callType, isIncoming, callId: incomingCallId, offerSdp: incomingOfferSdp, onEnd }: Props) {
+export default function CallModal({ token, partner, callType, isIncoming, callId: incomingCallId, offerSdp: incomingOfferSdp, masterToken, onEnd }: Props) {
   const [state, setState] = useState<'ringing' | 'connecting' | 'connected' | 'ended'>(
     isIncoming ? 'ringing' : 'connecting',
   );
@@ -171,9 +172,9 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
     }
 
     if (callIdRef.current) {
-      await performCallAction(token, callIdRef.current, 'accept', answerSdp).catch(() => {});
+      await performCallAction(token, callIdRef.current, 'accept', answerSdp, masterToken).catch(() => {});
     }
-  }, [startLocalMedia, createPc, token, incomingOfferSdp]);
+  }, [startLocalMedia, createPc, token, incomingOfferSdp, masterToken]);
 
   // Handle backend WebSocket signaling events
   useEffect(() => {
