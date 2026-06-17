@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 
-const WS_BASE = 'ws://187.124.208.16:8010/ws';
+const WS_BASE = 'wss://api.dilarion.eibstratoc.com/ws';
 
 export type WsMessage = {
   type: string;

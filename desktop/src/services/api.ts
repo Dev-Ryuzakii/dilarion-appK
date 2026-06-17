@@ -1,4 +1,4 @@
-const BASE = 'http://187.124.208.16:8010';
+const BASE = 'https://api.dilarion.eibstratoc.com';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 

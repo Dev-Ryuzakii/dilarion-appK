@@ -18,7 +18,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 private const val TAG = "PresenceService"
-private const val WS_BASE = "ws://187.124.208.16:8010/ws"
+private const val WS_BASE = "wss://api.dilarion.eibstratoc.com/ws"
 private const val PREFS_NAME = "dilarion_device"
 private const val KEY_DEVICE_ID = "device_id"
 

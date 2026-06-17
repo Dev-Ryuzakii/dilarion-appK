@@ -23,7 +23,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self' ipc: http://ipc.localhost; connect-src http://187.124.208.16:8010 ws://187.124.208.16:8010; img-src 'self' data: blob: asset: http://asset.localhost; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; media-src 'self' blob: data:"
+      "csp": "default-src 'self' ipc: http://ipc.localhost; connect-src https://api.dilarion.eibstratoc.com wss://api.dilarion.eibstratoc.com; img-src 'self' data: blob: asset: http://asset.localhost; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; media-src 'self' blob: data:"
     }
   },
   "bundle": {
