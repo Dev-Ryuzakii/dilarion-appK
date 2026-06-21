@@ -146,7 +146,10 @@ fun IncomingCallOverlay(
                 Text(incoming.callerUsername, color = SurfaceWhite, fontSize = 28.sp, fontWeight = FontWeight.Bold)
                 if (uiState.state == CallState.CONNECTED) {
                     Spacer(Modifier.height(8.dp))
-                    Text(formatDuration(uiState.durationSeconds), color = SurfaceWhite.copy(alpha = 0.7f), fontSize = 16.sp)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(formatDuration(uiState.durationSeconds), color = SurfaceWhite.copy(alpha = 0.7f), fontSize = 16.sp)
+                        SignalBars(uiState.networkQuality)
+                    }
                 }
                 Spacer(Modifier.weight(1f))
                 when (uiState.state) {
@@ -230,16 +233,22 @@ private fun CallContent(
                     Spacer(Modifier.height(24.dp))
                     Text(uiState.peerUsername, color = SurfaceWhite, fontSize = 28.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(8.dp))
-                    Text(
-                        when (uiState.state) {
-                            CallState.CALLING   -> "Calling..."
-                            CallState.RINGING   -> "Ringing..."
-                            CallState.CONNECTED -> formatDuration(uiState.durationSeconds)
-                            CallState.ENDED     -> "Call ended"
-                            else -> ""
-                        },
-                        color = SurfaceWhite.copy(alpha = 0.7f), fontSize = 16.sp,
-                    )
+                    if (uiState.state == CallState.CONNECTED) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(formatDuration(uiState.durationSeconds), color = SurfaceWhite.copy(alpha = 0.7f), fontSize = 16.sp)
+                            SignalBars(uiState.networkQuality)
+                        }
+                    } else {
+                        Text(
+                            when (uiState.state) {
+                                CallState.CALLING -> "Calling..."
+                                CallState.RINGING -> "Ringing..."
+                                CallState.ENDED   -> "Call ended"
+                                else -> ""
+                            },
+                            color = SurfaceWhite.copy(alpha = 0.7f), fontSize = 16.sp,
+                        )
+                    }
                     Spacer(Modifier.weight(1f))
                     if (uiState.state == CallState.CONNECTED) {
                         CallControls(uiState, viewModel, showFlip = false)
@@ -487,6 +496,28 @@ private fun SmallControl(icon: ImageVector, tint: Color, onClick: () -> Unit) {
         onClick = onClick,
         modifier = Modifier.size(56.dp).clip(CircleShape).background(ControlButton),
     ) { Icon(icon, null, tint = tint, modifier = Modifier.size(24.dp)) }
+}
+
+@Composable
+private fun SignalBars(quality: Int) {
+    val barColor = when {
+        quality <= 1 -> Color(0xFFEF4444)
+        quality <= 2 -> Color(0xFFF59E0B)
+        else         -> Color(0xFF22C55E)
+    }
+    Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+        listOf(6, 10, 14, 18).forEachIndexed { i, height ->
+            Box(
+                modifier = Modifier
+                    .width(4.dp)
+                    .height(height.dp)
+                    .background(
+                        color = if (i < quality) barColor else SurfaceWhite.copy(alpha = 0.2f),
+                        shape = RoundedCornerShape(1.dp),
+                    )
+            )
+        }
+    }
 }
 
 private fun formatDuration(seconds: Int) = "%02d:%02d".format(seconds / 60, seconds % 60)

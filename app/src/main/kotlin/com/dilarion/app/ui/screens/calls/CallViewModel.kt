@@ -31,6 +31,7 @@ data class CallUiState(
     val durationSeconds: Int = 0,
     val isMuted: Boolean = false,
     val isSpeaker: Boolean = false,
+    val networkQuality: Int = 4,  // 0=poor … 4=excellent
     val error: String? = null,
 )
 
@@ -53,8 +54,13 @@ class CallViewModel @Inject constructor(
     private var wsObserverJob: kotlinx.coroutines.Job? = null
     private var pendingCandidates = mutableListOf<IceCandidate>()
     private var storedOfferSdp: String? = null
+    // Buffer ICE candidates from remote until we set remote description (handleOffer)
+    private var remoteDescSet = false
+    private val pendingRemoteCandidates = mutableListOf<Triple<String, Int, String>>()
 
     fun startOutgoingCall(peerUsername: String, type: CallType) {
+        remoteDescSet = false
+        pendingRemoteCandidates.clear()
         _uiState.value = CallUiState(state = CallState.CALLING, peerUsername = peerUsername, callType = type)
         observeWsEvents()
         viewModelScope.launch {
@@ -72,7 +78,8 @@ class CallViewModel @Inject constructor(
                 )
                 val callId = resp.body()?.callId
                 if (callId != null) {
-                    _uiState.value = _uiState.value.copy(callId = callId, state = CallState.RINGING)
+                    // Stay CALLING until WS confirms callee received; state → RINGING via WS "calling" event
+                    _uiState.value = _uiState.value.copy(callId = callId)
                     flushPendingCandidates(token, peerUsername, callId)
                 } else {
                     _uiState.value = _uiState.value.copy(error = "Failed to initiate call", state = CallState.ENDED)
@@ -84,6 +91,8 @@ class CallViewModel @Inject constructor(
     }
 
     fun setIncoming(incoming: IncomingCallData) {
+        remoteDescSet = false
+        pendingRemoteCandidates.clear()
         storedOfferSdp = incoming.offerSdp
         _uiState.value = CallUiState(
             state = CallState.INCOMING,
@@ -103,6 +112,13 @@ class CallViewModel @Inject constructor(
                 _uiState.value = _uiState.value.copy(error = e.message)
             }
         }
+        // Tell caller our device is ringing
+        viewModelScope.launch {
+            val token = sessionManager.sessionToken.first() ?: return@launch
+            runCatching {
+                apiService.callAction("Bearer $token", CallActionRequest(incoming.callId, "ringing"))
+            }
+        }
     }
 
     fun acceptCall(masterToken: String) {
@@ -113,6 +129,12 @@ class CallViewModel @Inject constructor(
             runCatching {
                 val offerSdp = storedOfferSdp
                 val answerSdp = if (offerSdp != null) webRtcManager.handleOffer(offerSdp) else null
+                // Remote desc is now set — apply any ICE candidates that arrived before accept
+                remoteDescSet = true
+                pendingRemoteCandidates.forEach { (mid, idx, cand) ->
+                    webRtcManager.addIceCandidate(mid, idx, cand)
+                }
+                pendingRemoteCandidates.clear()
                 apiService.callAction(
                     "Bearer $token",
                     CallActionRequest(callId, "accept", answerSdp = answerSdp, mastertoken = masterToken),
@@ -179,9 +201,16 @@ class CallViewModel @Inject constructor(
                             "accept", "accepted" -> {
                                 val answerSdp = data.get("answer_sdp")?.asString
                                 if (answerSdp != null) webRtcManager.handleAnswer(answerSdp)
+                                // Caller: remote desc now set — flush any buffered remote ICE candidates
+                                remoteDescSet = true
+                                pendingRemoteCandidates.forEach { (mid, idx, cand) ->
+                                    webRtcManager.addIceCandidate(mid, idx, cand)
+                                }
+                                pendingRemoteCandidates.clear()
                                 _uiState.value = _uiState.value.copy(state = CallState.CONNECTED)
                                 startTimer()
                             }
+                            "calling" -> _uiState.value = _uiState.value.copy(state = CallState.RINGING)
                             "ringing" -> _uiState.value = _uiState.value.copy(state = CallState.RINGING)
                             "decline", "declined", "end", "busy" -> {
                                 timerJob?.cancel()
@@ -190,10 +219,19 @@ class CallViewModel @Inject constructor(
                         }
                     }
                     "ice_candidate" -> {
-                        val sdpMid = data.get("sdp_mid")?.asString ?: return@collect
-                        val sdpMLineIndex = data.get("sdp_m_line_index")?.asInt ?: 0
-                        val candidateStr = data.get("candidate")?.asString ?: return@collect
-                        webRtcManager.addIceCandidate(sdpMid, sdpMLineIndex, candidateStr)
+                        val callIdEvt = data.get("call_id")?.asInt ?: return@collect
+                        if (callIdEvt != _uiState.value.callId) return@collect
+                        // candidate is a nested object: {sdpMid, sdpMLineIndex, candidate}
+                        val candidateObj = runCatching { data.getAsJsonObject("candidate") }.getOrNull() ?: return@collect
+                        val sdpMid = candidateObj.get("sdpMid")?.asString ?: return@collect
+                        val sdpMLineIndex = candidateObj.get("sdpMLineIndex")?.asInt ?: 0
+                        val candidateStr = candidateObj.get("candidate")?.asString ?: return@collect
+                        if (!remoteDescSet) {
+                            // Buffer until acceptCall() calls handleOffer() which sets remote desc
+                            pendingRemoteCandidates.add(Triple(sdpMid, sdpMLineIndex, candidateStr))
+                        } else {
+                            webRtcManager.addIceCandidate(sdpMid, sdpMLineIndex, candidateStr)
+                        }
                     }
                 }
             }
@@ -245,9 +283,18 @@ class CallViewModel @Inject constructor(
 
     private fun startTimer() {
         timerJob = viewModelScope.launch {
+            var tick = 0
             while (true) {
                 kotlinx.coroutines.delay(1000)
-                _uiState.value = _uiState.value.copy(durationSeconds = _uiState.value.durationSeconds + 1)
+                tick++
+                val update = _uiState.value.copy(durationSeconds = _uiState.value.durationSeconds + 1)
+                _uiState.value = update
+                // Poll network quality every 2s
+                if (tick % 2 == 0) {
+                    webRtcManager.getNetworkQuality { quality ->
+                        _uiState.value = _uiState.value.copy(networkQuality = quality)
+                    }
+                }
             }
         }
     }

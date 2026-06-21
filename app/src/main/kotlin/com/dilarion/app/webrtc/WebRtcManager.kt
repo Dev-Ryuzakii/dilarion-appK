@@ -51,6 +51,13 @@ class WebRtcManager @Inject constructor(
         PeerConnection.IceServer.builder("stun:stun2.l.google.com:19302").createIceServer(),
         PeerConnection.IceServer.builder("stun:stun3.l.google.com:19302").createIceServer(),
         PeerConnection.IceServer.builder("stun:stun4.l.google.com:19302").createIceServer(),
+        // TURN relay — required when STUN fails across different networks (mobile data ↔ WiFi)
+        PeerConnection.IceServer.builder("turn:a.relay.metered.ca:80")
+            .setUsername("openrelayproject").setPassword("openrelayproject").createIceServer(),
+        PeerConnection.IceServer.builder("turn:a.relay.metered.ca:443")
+            .setUsername("openrelayproject").setPassword("openrelayproject").createIceServer(),
+        PeerConnection.IceServer.builder("turn:a.relay.metered.ca:443?transport=tcp")
+            .setUsername("openrelayproject").setPassword("openrelayproject").createIceServer(),
     )
 
     fun initialize() {
@@ -125,6 +132,26 @@ class WebRtcManager @Inject constructor(
             }
             override fun onIceConnectionChange(s: PeerConnection.IceConnectionState?) {
                 Log.i(TAG, "iceConnectionState=$s")
+                if (s == PeerConnection.IceConnectionState.CONNECTED ||
+                    s == PeerConnection.IceConnectionState.COMPLETED) {
+                    // Re-assert AudioManager mode so remote audio routes to speaker
+                    val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                    am.mode = AudioManager.MODE_IN_COMMUNICATION
+                    am.isSpeakerphoneOn = true
+                    Log.i(TAG, "audio mode reasserted on ICE connect")
+                    // onAddTrack can fire before ICE is up; force-enable all remote receivers
+                    peerConnection?.receivers?.forEach { receiver ->
+                        (receiver.track() as? AudioTrack)?.let { t ->
+                            t.setEnabled(true)
+                            Log.i(TAG, "remote audio track force-enabled on ICE connect")
+                        }
+                        (receiver.track() as? VideoTrack)?.let { t ->
+                            t.setEnabled(true)
+                            _remoteVideo.value = t
+                            Log.i(TAG, "remote video track force-enabled on ICE connect")
+                        }
+                    }
+                }
             }
             override fun onIceConnectionReceivingChange(b: Boolean) {}
             override fun onIceGatheringChange(s: PeerConnection.IceGatheringState?) {
@@ -256,6 +283,29 @@ class WebRtcManager @Inject constructor(
             override fun onCreateFailure(p: String?) {}
             override fun onSetFailure(e: String?) { Log.e(TAG, "setRemoteDesc answer failed: $e") }
         }, SessionDescription(SessionDescription.Type.ANSWER, sdpStr))
+    }
+
+    fun getNetworkQuality(onResult: (Int) -> Unit) {
+        peerConnection?.getStats { report ->
+            var loss = 0.0
+            var jitter = 0.0
+            report.statsMap.values.forEach { stats ->
+                if (stats.type == "inbound-rtp" && stats.members["kind"] == "audio") {
+                    val lost = (stats.members["packetsLost"] as? Number)?.toLong() ?: 0L
+                    val received = (stats.members["packetsReceived"] as? Number)?.toLong() ?: 1L
+                    loss = if (lost + received > 0) lost.toDouble() / (lost + received) else 0.0
+                    jitter = (stats.members["jitter"] as? Double) ?: 0.0
+                }
+            }
+            val quality = when {
+                loss > 0.15 || jitter > 0.1  -> 0
+                loss > 0.08 || jitter > 0.05 -> 1
+                loss > 0.04 || jitter > 0.02 -> 2
+                loss > 0.01 || jitter > 0.01 -> 3
+                else                          -> 4
+            }
+            onResult(quality)
+        } ?: onResult(4)
     }
 
     fun addIceCandidate(sdpMid: String, sdpMLineIndex: Int, candidateStr: String) {

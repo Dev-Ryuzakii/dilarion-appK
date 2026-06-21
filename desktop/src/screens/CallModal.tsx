@@ -47,14 +47,19 @@ function fmtDur(s: number) {
 // ── CallModal ─────────────────────────────────────────────────────────────────
 
 export default function CallModal({ token, partner, callType, isIncoming, callId: incomingCallId, offerSdp: incomingOfferSdp, masterToken, onEnd }: Props) {
-  const [state, setState] = useState<'ringing' | 'connecting' | 'connected' | 'ended'>(
-    isIncoming ? 'ringing' : 'connecting',
+  // calling = outgoing, waiting for callee to receive; ringing = callee's device is ringing; connecting = SDP negotiating
+  const [state, setState] = useState<'calling' | 'ringing' | 'connecting' | 'connected' | 'ended'>(
+    isIncoming ? 'ringing' : 'calling',
   );
   const [muted, setMuted] = useState(false);
   const [cameraOff, setCameraOff] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [duration, setDuration] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [netQuality, setNetQuality] = useState<0 | 1 | 2 | 3 | 4>(4);
+  const [reconnecting, setReconnecting] = useState(false);
+  const iceRestartedRef = useRef(false);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
@@ -97,6 +102,9 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
     };
 
     const markConnected = () => {
+      if (reconnectTimerRef.current) { clearTimeout(reconnectTimerRef.current); reconnectTimerRef.current = null; }
+      setReconnecting(false);
+      iceRestartedRef.current = false;
       setState(s => {
         if (s === 'connected') return s;
         if (!timerRef.current) timerRef.current = setInterval(() => setDuration(d => d + 1), 1000);
@@ -105,8 +113,22 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
     };
 
     pc.onconnectionstatechange = () => {
-      if (pc.connectionState === 'connected') markConnected();
-      else if (['failed', 'disconnected', 'closed'].includes(pc.connectionState)) handleEnd();
+      if (pc.connectionState === 'connected') {
+        markConnected();
+      } else if (pc.connectionState === 'failed') {
+        if (!iceRestartedRef.current) {
+          // One reconnect attempt: wait 5s then end if not recovered
+          iceRestartedRef.current = true;
+          setReconnecting(true);
+          reconnectTimerRef.current = setTimeout(() => {
+            if (pcRef.current?.connectionState !== 'connected') handleEnd();
+          }, 5000);
+        } else {
+          handleEnd();
+        }
+      } else if (pc.connectionState === 'closed') {
+        handleEnd();
+      }
     };
 
     pc.oniceconnectionstatechange = () => {
@@ -183,7 +205,13 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
 
       // call_status_update — caller gets answer_sdp when callee accepts
       if (msg.type === 'call_status_update' && Number(data.call_id) === callIdRef.current) {
-        if (data.status === 'accept' || data.status === 'accepted') {
+        if (data.status === 'calling') {
+          // Callee's device received the notification — upgrade from "Calling..." to "Ringing..."
+          setState(s => (s === 'calling' ? 'ringing' : s));
+        } else if (data.status === 'ringing') {
+          // Callee's app is showing the incoming call UI
+          setState(s => (s === 'calling' || s === 'ringing' ? 'ringing' : s));
+        } else if (data.status === 'accept' || data.status === 'accepted') {
           setState('connecting');
           if (data.answer_sdp && pcRef.current) {
             try {
@@ -226,6 +254,67 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
     return () => presenceService.removeListener(handler);
   }, [partner]);
 
+  // ── Calling tone (outgoing only, while waiting for answer) ───────────────────
+
+  useEffect(() => {
+    if (isIncoming || (state !== 'calling' && state !== 'ringing')) return;
+    let ctx: AudioContext | null = null;
+    let osc1: OscillatorNode | null = null;
+    let osc2: OscillatorNode | null = null;
+    let gain: GainNode | null = null;
+    let intervalId: ReturnType<typeof setInterval>;
+
+    try {
+      ctx = new AudioContext();
+      gain = ctx.createGain();
+      gain.connect(ctx.destination);
+      osc1 = ctx.createOscillator(); osc1.frequency.value = 440; osc1.connect(gain); osc1.start();
+      osc2 = ctx.createOscillator(); osc2.frequency.value = 480; osc2.connect(gain); osc2.start();
+
+      const ring = () => {
+        if (!gain || !ctx) return;
+        const now = ctx.currentTime;
+        gain.gain.setValueAtTime(0.25, now);
+        gain.gain.setValueAtTime(0, now + 1.2);
+      };
+      ring();
+      intervalId = setInterval(ring, 4000);
+    } catch {}
+
+    return () => {
+      clearInterval(intervalId!);
+      try { osc1?.stop(); osc2?.stop(); ctx?.close(); } catch {}
+    };
+  }, [state, isIncoming]);
+
+  // ── Network quality (poll getStats every 2s while connected) ─────────────────
+
+  useEffect(() => {
+    if (state !== 'connected') return;
+    const id = setInterval(async () => {
+      const pc = pcRef.current;
+      if (!pc) return;
+      try {
+        const stats = await pc.getStats();
+        let loss = 0;
+        let jitter = 0;
+        stats.forEach((r: any) => {
+          if (r.type === 'inbound-rtp' && r.kind === 'audio') {
+            const total = (r.packetsLost ?? 0) + (r.packetsReceived ?? 1);
+            loss = (r.packetsLost ?? 0) / total;
+            jitter = r.jitter ?? 0;
+          }
+        });
+        if (loss > 0.15 || jitter > 0.1)       setNetQuality(0);
+        else if (loss > 0.08 || jitter > 0.05)  setNetQuality(1);
+        else if (loss > 0.04 || jitter > 0.02)  setNetQuality(2);
+        else if (loss > 0.01 || jitter > 0.01)  setNetQuality(3);
+        else                                     setNetQuality(4);
+      } catch {}
+    }, 2000);
+    return () => clearInterval(id);
+  }, [state]);
+
   function stopAllMedia() {
     if (localVideoRef.current) localVideoRef.current.srcObject = null;
     if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
@@ -252,6 +341,7 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
   // ── Controls ─────────────────────────────────────────────────────────────────
 
   function handleEnd() {
+    if (reconnectTimerRef.current) { clearTimeout(reconnectTimerRef.current); reconnectTimerRef.current = null; }
     if (callIdRef.current) {
       performCallAction(token, callIdRef.current, 'end').catch(() => {});
     }
@@ -347,12 +437,16 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
         {/* Info bar */}
         <div style={cs.infoBar}>
           <span style={cs.partnerName}>{partner}</span>
-          <span style={cs.callStatus}>
-            {state === 'ringing' && (isIncoming ? 'Incoming call…' : 'Ringing…')}
-            {state === 'connecting' && 'Connecting…'}
-            {state === 'connected' && fmtDur(duration)}
-            {state === 'ended' && 'Call ended'}
-          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={cs.callStatus}>
+              {state === 'calling'    && 'Calling…'}
+              {state === 'ringing'    && (isIncoming ? 'Incoming call…' : 'Ringing…')}
+              {state === 'connecting' && 'Connecting…'}
+              {state === 'connected'  && (reconnecting ? 'Reconnecting…' : fmtDur(duration))}
+              {state === 'ended'      && 'Call ended'}
+            </span>
+            {state === 'connected' && !reconnecting && <SignalBars quality={netQuality} />}
+          </div>
           {error && <span style={{ fontSize: '0.75rem', color: '#ef4444' }}>{error}</span>}
         </div>
 
@@ -364,8 +458,15 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
           </div>
         )}
 
+        {/* Outgoing: calling/ringing — just show cancel */}
+        {(state === 'calling' || (state === 'ringing' && !isIncoming)) && (
+          <div style={cs.controls}>
+            <ControlBtn icon="end" color="#ef4444" label="Cancel" onClick={handleEnd} />
+          </div>
+        )}
+
         {/* Active call controls */}
-        {state !== 'ringing' && state !== 'ended' && (
+        {(state === 'connecting' || state === 'connected') && (
           <div style={cs.controls}>
             <ControlBtn icon={muted ? 'mic-off' : 'mic'} color={muted ? '#ef4444' : '#374151'} label={muted ? 'Unmute' : 'Mute'} onClick={toggleMute} />
             {isVideo && (
@@ -409,6 +510,27 @@ function CtrlIcon({ name }: { name: IconName }) {
     case 'accept': return <svg viewBox="0 0 24 24" {...S}><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 1h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.64a16 16 0 0 0 6 6l.95-.95a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>;
     case 'decline': return <svg viewBox="0 0 24 24" {...S}><line x1="2" y1="2" x2="22" y2="22"/><path d="M16.5 9.4l-6.9-6.9M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07"/></svg>;
   }
+}
+
+// ── Signal quality bars ───────────────────────────────────────────────────────
+
+function SignalBars({ quality }: { quality: 0 | 1 | 2 | 3 | 4 }) {
+  const barColor = quality <= 1 ? '#ef4444' : quality <= 2 ? '#f59e0b' : '#22c55e';
+  return (
+    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2 }}>
+      {([1, 2, 3, 4] as const).map(i => (
+        <div
+          key={i}
+          style={{
+            width: 3,
+            height: 4 + i * 3,
+            background: i <= quality ? barColor : '#374151',
+            borderRadius: 1,
+          }}
+        />
+      ))}
+    </div>
+  );
 }
 
 // ── Styles ────────────────────────────────────────────────────────────────────
