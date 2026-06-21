@@ -363,26 +363,104 @@ private fun VideoView(
 
 @Composable
 private fun CallControls(uiState: CallUiState, viewModel: CallViewModel, showFlip: Boolean) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 32.dp),
-        horizontalArrangement = Arrangement.SpaceEvenly,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        SmallControl(
-            if (uiState.isMuted) Icons.Default.MicOff else Icons.Default.Mic,
-            if (uiState.isMuted) DilarionRed else SurfaceWhite,
-            viewModel::toggleMute,
-        )
-        if (showFlip) {
-            SmallControl(Icons.Default.FlipCameraAndroid, SurfaceWhite, viewModel::flipCamera)
+    val conferenceState by viewModel.conferenceState.collectAsState()
+    var showAddDialog by remember { mutableStateOf(false) }
+
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        // Participant chips when conference active
+        if (conferenceState.isActive && conferenceState.participants.isNotEmpty()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                conferenceState.participants.forEach { p ->
+                    Box(
+                        modifier = Modifier
+                            .padding(horizontal = 4.dp)
+                            .clip(RoundedCornerShape(50))
+                            .background(ControlButton),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Box(Modifier.size(6.dp).clip(CircleShape).background(AcceptGreen))
+                            Text(p, color = SurfaceWhite, fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
         }
-        CallActionButton(Icons.Default.CallEnd, "End", EndCallRed) { viewModel.endCall() }
-        SmallControl(
-            if (uiState.isSpeaker) Icons.Default.VolumeUp else Icons.Default.VolumeOff,
-            if (uiState.isSpeaker) DilarionRed else SurfaceWhite,
-            viewModel::toggleSpeaker,
+
+        // Main control row
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 32.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            SmallControl(
+                if (uiState.isMuted) Icons.Default.MicOff else Icons.Default.Mic,
+                if (uiState.isMuted) DilarionRed else SurfaceWhite,
+                viewModel::toggleMute,
+            )
+            if (showFlip) {
+                SmallControl(Icons.Default.FlipCameraAndroid, SurfaceWhite, viewModel::flipCamera)
+            }
+            // Add to call button
+            SmallControl(Icons.Default.PersonAdd, SurfaceWhite) { showAddDialog = true }
+            CallActionButton(Icons.Default.CallEnd, "End", EndCallRed) { viewModel.endCall() }
+            SmallControl(
+                if (uiState.isSpeaker) Icons.Default.VolumeUp else Icons.Default.VolumeOff,
+                if (uiState.isSpeaker) DilarionRed else SurfaceWhite,
+                viewModel::toggleSpeaker,
+            )
+        }
+    }
+
+    if (showAddDialog) {
+        AddToCallDialog(
+            onDismiss = { showAddDialog = false },
+            onConfirm = { username ->
+                showAddDialog = false
+                uiState.callId?.let { viewModel.startConferenceAndInvite(it, username) }
+            },
         )
     }
+}
+
+// ── Add-to-call dialog ──────────────────────────────────────────────────────
+
+@Composable
+private fun AddToCallDialog(onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
+    var username by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Default.PersonAdd, null, tint = DilarionRed) },
+        title = { Text("Add to Call", textAlign = TextAlign.Center) },
+        text = {
+            OutlinedTextField(
+                value = username,
+                onValueChange = { username = it },
+                label = { Text("Username") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+            )
+        },
+        confirmButton = {
+            Button(
+                onClick = { if (username.isNotBlank()) onConfirm(username.trim()) },
+                enabled = username.isNotBlank(),
+                colors = ButtonDefaults.buttonColors(containerColor = AcceptGreen),
+            ) { Text("Invite") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
 
 // ── Dialogs ─────────────────────────────────────────────────────────────────

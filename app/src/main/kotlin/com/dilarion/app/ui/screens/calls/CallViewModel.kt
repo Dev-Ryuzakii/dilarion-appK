@@ -356,6 +356,34 @@ class CallViewModel @Inject constructor(
         }
     }
 
+    fun startConferenceAndInvite(callId: Int, username: String) {
+        viewModelScope.launch {
+            val token = sessionManager.sessionToken.first() ?: return@launch
+            runCatching {
+                val existingConfId = _conferenceState.value.conferenceId
+                val confId = if (existingConfId != null) {
+                    existingConfId
+                } else {
+                    val resp = apiService.createConference("Bearer $token", mapOf("call_id" to callId))
+                    if (resp.isSuccessful) {
+                        val id = resp.body()?.get("conference_id")?.asInt
+                        if (id != null) {
+                            _conferenceState.value = ConferenceUiState(
+                                conferenceId = id,
+                                participants = listOf(_uiState.value.peerUsername),
+                                isActive = true,
+                            )
+                        }
+                        id
+                    } else null
+                }
+                if (confId != null) {
+                    apiService.conferenceInvite("Bearer $token", confId, mapOf("username" to username))
+                }
+            }
+        }
+    }
+
     fun inviteToConference(username: String) {
         val confId = _conferenceState.value.conferenceId ?: return
         viewModelScope.launch {
