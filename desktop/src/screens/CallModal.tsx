@@ -30,9 +30,12 @@ interface Props {
 const ICE_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
-  // TURN relay — required for calls across different networks (WiFi ↔ mobile data)
+  // Own VPS TURN — same server as backend, geographically close to users
+  { urls: 'turn:api.dilarion.eibstratoc.com:3478',            username: 'dilarion', credential: 'dilarion2026' },
+  { urls: 'turn:api.dilarion.eibstratoc.com:3478?transport=tcp', username: 'dilarion', credential: 'dilarion2026' },
+  { urls: 'turns:api.dilarion.eibstratoc.com:5349',           username: 'dilarion', credential: 'dilarion2026' },
+  // Public fallback
   { urls: 'turn:a.relay.metered.ca:80',             username: 'openrelayproject', credential: 'openrelayproject' },
-  { urls: 'turn:a.relay.metered.ca:443',            username: 'openrelayproject', credential: 'openrelayproject' },
   { urls: 'turn:a.relay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
 ];
 

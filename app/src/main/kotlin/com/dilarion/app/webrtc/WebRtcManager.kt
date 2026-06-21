@@ -51,10 +51,15 @@ class WebRtcManager @Inject constructor(
         PeerConnection.IceServer.builder("stun:stun2.l.google.com:19302").createIceServer(),
         PeerConnection.IceServer.builder("stun:stun3.l.google.com:19302").createIceServer(),
         PeerConnection.IceServer.builder("stun:stun4.l.google.com:19302").createIceServer(),
-        // TURN relay — required when STUN fails across different networks (mobile data ↔ WiFi)
+        // Own VPS TURN — geographically close, same server as backend
+        PeerConnection.IceServer.builder("turn:api.dilarion.eibstratoc.com:3478")
+            .setUsername("dilarion").setPassword("dilarion2026").createIceServer(),
+        PeerConnection.IceServer.builder("turn:api.dilarion.eibstratoc.com:3478?transport=tcp")
+            .setUsername("dilarion").setPassword("dilarion2026").createIceServer(),
+        PeerConnection.IceServer.builder("turns:api.dilarion.eibstratoc.com:5349")
+            .setUsername("dilarion").setPassword("dilarion2026").createIceServer(),
+        // Public fallback
         PeerConnection.IceServer.builder("turn:a.relay.metered.ca:80")
-            .setUsername("openrelayproject").setPassword("openrelayproject").createIceServer(),
-        PeerConnection.IceServer.builder("turn:a.relay.metered.ca:443")
             .setUsername("openrelayproject").setPassword("openrelayproject").createIceServer(),
         PeerConnection.IceServer.builder("turn:a.relay.metered.ca:443?transport=tcp")
             .setUsername("openrelayproject").setPassword("openrelayproject").createIceServer(),
