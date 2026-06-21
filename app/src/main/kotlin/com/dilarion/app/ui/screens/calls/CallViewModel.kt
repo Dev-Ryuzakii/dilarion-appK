@@ -8,6 +8,7 @@ import com.dilarion.app.data.model.CallInitiateRequest
 import com.dilarion.app.data.model.IceCandidateRequest
 import com.dilarion.app.data.model.IncomingCallData
 import com.dilarion.app.security.SessionManager
+import com.dilarion.app.services.NotificationHelper
 import com.dilarion.app.services.PresenceService
 import com.dilarion.app.webrtc.WebRtcManager
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -122,6 +123,7 @@ class CallViewModel @Inject constructor(
     }
 
     fun acceptCall(masterToken: String) {
+        NotificationHelper.stopRingtone()
         val callId = _uiState.value.callId ?: return
         val peerUsername = _uiState.value.peerUsername
         viewModelScope.launch {
@@ -149,6 +151,7 @@ class CallViewModel @Inject constructor(
     }
 
     fun declineCall() {
+        NotificationHelper.stopRingtone()
         val callId = _uiState.value.callId ?: run {
             _uiState.value = _uiState.value.copy(state = CallState.ENDED)
             return

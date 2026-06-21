@@ -44,6 +44,8 @@ class WebRtcManager @Inject constructor(
 
     // Set to true while a call is active; AudioMonitor checks this
     @Volatile var callActive: Boolean = false
+    // Track user's speaker preference so ICE reconnect doesn't override it
+    @Volatile private var userSpeakerOn: Boolean = true
 
     private val iceServers = listOf(
         PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
@@ -139,10 +141,10 @@ class WebRtcManager @Inject constructor(
                 Log.i(TAG, "iceConnectionState=$s")
                 if (s == PeerConnection.IceConnectionState.CONNECTED ||
                     s == PeerConnection.IceConnectionState.COMPLETED) {
-                    // Re-assert AudioManager mode so remote audio routes to speaker
+                    // Re-assert AudioManager mode, respect user's speaker preference
                     val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
                     am.mode = AudioManager.MODE_IN_COMMUNICATION
-                    am.isSpeakerphoneOn = true
+                    am.isSpeakerphoneOn = userSpeakerOn
                     Log.i(TAG, "audio mode reasserted on ICE connect")
                     // onAddTrack can fire before ICE is up; force-enable all remote receivers
                     peerConnection?.receivers?.forEach { receiver ->
@@ -324,7 +326,9 @@ class WebRtcManager @Inject constructor(
     }
 
     fun setSpeaker(speaker: Boolean) {
+        userSpeakerOn = speaker
         val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        am.mode = AudioManager.MODE_IN_COMMUNICATION
         am.isSpeakerphoneOn = speaker
         Log.i(TAG, "speaker=$speaker")
     }
