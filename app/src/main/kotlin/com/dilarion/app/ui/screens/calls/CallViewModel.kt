@@ -24,6 +24,12 @@ import javax.inject.Inject
 enum class CallState { IDLE, CALLING, RINGING, CONNECTED, INCOMING, ENDED }
 enum class CallType { VOICE, VIDEO }
 
+data class ConferenceUiState(
+    val conferenceId: Int? = null,
+    val participants: List<String> = emptyList(),
+    val isActive: Boolean = false,
+)
+
 data class CallUiState(
     val state: CallState = CallState.IDLE,
     val peerUsername: String = "",
@@ -47,8 +53,12 @@ class CallViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(CallUiState())
     val uiState: StateFlow<CallUiState> = _uiState
 
+    private val _conferenceState = MutableStateFlow(ConferenceUiState())
+    val conferenceState: StateFlow<ConferenceUiState> = _conferenceState
+
     val localVideo: StateFlow<VideoTrack?> = webRtcManager.localVideo
     val remoteVideo: StateFlow<VideoTrack?> = webRtcManager.remoteVideo
+    val conferenceRemoteVideos = webRtcManager.conferenceRemoteVideos
     val eglBaseContext: EglBase.Context get() = webRtcManager.eglBaseContext
 
     private var timerJob: kotlinx.coroutines.Job? = null
@@ -224,20 +234,155 @@ class CallViewModel @Inject constructor(
                     "ice_candidate" -> {
                         val callIdEvt = data.get("call_id")?.asInt ?: return@collect
                         if (callIdEvt != _uiState.value.callId) return@collect
-                        // candidate is a nested object: {sdpMid, sdpMLineIndex, candidate}
                         val candidateObj = runCatching { data.getAsJsonObject("candidate") }.getOrNull() ?: return@collect
                         val sdpMid = candidateObj.get("sdpMid")?.asString ?: return@collect
                         val sdpMLineIndex = candidateObj.get("sdpMLineIndex")?.asInt ?: 0
                         val candidateStr = candidateObj.get("candidate")?.asString ?: return@collect
                         if (!remoteDescSet) {
-                            // Buffer until acceptCall() calls handleOffer() which sets remote desc
                             pendingRemoteCandidates.add(Triple(sdpMid, sdpMLineIndex, candidateStr))
                         } else {
                             webRtcManager.addIceCandidate(sdpMid, sdpMLineIndex, candidateStr)
                         }
                     }
+
+                    // ── Conference signaling ──────────────────────────────────
+                    "conference_invite" -> {
+                        val confId = data.get("conference_id")?.asInt ?: return@collect
+                        val invitedBy = data.get("invited_by")?.asString ?: return@collect
+                        val existing = data.getAsJsonArray("existing_participants")
+                            ?.map { it.asString } ?: emptyList()
+                        _conferenceState.value = ConferenceUiState(
+                            conferenceId = confId,
+                            participants = existing,
+                            isActive = true,
+                        )
+                        // Create peer connections to all existing participants
+                        val token = sessionManager.sessionToken.first() ?: return@collect
+                        existing.forEach { peerUsername ->
+                            webRtcManager.createConferencePeer(peerUsername) { candidate ->
+                                viewModelScope.launch {
+                                    sendConferenceSignal(token, confId, peerUsername, "ice_candidate", mapOf(
+                                        "sdpMid" to candidate.sdpMid,
+                                        "sdpMLineIndex" to candidate.sdpMLineIndex,
+                                        "candidate" to candidate.sdp,
+                                    ))
+                                }
+                            }
+                        }
+                    }
+
+                    "conference_peer_connect" -> {
+                        val confId = data.get("conference_id")?.asInt ?: return@collect
+                        val peerUsername = data.get("peer_username")?.asString ?: return@collect
+                        val role = data.get("role")?.asString ?: "offer"
+                        val token = sessionManager.sessionToken.first() ?: return@collect
+                        webRtcManager.createConferencePeer(peerUsername) { candidate ->
+                            viewModelScope.launch {
+                                sendConferenceSignal(token, confId, peerUsername, "ice_candidate", mapOf(
+                                    "sdpMid" to candidate.sdpMid,
+                                    "sdpMLineIndex" to candidate.sdpMLineIndex,
+                                    "candidate" to candidate.sdp,
+                                ))
+                            }
+                        }
+                        if (role == "offer") {
+                            val offerSdp = webRtcManager.createConferenceOffer(peerUsername) ?: return@collect
+                            sendConferenceSignal(token, confId, peerUsername, "offer", mapOf("sdp" to offerSdp))
+                        }
+                        val prev = _conferenceState.value
+                        _conferenceState.value = prev.copy(
+                            conferenceId = confId,
+                            participants = (prev.participants + peerUsername).distinct(),
+                            isActive = true,
+                        )
+                    }
+
+                    "conference_signal" -> {
+                        val confId = data.get("conference_id")?.asInt ?: return@collect
+                        val fromUser = data.get("from")?.asString ?: return@collect
+                        val signalType = data.get("signal_type")?.asString ?: return@collect
+                        val signalData = runCatching { data.getAsJsonObject("data") }.getOrNull() ?: return@collect
+                        val token = sessionManager.sessionToken.first() ?: return@collect
+                        when (signalType) {
+                            "offer" -> {
+                                val sdp = signalData.get("sdp")?.asString ?: return@collect
+                                val answer = webRtcManager.handleConferenceOffer(fromUser, sdp) ?: return@collect
+                                sendConferenceSignal(token, confId, fromUser, "answer", mapOf("sdp" to answer))
+                            }
+                            "answer" -> {
+                                val sdp = signalData.get("sdp")?.asString ?: return@collect
+                                webRtcManager.handleConferenceAnswer(fromUser, sdp)
+                            }
+                            "ice_candidate" -> {
+                                val mid = signalData.get("sdpMid")?.asString ?: return@collect
+                                val idx = signalData.get("sdpMLineIndex")?.asInt ?: 0
+                                val cand = signalData.get("candidate")?.asString ?: return@collect
+                                webRtcManager.addConferenceIceCandidate(fromUser, mid, idx, cand)
+                            }
+                        }
+                    }
+
+                    "conference_participant_left" -> {
+                        val peerUsername = data.get("username")?.asString ?: return@collect
+                        webRtcManager.removeConferencePeer(peerUsername)
+                        val prev = _conferenceState.value
+                        val updated = prev.participants.filter { it != peerUsername }
+                        _conferenceState.value = prev.copy(
+                            participants = updated,
+                            isActive = updated.isNotEmpty(),
+                        )
+                    }
                 }
             }
+        }
+    }
+
+    fun startConference(callId: Int) {
+        viewModelScope.launch {
+            val token = sessionManager.sessionToken.first() ?: return@launch
+            runCatching {
+                val resp = apiService.createConference("Bearer $token", mapOf("call_id" to callId))
+                if (resp.isSuccessful) {
+                    val confId = resp.body()?.get("conference_id")?.asInt
+                    if (confId != null) {
+                        _conferenceState.value = ConferenceUiState(
+                            conferenceId = confId,
+                            participants = listOf(_uiState.value.peerUsername),
+                            isActive = true,
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    fun inviteToConference(username: String) {
+        val confId = _conferenceState.value.conferenceId ?: return
+        viewModelScope.launch {
+            val token = sessionManager.sessionToken.first() ?: return@launch
+            runCatching {
+                apiService.conferenceInvite("Bearer $token", confId, mapOf("username" to username))
+            }
+        }
+    }
+
+    fun leaveConference() {
+        val confId = _conferenceState.value.conferenceId ?: return
+        viewModelScope.launch {
+            val token = sessionManager.sessionToken.first() ?: return@launch
+            runCatching { apiService.conferenceLeave("Bearer $token", confId) }
+            webRtcManager.closeConference()
+            _conferenceState.value = ConferenceUiState()
+        }
+    }
+
+    private suspend fun sendConferenceSignal(token: String, confId: Int, to: String, signalType: String, data: Any) {
+        runCatching {
+            apiService.conferenceSignal("Bearer $token", confId, mapOf(
+                "to" to to,
+                "signal_type" to signalType,
+                "data" to data,
+            ))
         }
     }
 

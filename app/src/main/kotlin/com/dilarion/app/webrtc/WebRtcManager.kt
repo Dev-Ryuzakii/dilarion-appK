@@ -3,6 +3,7 @@ package com.dilarion.app.webrtc
 import android.content.Context
 import android.content.pm.PackageManager
 import android.media.AudioAttributes
+import android.media.AudioDeviceInfo
 import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.os.Build
@@ -47,6 +48,11 @@ class WebRtcManager @Inject constructor(
     // Track user's speaker preference so ICE reconnect doesn't override it
     @Volatile private var userSpeakerOn: Boolean = true
 
+    // Conference: map peerUsername → PeerConnection for multi-party calls
+    private val conferencePeers = mutableMapOf<String, PeerConnection>()
+    private val _conferenceRemoteVideos = MutableStateFlow<Map<String, VideoTrack?>>(emptyMap())
+    val conferenceRemoteVideos: StateFlow<Map<String, VideoTrack?>> = _conferenceRemoteVideos
+
     private val iceServers = listOf(
         PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
         PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer(),
@@ -89,9 +95,7 @@ class WebRtcManager @Inject constructor(
 
         requestAudioFocus()
 
-        val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-        am.mode = AudioManager.MODE_IN_COMMUNICATION
-        am.isSpeakerphoneOn = true  // Default speaker ON — user can toggle off
+        applyAudioOutput(true)  // Default speaker ON — user can toggle off
 
         val audioConstraints = MediaConstraints().apply {
             mandatory.add(MediaConstraints.KeyValuePair("googEchoCancellation", "true"))
@@ -141,11 +145,8 @@ class WebRtcManager @Inject constructor(
                 Log.i(TAG, "iceConnectionState=$s")
                 if (s == PeerConnection.IceConnectionState.CONNECTED ||
                     s == PeerConnection.IceConnectionState.COMPLETED) {
-                    // Re-assert AudioManager mode, respect user's speaker preference
-                    val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-                    am.mode = AudioManager.MODE_IN_COMMUNICATION
-                    am.isSpeakerphoneOn = userSpeakerOn
-                    Log.i(TAG, "audio mode reasserted on ICE connect")
+                    applyAudioOutput(userSpeakerOn)
+                    Log.i(TAG, "audio output re-applied on ICE connect, speaker=$userSpeakerOn")
                     // onAddTrack can fire before ICE is up; force-enable all remote receivers
                     peerConnection?.receivers?.forEach { receiver ->
                         (receiver.track() as? AudioTrack)?.let { t ->
@@ -327,15 +328,147 @@ class WebRtcManager @Inject constructor(
 
     fun setSpeaker(speaker: Boolean) {
         userSpeakerOn = speaker
-        val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-        am.mode = AudioManager.MODE_IN_COMMUNICATION
-        am.isSpeakerphoneOn = speaker
-        Log.i(TAG, "speaker=$speaker")
+        applyAudioOutput(speaker)
+        Log.i(TAG, "speaker toggled=$speaker")
     }
 
     fun flipCamera() { videoCapturer?.switchCamera(null) }
 
+    // ── Conference (multi-party) ──────────────────────────────────────────────
+
+    fun createConferencePeer(peerUsername: String, onIce: (IceCandidate) -> Unit): PeerConnection? {
+        val f = factory ?: return null
+        val rtcConfig = PeerConnection.RTCConfiguration(iceServers).apply {
+            sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
+            continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
+            bundlePolicy = PeerConnection.BundlePolicy.MAXBUNDLE
+            rtcpMuxPolicy = PeerConnection.RtcpMuxPolicy.REQUIRE
+        }
+        val pc = f.createPeerConnection(rtcConfig, object : PeerConnection.Observer {
+            override fun onSignalingChange(s: PeerConnection.SignalingState?) {}
+            override fun onIceConnectionChange(s: PeerConnection.IceConnectionState?) {
+                if (s == PeerConnection.IceConnectionState.CONNECTED ||
+                    s == PeerConnection.IceConnectionState.COMPLETED) {
+                    applyAudioOutput(userSpeakerOn)
+                    conferencePeers[peerUsername]?.receivers?.forEach { receiver ->
+                        val audioTrack = receiver.track() as? AudioTrack
+                        audioTrack?.setEnabled(true)
+                        val videoTrack = receiver.track() as? VideoTrack
+                        if (videoTrack != null) {
+                            videoTrack.setEnabled(true)
+                            _conferenceRemoteVideos.value = _conferenceRemoteVideos.value + (peerUsername to videoTrack)
+                        }
+                    }
+                }
+            }
+            override fun onIceConnectionReceivingChange(b: Boolean) {}
+            override fun onIceGatheringChange(s: PeerConnection.IceGatheringState?) {}
+            override fun onIceCandidate(candidate: IceCandidate?) { candidate?.let { onIce(it) } }
+            override fun onIceCandidatesRemoved(cs: Array<out IceCandidate>?) {}
+            override fun onAddStream(stream: MediaStream?) {}
+            override fun onRemoveStream(stream: MediaStream?) {}
+            override fun onDataChannel(dc: DataChannel?) {}
+            override fun onRenegotiationNeeded() {}
+            override fun onAddTrack(receiver: RtpReceiver?, streams: Array<out MediaStream>?) {
+                val track = receiver?.track() ?: return
+                when (track) {
+                    is VideoTrack -> {
+                        track.setEnabled(true)
+                        _conferenceRemoteVideos.value = _conferenceRemoteVideos.value + (peerUsername to track)
+                    }
+                    is AudioTrack -> track.setEnabled(true)
+                }
+            }
+        }) ?: return null
+
+        // Add local tracks to this conference peer connection
+        localAudioTrack?.let { pc.addTrack(it, listOf("ARDAMS")) }
+        localVideoTrackInternal?.let { pc.addTrack(it, listOf("ARDAMS")) }
+        conferencePeers[peerUsername] = pc
+        Log.i(TAG, "conference peer created for $peerUsername")
+        return pc
+    }
+
+    suspend fun createConferenceOffer(peerUsername: String): String? {
+        val pc = conferencePeers[peerUsername] ?: return null
+        return suspendCancellableCoroutine { cont ->
+            val constraints = MediaConstraints().apply {
+                mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"))
+                mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo", "true"))
+            }
+            pc.createOffer(object : SdpObserver {
+                override fun onCreateSuccess(sdp: SessionDescription?) {
+                    if (sdp == null) { if (cont.isActive) cont.resume(null); return }
+                    pc.setLocalDescription(object : SdpObserver {
+                        override fun onCreateSuccess(p: SessionDescription?) {}
+                        override fun onSetSuccess() { if (cont.isActive) cont.resume(sdp.description) }
+                        override fun onCreateFailure(e: String?) {}
+                        override fun onSetFailure(e: String?) { if (cont.isActive) cont.resume(null) }
+                    }, sdp)
+                }
+                override fun onSetSuccess() {}
+                override fun onCreateFailure(e: String?) { if (cont.isActive) cont.resume(null) }
+                override fun onSetFailure(e: String?) {}
+            }, constraints)
+        }
+    }
+
+    suspend fun handleConferenceOffer(peerUsername: String, sdpStr: String): String? {
+        val pc = conferencePeers[peerUsername] ?: return null
+        return suspendCancellableCoroutine { cont ->
+            pc.setRemoteDescription(object : SdpObserver {
+                override fun onCreateSuccess(p: SessionDescription?) {}
+                override fun onSetSuccess() {
+                    val constraints = MediaConstraints().apply {
+                        mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"))
+                        mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo", "true"))
+                    }
+                    pc.createAnswer(object : SdpObserver {
+                        override fun onCreateSuccess(ans: SessionDescription?) {
+                            if (ans == null) { if (cont.isActive) cont.resume(null); return }
+                            pc.setLocalDescription(object : SdpObserver {
+                                override fun onCreateSuccess(p: SessionDescription?) {}
+                                override fun onSetSuccess() { if (cont.isActive) cont.resume(ans.description) }
+                                override fun onCreateFailure(p: String?) {}
+                                override fun onSetFailure(e: String?) { if (cont.isActive) cont.resume(null) }
+                            }, ans)
+                        }
+                        override fun onSetSuccess() {}
+                        override fun onCreateFailure(e: String?) { if (cont.isActive) cont.resume(null) }
+                        override fun onSetFailure(e: String?) {}
+                    }, constraints)
+                }
+                override fun onCreateFailure(p: String?) {}
+                override fun onSetFailure(e: String?) { if (cont.isActive) cont.resume(null) }
+            }, SessionDescription(SessionDescription.Type.OFFER, sdpStr))
+        }
+    }
+
+    fun handleConferenceAnswer(peerUsername: String, sdpStr: String) {
+        conferencePeers[peerUsername]?.setRemoteDescription(object : SdpObserver {
+            override fun onCreateSuccess(p: SessionDescription?) {}
+            override fun onSetSuccess() { Log.i(TAG, "conference answer set for $peerUsername") }
+            override fun onCreateFailure(p: String?) {}
+            override fun onSetFailure(e: String?) { Log.e(TAG, "conference answer failed for $peerUsername: $e") }
+        }, SessionDescription(SessionDescription.Type.ANSWER, sdpStr))
+    }
+
+    fun addConferenceIceCandidate(peerUsername: String, sdpMid: String, sdpMLineIndex: Int, candidateStr: String) {
+        conferencePeers[peerUsername]?.addIceCandidate(IceCandidate(sdpMid, sdpMLineIndex, candidateStr))
+    }
+
+    fun removeConferencePeer(peerUsername: String) {
+        conferencePeers.remove(peerUsername)?.dispose()
+        _conferenceRemoteVideos.value = _conferenceRemoteVideos.value - peerUsername
+        Log.i(TAG, "conference peer removed: $peerUsername")
+    }
+
+    fun closeConference() {
+        conferencePeers.keys.toList().forEach { removeConferencePeer(it) }
+    }
+
     fun closeCall() {
+        closeConference()
         callActive = false
         try { videoCapturer?.stopCapture() } catch (_: Exception) {}
         videoCapturer?.dispose()
@@ -351,10 +484,35 @@ class WebRtcManager @Inject constructor(
         _localVideo.value = null
         _remoteVideo.value = null
         val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            am.clearCommunicationDevice()
+        } else {
+            @Suppress("DEPRECATION")
+            am.isSpeakerphoneOn = false
+        }
         am.mode = AudioManager.MODE_NORMAL
-        am.isSpeakerphoneOn = false
         abandonAudioFocus()
         Log.i(TAG, "call closed")
+    }
+
+    private fun applyAudioOutput(speaker: Boolean) {
+        val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        am.mode = AudioManager.MODE_IN_COMMUNICATION
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val targetType = if (speaker) AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
+                             else         AudioDeviceInfo.TYPE_BUILTIN_EARPIECE
+            val device = am.availableCommunicationDevices.firstOrNull { it.type == targetType }
+            if (device != null) {
+                am.setCommunicationDevice(device)
+                Log.i(TAG, "setCommunicationDevice speaker=$speaker type=$targetType")
+            } else {
+                Log.w(TAG, "no device for type=$targetType available=${am.availableCommunicationDevices.map { it.type }}")
+            }
+        } else {
+            @Suppress("DEPRECATION")
+            am.isSpeakerphoneOn = speaker
+            Log.i(TAG, "isSpeakerphoneOn=$speaker (legacy API)")
+        }
     }
 
     private fun requestAudioFocus() {

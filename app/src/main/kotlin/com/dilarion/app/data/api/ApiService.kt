@@ -113,6 +113,34 @@ interface ApiService {
     @GET("calls/history")
     suspend fun getCallHistory(@Header("Authorization") bearer: String): Response<CallHistoryResponse>
 
+    // ─── Conference ────────────────────────────────────────────────────────────
+
+    @POST("calls/conference/create")
+    suspend fun createConference(
+        @Header("Authorization") bearer: String,
+        @Body body: Map<String, @JvmSuppressWildcards Any>,
+    ): Response<com.google.gson.JsonObject>
+
+    @POST("calls/conference/{id}/invite")
+    suspend fun conferenceInvite(
+        @Header("Authorization") bearer: String,
+        @Path("id") conferenceId: Int,
+        @Body body: Map<String, @JvmSuppressWildcards Any>,
+    ): Response<com.google.gson.JsonObject>
+
+    @POST("calls/conference/{id}/signal")
+    suspend fun conferenceSignal(
+        @Header("Authorization") bearer: String,
+        @Path("id") conferenceId: Int,
+        @Body body: Map<String, @JvmSuppressWildcards Any>,
+    ): Response<com.google.gson.JsonObject>
+
+    @POST("calls/conference/{id}/leave")
+    suspend fun conferenceLeave(
+        @Header("Authorization") bearer: String,
+        @Path("id") conferenceId: Int,
+    ): Response<com.google.gson.JsonObject>
+
     // ─── Media ─────────────────────────────────────────────────────────────────
 
     @Multipart
