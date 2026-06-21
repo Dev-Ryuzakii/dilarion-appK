@@ -850,6 +850,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
 
   // ── Call state ───────────────────────────────────────────────────────────────
   const [activeCall, setActiveCall] = useState<{ partner: string; callType: CallType; isIncoming: boolean; callId?: number; offerSdp?: string } | null>(null);
+  const [callMinimized, setCallMinimized] = useState(false);
   const [incomingCall, setIncomingCall] = useState<IncomingCall | null>(null);
   const [callTokenInput, setCallTokenInput] = useState('');
   const [callTokenError, setCallTokenError] = useState<string | null>(null);
@@ -1010,6 +1011,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
   }
 
   function handleCall(partner: string, callType: CallType) {
+    setCallMinimized(false);
     setActiveCall({ partner, callType, isIncoming: false });
   }
 
@@ -1352,7 +1354,10 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
           callId={activeCall.callId}
           offerSdp={activeCall.offerSdp}
           masterToken={masterToken ?? undefined}
-          onEnd={() => setActiveCall(null)}
+          onEnd={() => { setActiveCall(null); setCallMinimized(false); }}
+          minimized={callMinimized}
+          onMinimize={() => setCallMinimized(true)}
+          onMaximize={() => setCallMinimized(false)}
         />
       )}
 
@@ -1449,6 +1454,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
                   stopRinging();
                   setCallTokenInput('');
                   setCallTokenError(null);
+                  setCallMinimized(false);
                   setActiveCall({ partner: incomingCall.from, callType: incomingCall.callType, isIncoming: true, callId: incomingCall.callId, offerSdp: incomingCall.offerSdp });
                   setIncomingCall(null);
                 }}

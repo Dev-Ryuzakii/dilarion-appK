@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { presenceService } from '../services/presence';
-import { initiateCall, performCallAction, sendCallIceCandidate } from '../services/api';
+import { initiateCall, performCallAction, sendCallIceCandidate, createConference, conferenceInvite, conferenceSignal, conferenceLeave } from '../services/api';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -23,6 +23,22 @@ interface Props {
   offerSdp?: string;     // set for incoming calls
   masterToken?: string;  // required by backend to accept calls
   onEnd: () => void;
+  minimized?: boolean;
+  onMinimize?: () => void;
+  onMaximize?: () => void;
+}
+
+// ── ICE gather helper — waits for 'complete' with timeout ────────────────────
+
+function waitForIceGathering(pc: RTCPeerConnection, timeoutMs = 3500): Promise<void> {
+  return new Promise(resolve => {
+    if (pc.iceGatheringState === 'complete') { resolve(); return; }
+    const timer = setTimeout(resolve, timeoutMs);
+    const check = () => {
+      if (pc.iceGatheringState === 'complete') { clearTimeout(timer); resolve(); }
+    };
+    pc.addEventListener('icegatheringstatechange', check);
+  });
 }
 
 // ── ICE servers (STUN) ────────────────────────────────────────────────────────
@@ -49,7 +65,7 @@ function fmtDur(s: number) {
 
 // ── CallModal ─────────────────────────────────────────────────────────────────
 
-export default function CallModal({ token, partner, callType, isIncoming, callId: incomingCallId, offerSdp: incomingOfferSdp, masterToken, onEnd }: Props) {
+export default function CallModal({ token, partner, callType, isIncoming, callId: incomingCallId, offerSdp: incomingOfferSdp, masterToken, onEnd, minimized = false, onMinimize, onMaximize }: Props) {
   // calling = outgoing, waiting for callee to receive; ringing = callee's device is ringing; connecting = SDP negotiating
   const [state, setState] = useState<'calling' | 'ringing' | 'connecting' | 'connected' | 'ended'>(
     isIncoming ? 'ringing' : 'calling',
@@ -64,7 +80,15 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
   const iceRestartedRef = useRef(false);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const [conferenceId, setConferenceId] = useState<number | null>(null);
+  const [confParticipants, setConfParticipants] = useState<string[]>([]);
+  const [addingParticipant, setAddingParticipant] = useState(false);
+  const [addUsername, setAddUsername] = useState('');
+
   const pcRef = useRef<RTCPeerConnection | null>(null);
+  // Conference: one RTCPeerConnection per remote peer username
+  const confPeersRef = useRef<Map<string, RTCPeerConnection>>(new Map());
+  const confAudioElemsRef = useRef<Map<string, HTMLAudioElement>>(new Map());
   const localStreamRef = useRef<MediaStream | null>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);
   const localVideoRef = useRef<HTMLVideoElement>(null);
@@ -81,7 +105,7 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
   // ── WebRTC setup ─────────────────────────────────────────────────────────────
 
   const createPc = useCallback(() => {
-    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS, iceCandidatePoolSize: 10 });
 
     pc.onicecandidate = ({ candidate }) => {
       if (!candidate) return;
@@ -157,21 +181,22 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
     }
   }, [callType]);
 
-  // Caller: get media → create offer → POST /calls/initiate → wait for call_status_update
+  // Caller: get media → create offer → wait for ICE gather → POST /calls/initiate
   const startCall = useCallback(async () => {
     const stream = await startLocalMedia();
     if (!stream) return;
     const pc = createPc();
     stream.getTracks().forEach(t => pc.addTrack(t, stream));
 
-    // Create offer SDP
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
+    // Wait for TURN relay candidates to be gathered (up to 3.5s) so SDP includes them
+    await waitForIceGathering(pc);
 
     try {
-      const { call_id } = await initiateCall(token, partner, callType, offer.sdp);
+      const { call_id } = await initiateCall(token, partner, callType, pc.localDescription!.sdp);
       callIdRef.current = call_id;
-      // Flush buffered ICE candidates now that we have the call_id
+      // Flush any late-arriving candidates
       const buffered = iceBufRef.current.splice(0);
       buffered.forEach(c => sendCallIceCandidate(token, call_id, partner, c).catch(() => {}));
     } catch (err: any) {
@@ -179,7 +204,7 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
     }
   }, [startLocalMedia, createPc, token, partner, callType]);
 
-  // Callee: accept → get media → handle offer SDP → POST /calls/action accept
+  // Callee: accept → get media → handle offer SDP → wait for ICE gather → POST /calls/action accept
   const acceptCall = useCallback(async () => {
     setState('connecting');
     const stream = await startLocalMedia();
@@ -191,9 +216,16 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
     if (incomingOfferSdp) {
       await pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: incomingOfferSdp }));
       remoteDescSetRef.current = true;
+      // Flush ICE candidates that arrived before we accepted
+      const queued = remoteIceBufRef.current.splice(0);
+      for (const c of queued) {
+        try { await pc.addIceCandidate(new RTCIceCandidate(c)); } catch {}
+      }
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
-      answerSdp = answer.sdp;
+      // Wait for TURN relay candidates to be gathered before sending answer
+      await waitForIceGathering(pc);
+      answerSdp = pc.localDescription!.sdp;
     }
 
     if (callIdRef.current) {
@@ -250,6 +282,53 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
       // Legacy p2p fallback: call_end sent directly by other desktop client
       if (msg.type === 'call_end' && (msg.sender === partner || msg.from === partner)) {
         handleEnd();
+      }
+
+      // ── Conference signaling ────────────────────────────────────────────────
+      if (msg.type === 'conference_invite') {
+        const confId: number = data.conference_id;
+        const existing: string[] = data.existing_participants || [];
+        setConferenceId(confId);
+        setConfParticipants(existing);
+        // Connect to each existing participant
+        for (const peer of existing) {
+          createConferencePeer(peer, confId);
+        }
+      }
+
+      if (msg.type === 'conference_peer_connect') {
+        const confId: number = data.conference_id;
+        const peer: string = data.peer_username;
+        const role: string = data.role || 'offer';
+        const pc = createConferencePeer(peer, confId);
+        if (role === 'offer') {
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          await conferenceSignal(token, confId, peer, 'offer', { sdp: offer.sdp }).catch(() => {});
+        }
+        setConferenceId(confId);
+      }
+
+      if (msg.type === 'conference_signal') {
+        const confId: number = data.conference_id;
+        const fromUser: string = data.from;
+        const signalType: string = data.signal_type;
+        const signalData: any = data.data;
+        const pc = confPeersRef.current.get(fromUser) || createConferencePeer(fromUser, confId);
+        if (signalType === 'offer') {
+          await pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: signalData.sdp }));
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          await conferenceSignal(token, confId, fromUser, 'answer', { sdp: answer.sdp }).catch(() => {});
+        } else if (signalType === 'answer') {
+          await pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: signalData.sdp }));
+        } else if (signalType === 'ice_candidate') {
+          try { await pc.addIceCandidate(new RTCIceCandidate(signalData)); } catch {}
+        }
+      }
+
+      if (msg.type === 'conference_participant_left') {
+        removeConferencePeer(data.username);
       }
     };
 
@@ -318,6 +397,64 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
     return () => clearInterval(id);
   }, [state]);
 
+  // ── Conference peer helpers ───────────────────────────────────────────────────
+
+  const createConferencePeer = useCallback((peerUsername: string, confId: number) => {
+    if (confPeersRef.current.has(peerUsername)) return confPeersRef.current.get(peerUsername)!;
+    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+
+    pc.onicecandidate = ({ candidate }) => {
+      if (!candidate) return;
+      conferenceSignal(token, confId, peerUsername, 'ice_candidate', candidate.toJSON()).catch(() => {});
+    };
+
+    pc.ontrack = (e) => {
+      const stream = e.streams[0];
+      if (!stream) return;
+      // Create / reuse a dedicated audio element per peer
+      let audio = confAudioElemsRef.current.get(peerUsername);
+      if (!audio) {
+        audio = document.createElement('audio');
+        audio.autoplay = true;
+        document.body.appendChild(audio);
+        confAudioElemsRef.current.set(peerUsername, audio);
+      }
+      audio.srcObject = stream;
+      audio.play().catch(() => {});
+    };
+
+    // Add local tracks so conference peer can hear us
+    localStreamRef.current?.getTracks().forEach(t => {
+      pc.addTrack(t, localStreamRef.current!);
+    });
+
+    confPeersRef.current.set(peerUsername, pc);
+    setConfParticipants(p => [...new Set([...p, peerUsername])]);
+    return pc;
+  }, [token]);
+
+  const removeConferencePeer = useCallback((peerUsername: string) => {
+    confPeersRef.current.get(peerUsername)?.close();
+    confPeersRef.current.delete(peerUsername);
+    const audio = confAudioElemsRef.current.get(peerUsername);
+    if (audio) { audio.srcObject = null; audio.remove(); confAudioElemsRef.current.delete(peerUsername); }
+    setConfParticipants(p => p.filter(u => u !== peerUsername));
+  }, []);
+
+  async function handleAddParticipant() {
+    if (!addUsername.trim() || !callIdRef.current) return;
+    let confId = conferenceId;
+    if (!confId) {
+      const res = await createConference(token, callIdRef.current);
+      confId = res.conference_id;
+      setConferenceId(confId);
+      setConfParticipants([partner]);
+    }
+    await conferenceInvite(token, confId, addUsername.trim());
+    setAddUsername('');
+    setAddingParticipant(false);
+  }
+
   function stopAllMedia() {
     if (localVideoRef.current) localVideoRef.current.srcObject = null;
     if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
@@ -326,6 +463,12 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
     screenStreamRef.current?.getTracks().forEach(t => t.stop());
     localStreamRef.current = null;
     screenStreamRef.current = null;
+    // Close all conference peer connections
+    confPeersRef.current.forEach(pc => pc.close());
+    confPeersRef.current.clear();
+    confAudioElemsRef.current.forEach(audio => { audio.srcObject = null; audio.remove(); });
+    confAudioElemsRef.current.clear();
+    if (conferenceId) conferenceLeave(token, conferenceId).catch(() => {});
     pcRef.current?.close();
     pcRef.current = null;
   }
@@ -397,6 +540,29 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
 
   const isVideo = callType === 'video';
 
+  // Minimized: floating mini-pill at bottom-right — WebRTC keeps running
+  if (minimized) {
+    return (
+      <div style={cs.miniPill}>
+        <div style={cs.miniAvatar}>{partner.slice(0, 2).toUpperCase()}</div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ color: '#f1f5f9', fontWeight: 700, fontSize: '0.85rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{partner}</div>
+          <div style={{ color: '#22c55e', fontSize: '0.72rem', marginTop: 2 }}>
+            {state === 'connected' ? fmtDur(duration) : state === 'connecting' ? 'Connecting…' : 'Call…'}
+          </div>
+        </div>
+        <button onClick={onMaximize} style={cs.miniBtn} title="Expand">
+          <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="#fff" strokeWidth={2} strokeLinecap="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
+        </button>
+        <button onClick={handleEnd} style={{ ...cs.miniBtn, background: '#ef4444' }} title="End call">
+          <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="#fff" strokeWidth={2} strokeLinecap="round"><path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07"/><line x1="2" y1="2" x2="22" y2="22" stroke="#fff" strokeWidth="2"/></svg>
+        </button>
+        {/* Hidden audio elements keep playing */}
+        <audio ref={remoteAudioRef} autoPlay style={{ display: 'none' }} />
+      </div>
+    );
+  }
+
   return (
     <div style={cs.overlay}>
       <div style={cs.modal}>
@@ -438,7 +604,16 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
         )}
 
         {/* Info bar */}
-        <div style={cs.infoBar}>
+        <div style={{ ...cs.infoBar, position: 'relative' }}>
+          {onMinimize && state !== 'ringing' && (
+            <button
+              onClick={onMinimize}
+              title="Minimize"
+              style={{ position: 'absolute', top: 12, right: 12, background: 'transparent', border: 'none', cursor: 'pointer', padding: 4, borderRadius: 6, color: '#9ca3af' }}
+            >
+              <svg viewBox="0 0 24 24" width={18} height={18} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round"><path d="M8 3v3a2 2 0 0 1-2 2H3M21 8h-3a2 2 0 0 1-2-2V3M3 16h3a2 2 0 0 1 2 2v3M16 21v-3a2 2 0 0 1 2-2h3"/></svg>
+            </button>
+          )}
           <span style={cs.partnerName}>{partner}</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={cs.callStatus}>
@@ -468,6 +643,33 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
           </div>
         )}
 
+        {/* Conference participants list */}
+        {confParticipants.length > 0 && (
+          <div style={{ display: 'flex', gap: 6, padding: '8px 16px', flexWrap: 'wrap' }}>
+            {confParticipants.map(p => (
+              <div key={p} style={{ background: '#1f2937', borderRadius: 20, padding: '4px 10px', fontSize: '0.75rem', color: '#d1d5db', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#22c55e', display: 'inline-block' }} />
+                {p}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Add participant dialog */}
+        {addingParticipant && (
+          <div style={{ display: 'flex', gap: 8, padding: '8px 16px' }}>
+            <input
+              value={addUsername}
+              onChange={e => setAddUsername(e.target.value)}
+              placeholder="Username to add..."
+              onKeyDown={e => e.key === 'Enter' && handleAddParticipant()}
+              style={{ flex: 1, background: '#1f2937', border: '1px solid #374151', borderRadius: 8, padding: '6px 10px', color: '#fff', fontSize: '0.85rem' }}
+            />
+            <button onClick={handleAddParticipant} style={{ background: '#3b82f6', border: 'none', borderRadius: 8, padding: '6px 12px', color: '#fff', cursor: 'pointer', fontSize: '0.85rem' }}>Add</button>
+            <button onClick={() => setAddingParticipant(false)} style={{ background: '#374151', border: 'none', borderRadius: 8, padding: '6px 12px', color: '#9ca3af', cursor: 'pointer', fontSize: '0.85rem' }}>✕</button>
+          </div>
+        )}
+
         {/* Active call controls */}
         {(state === 'connecting' || state === 'connected') && (
           <div style={cs.controls}>
@@ -477,6 +679,9 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
             )}
             {isVideo && (
               <ControlBtn icon="screen" color={sharing ? '#3b82f6' : '#374151'} label={sharing ? 'Stop Share' : 'Share Screen'} onClick={toggleScreenShare} />
+            )}
+            {state === 'connected' && (
+              <ControlBtn icon="add-user" color={addingParticipant ? '#3b82f6' : '#374151'} label="Add" onClick={() => setAddingParticipant(a => !a)} />
             )}
             <ControlBtn icon="end" color="#ef4444" label="End" onClick={handleEnd} />
           </div>
@@ -488,7 +693,7 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
 
 // ── Control button ────────────────────────────────────────────────────────────
 
-type IconName = 'mic' | 'mic-off' | 'cam' | 'cam-off' | 'screen' | 'end' | 'accept' | 'decline';
+type IconName = 'mic' | 'mic-off' | 'cam' | 'cam-off' | 'screen' | 'end' | 'accept' | 'decline' | 'add-user';
 
 function ControlBtn({ icon, color, label, onClick }: { icon: IconName; color: string; label: string; onClick: () => void }) {
   return (
@@ -512,6 +717,7 @@ function CtrlIcon({ name }: { name: IconName }) {
     case 'end': return <svg viewBox="0 0 24 24" {...S}><path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-3.5-3.5m-1.4-4A19.79 19.79 0 0 1 3 3.83 2 2 0 0 1 4.11 1.9"/><line x1="2" y1="2" x2="22" y2="22" stroke="#ef4444" strokeWidth="2.5"/></svg>;
     case 'accept': return <svg viewBox="0 0 24 24" {...S}><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 1h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.64a16 16 0 0 0 6 6l.95-.95a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>;
     case 'decline': return <svg viewBox="0 0 24 24" {...S}><line x1="2" y1="2" x2="22" y2="22"/><path d="M16.5 9.4l-6.9-6.9M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07"/></svg>;
+    case 'add-user': return <svg viewBox="0 0 24 24" {...S}><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>;
   }
 }
 
@@ -628,5 +834,47 @@ const cs: Record<string, React.CSSProperties> = {
     border: 'none',
     cursor: 'pointer',
     transition: 'opacity 0.15s',
+  },
+  miniPill: {
+    position: 'fixed' as const,
+    bottom: 24,
+    right: 24,
+    zIndex: 2000,
+    display: 'flex',
+    alignItems: 'center',
+    gap: 10,
+    background: '#111827',
+    border: '1px solid #1f2937',
+    borderRadius: 40,
+    padding: '10px 14px',
+    boxShadow: '0 8px 32px rgba(0,0,0,0.7)',
+    minWidth: 220,
+    maxWidth: 320,
+    cursor: 'default',
+  },
+  miniAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: '50%',
+    background: '#c0392b',
+    color: '#fff',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontWeight: 800,
+    fontSize: '0.8rem',
+    flexShrink: 0,
+  },
+  miniBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: '50%',
+    background: '#374151',
+    border: 'none',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
   },
 };

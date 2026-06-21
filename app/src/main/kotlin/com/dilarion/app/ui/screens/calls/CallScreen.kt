@@ -1,7 +1,9 @@
 package com.dilarion.app.ui.screens.calls
 
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.border
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -45,6 +47,7 @@ private val ControlButton = Color(0xFF2C2C54)
 fun CallScreen(
     username: String,
     onCallEnded: () -> Unit,
+    onMinimize: ((callId: Int?) -> Unit)? = null,
     viewModel: CallViewModel = hiltViewModel(),
 ) {
     var showTypeDialog by remember { mutableStateOf(true) }
@@ -82,6 +85,7 @@ fun CallScreen(
             localVideo = localVideo,
             remoteVideo = remoteVideo,
             eglBaseContext = viewModel.eglBaseContext,
+            onMinimize = onMinimize,
         )
     }
 }
@@ -184,10 +188,11 @@ private fun CallContent(
     localVideo: VideoTrack?,
     remoteVideo: VideoTrack?,
     eglBaseContext: EglBase.Context,
+    onMinimize: ((callId: Int?) -> Unit)? = null,
 ) {
     when {
         uiState.callType == CallType.VIDEO && uiState.state == CallState.CONNECTED && remoteVideo != null -> {
-            VideoCallContent(uiState, viewModel, localVideo, remoteVideo, eglBaseContext)
+            VideoCallContent(uiState, viewModel, localVideo, remoteVideo, eglBaseContext, onMinimize)
         }
         uiState.callType == CallType.VIDEO && localVideo != null -> {
             // Calling/Ringing for video — show self-view full screen
@@ -251,7 +256,7 @@ private fun CallContent(
                     }
                     Spacer(Modifier.weight(1f))
                     if (uiState.state == CallState.CONNECTED) {
-                        CallControls(uiState, viewModel, showFlip = false)
+                        CallControls(uiState, viewModel, showFlip = false, onMinimize = onMinimize)
                     } else {
                         CallActionButton(Icons.Default.CallEnd, "End", EndCallRed) { viewModel.endCall() }
                     }
@@ -271,6 +276,7 @@ private fun VideoCallContent(
     localVideo: VideoTrack?,
     remoteVideo: VideoTrack?,
     eglBaseContext: EglBase.Context,
+    onMinimize: ((callId: Int?) -> Unit)? = null,
 ) {
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
         // Remote video full-screen
@@ -310,7 +316,7 @@ private fun VideoCallContent(
 
         // Controls bottom
         Box(modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 48.dp)) {
-            CallControls(uiState, viewModel, showFlip = true)
+            CallControls(uiState, viewModel, showFlip = true, onMinimize = onMinimize)
         }
     }
 }
@@ -362,7 +368,7 @@ private fun VideoView(
 // ── Call controls ───────────────────────────────────────────────────────────
 
 @Composable
-private fun CallControls(uiState: CallUiState, viewModel: CallViewModel, showFlip: Boolean) {
+private fun CallControls(uiState: CallUiState, viewModel: CallViewModel, showFlip: Boolean, onMinimize: ((callId: Int?) -> Unit)? = null) {
     val conferenceState by viewModel.conferenceState.collectAsState()
     var showAddDialog by remember { mutableStateOf(false) }
 
@@ -399,7 +405,7 @@ private fun CallControls(uiState: CallUiState, viewModel: CallViewModel, showFli
 
         // Main control row
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 32.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -419,6 +425,10 @@ private fun CallControls(uiState: CallUiState, viewModel: CallViewModel, showFli
                 if (uiState.isSpeaker) DilarionRed else SurfaceWhite,
                 viewModel::toggleSpeaker,
             )
+            // Minimize button — only when there's a minimizer callback
+            if (onMinimize != null) {
+                SmallControl(Icons.Default.CloseFullscreen, SurfaceWhite) { onMinimize(uiState.callId) }
+            }
         }
     }
 
@@ -599,3 +609,62 @@ private fun SignalBars(quality: Int) {
 }
 
 private fun formatDuration(seconds: Int) = "%02d:%02d".format(seconds / 60, seconds % 60)
+
+// ── Floating minimized call bar ─────────────────────────────────────────────
+
+@Composable
+fun FloatingCallBar(
+    info: MinimizedCallInfo,
+    onExpand: () -> Unit,
+    onEnd: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(bottom = 16.dp, start = 12.dp, end = 12.dp),
+        contentAlignment = Alignment.BottomCenter,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(50))
+                .background(Color(0xFF1A1A2E))
+                .border(1.dp, Color(0xFF2C2C54), RoundedCornerShape(50))
+                .clickable { onExpand() }
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            // Pulsing green dot
+            Box(Modifier.size(10.dp).clip(CircleShape).background(AcceptGreen))
+            // Avatar
+            Box(
+                Modifier.size(36.dp).clip(CircleShape).background(DilarionRed),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    info.partner.firstOrNull()?.uppercaseChar()?.toString() ?: "?",
+                    color = SurfaceWhite, fontSize = 14.sp, fontWeight = FontWeight.Bold,
+                )
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text(info.partner, color = SurfaceWhite, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                Text(formatDuration(info.durationSeconds), color = Color(0xFF22C55E), fontSize = 12.sp)
+            }
+            // Expand icon
+            IconButton(
+                onClick = onExpand,
+                modifier = Modifier.size(36.dp).clip(CircleShape).background(Color(0xFF2C2C54)),
+            ) {
+                Icon(Icons.Default.OpenInFull, null, tint = SurfaceWhite, modifier = Modifier.size(16.dp))
+            }
+            // End call
+            IconButton(
+                onClick = onEnd,
+                modifier = Modifier.size(36.dp).clip(CircleShape).background(EndCallRed),
+            ) {
+                Icon(Icons.Default.CallEnd, null, tint = SurfaceWhite, modifier = Modifier.size(16.dp))
+            }
+        }
+    }
+}

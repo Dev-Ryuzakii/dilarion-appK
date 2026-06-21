@@ -1,9 +1,12 @@
 package com.dilarion.app.ui.navigation
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Modifier
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -15,6 +18,7 @@ import com.dilarion.app.ui.screens.auth.AuthScreen
 import com.dilarion.app.ui.screens.auth.AuthViewModel
 import com.dilarion.app.ui.screens.calls.CallOverlayViewModel
 import com.dilarion.app.ui.screens.calls.CallScreen
+import com.dilarion.app.ui.screens.calls.FloatingCallBar
 import com.dilarion.app.ui.screens.calls.IncomingCallOverlay
 import com.dilarion.app.ui.screens.chat.ChatScreen
 import com.dilarion.app.ui.screens.home.HomeScreen
@@ -29,6 +33,7 @@ fun AppNavigation(pendingIncomingCall: IncomingCallData? = null) {
     val navController = rememberNavController()
     val overlayVm: CallOverlayViewModel = hiltViewModel()
     val incomingCall by overlayVm.incomingCall.collectAsState()
+    val minimizedCall by overlayVm.minimizedCall.collectAsState()
 
     // Inject call from notification intent into overlay VM
     LaunchedEffect(pendingIncomingCall) {
@@ -44,6 +49,7 @@ fun AppNavigation(pendingIncomingCall: IncomingCallData? = null) {
         return
     }
 
+    Box(modifier = Modifier.fillMaxSize()) {
     NavHost(
         navController = navController,
         startDestination = Screen.Splash.route,
@@ -143,9 +149,14 @@ fun AppNavigation(pendingIncomingCall: IncomingCallData? = null) {
             arguments = listOf(navArgument("username") { type = NavType.StringType }),
         ) { backStack ->
             val username = backStack.arguments?.getString("username") ?: return@composable
+            LaunchedEffect(username) { overlayVm.clearMinimized() }
             CallScreen(
                 username = username,
-                onCallEnded = { navController.popBackStack() },
+                onCallEnded = { overlayVm.clearMinimized(); navController.popBackStack() },
+                onMinimize = { callId ->
+                    overlayVm.setMinimized(callId ?: 0, username)
+                    navController.popBackStack()
+                },
             )
         }
 
@@ -177,4 +188,17 @@ fun AppNavigation(pendingIncomingCall: IncomingCallData? = null) {
             )
         }
     }
+
+    // Floating minimized call bar — shown over all screens
+    minimizedCall?.let { info ->
+        FloatingCallBar(
+            info = info,
+            onExpand = {
+                overlayVm.clearMinimized()
+                navController.navigate(Screen.Call.route(info.partner))
+            },
+            onEnd = { overlayVm.endMinimizedCall() },
+        )
+    }
+    } // close Box
 }
