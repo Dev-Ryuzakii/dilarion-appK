@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { presenceService } from '../services/presence';
-import { initiateCall, performCallAction, sendCallIceCandidate, createConference, conferenceInvite, conferenceSignal, conferenceLeave } from '../services/api';
+import { initiateCall, performCallAction, sendCallIceCandidate, createConference, conferenceInvite, conferenceSignal, conferenceLeave, getUsers, Contact } from '../services/api';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -46,13 +46,19 @@ function waitForIceGathering(pc: RTCPeerConnection, timeoutMs = 3500): Promise<v
 const ICE_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
-  // Own VPS TURN — same server as backend, geographically close to users
-  { urls: 'turn:api.dilarion.eibstratoc.com:3478',            username: 'dilarion', credential: 'dilarion2026' },
-  { urls: 'turn:api.dilarion.eibstratoc.com:3478?transport=tcp', username: 'dilarion', credential: 'dilarion2026' },
-  { urls: 'turns:api.dilarion.eibstratoc.com:5349',           username: 'dilarion', credential: 'dilarion2026' },
-  // Public fallback
-  { urls: 'turn:a.relay.metered.ca:80',             username: 'openrelayproject', credential: 'openrelayproject' },
+  { urls: 'stun:stun2.l.google.com:19302' },
+  { urls: 'stun:stun3.l.google.com:19302' },
+  // Own VPS TURN — by hostname (add DNS A record: turn.dilarion.eibstratoc.com → 41.242.54.66, grey cloud)
+  { urls: 'turn:turn.dilarion.eibstratoc.com:3478',              username: 'dilarion', credential: 'dilarion2026' },
+  { urls: 'turn:turn.dilarion.eibstratoc.com:3478?transport=tcp', username: 'dilarion', credential: 'dilarion2026' },
+  // Own VPS TURN — raw IP fallback (works before DNS is set)
+  { urls: 'turn:41.242.54.66:3478',              username: 'dilarion', credential: 'dilarion2026' },
+  { urls: 'turn:41.242.54.66:3478?transport=tcp', username: 'dilarion', credential: 'dilarion2026' },
+  // Public fallbacks
+  { urls: 'turn:a.relay.metered.ca:80',               username: 'openrelayproject', credential: 'openrelayproject' },
   { urls: 'turn:a.relay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
+  { urls: 'turn:openrelay.metered.ca:80',               username: 'openrelayproject', credential: 'openrelayproject' },
+  { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
 ];
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -82,8 +88,9 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
 
   const [conferenceId, setConferenceId] = useState<number | null>(null);
   const [confParticipants, setConfParticipants] = useState<string[]>([]);
-  const [addingParticipant, setAddingParticipant] = useState(false);
-  const [addUsername, setAddUsername] = useState('');
+  const [userPickerOpen, setUserPickerOpen] = useState(false);
+  const [userSearch, setUserSearch] = useState('');
+  const [allUsers, setAllUsers] = useState<Contact[]>([]);
 
   const pcRef = useRef<RTCPeerConnection | null>(null);
   // Conference: one RTCPeerConnection per remote peer username
@@ -441,8 +448,16 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
     setConfParticipants(p => p.filter(u => u !== peerUsername));
   }, []);
 
-  async function handleAddParticipant() {
-    if (!addUsername.trim() || !callIdRef.current) return;
+  async function openUserPicker() {
+    try {
+      const fetched = await getUsers(token);
+      setAllUsers(fetched.filter(u => u.username !== partner));
+    } catch {}
+    setUserPickerOpen(true);
+  }
+
+  async function handleAddParticipant(username: string) {
+    if (!username.trim() || !callIdRef.current) return;
     let confId = conferenceId;
     if (!confId) {
       const res = await createConference(token, callIdRef.current);
@@ -450,9 +465,9 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
       setConferenceId(confId);
       setConfParticipants([partner]);
     }
-    await conferenceInvite(token, confId, addUsername.trim());
-    setAddUsername('');
-    setAddingParticipant(false);
+    await conferenceInvite(token, confId, username.trim());
+    setUserPickerOpen(false);
+    setUserSearch('');
   }
 
   function stopAllMedia() {
@@ -655,18 +670,38 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
           </div>
         )}
 
-        {/* Add participant dialog */}
-        {addingParticipant && (
-          <div style={{ display: 'flex', gap: 8, padding: '8px 16px' }}>
-            <input
-              value={addUsername}
-              onChange={e => setAddUsername(e.target.value)}
-              placeholder="Username to add..."
-              onKeyDown={e => e.key === 'Enter' && handleAddParticipant()}
-              style={{ flex: 1, background: '#1f2937', border: '1px solid #374151', borderRadius: 8, padding: '6px 10px', color: '#fff', fontSize: '0.85rem' }}
-            />
-            <button onClick={handleAddParticipant} style={{ background: '#3b82f6', border: 'none', borderRadius: 8, padding: '6px 12px', color: '#fff', cursor: 'pointer', fontSize: '0.85rem' }}>Add</button>
-            <button onClick={() => setAddingParticipant(false)} style={{ background: '#374151', border: 'none', borderRadius: 8, padding: '6px 12px', color: '#9ca3af', cursor: 'pointer', fontSize: '0.85rem' }}>✕</button>
+        {/* WhatsApp-style user picker modal */}
+        {userPickerOpen && (
+          <div style={cs.pickerOverlay}>
+            <div style={cs.pickerModal}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px', borderBottom: '1px solid #1f2937' }}>
+                <span style={{ color: '#f1f5f9', fontWeight: 700, fontSize: '1rem' }}>Add to Call</span>
+                <button onClick={() => { setUserPickerOpen(false); setUserSearch(''); }} style={cs.pickerClose}>✕</button>
+              </div>
+              <div style={{ padding: '12px 16px' }}>
+                <input
+                  autoFocus
+                  value={userSearch}
+                  onChange={e => setUserSearch(e.target.value)}
+                  placeholder="Search users…"
+                  style={cs.searchInput}
+                />
+              </div>
+              <div style={{ overflowY: 'auto', flex: 1 }}>
+                {allUsers.filter(u => u.username.toLowerCase().includes(userSearch.toLowerCase())).map(u => (
+                  <div key={u.username} onClick={() => handleAddParticipant(u.username)} style={cs.userRow}>
+                    <div style={cs.userAvatar}>{u.username.slice(0, 2).toUpperCase()}</div>
+                    <span style={{ color: '#f1f5f9', fontSize: '0.9rem', fontWeight: 600, flex: 1 }}>{u.username}</span>
+                    <span style={{ color: '#22c55e', fontSize: '0.8rem', fontWeight: 600 }}>+ Add</span>
+                  </div>
+                ))}
+                {allUsers.filter(u => u.username.toLowerCase().includes(userSearch.toLowerCase())).length === 0 && (
+                  <div style={{ padding: '24px', textAlign: 'center', color: '#6b7280', fontSize: '0.85rem' }}>
+                    {allUsers.length === 0 ? 'Loading…' : 'No users found'}
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         )}
 
@@ -681,7 +716,7 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
               <ControlBtn icon="screen" color={sharing ? '#3b82f6' : '#374151'} label={sharing ? 'Stop Share' : 'Share Screen'} onClick={toggleScreenShare} />
             )}
             {state === 'connected' && (
-              <ControlBtn icon="add-user" color={addingParticipant ? '#3b82f6' : '#374151'} label="Add" onClick={() => setAddingParticipant(a => !a)} />
+              <ControlBtn icon="add-user" color={userPickerOpen ? '#3b82f6' : '#374151'} label="Add" onClick={openUserPicker} />
             )}
             <ControlBtn icon="end" color="#ef4444" label="End" onClick={handleEnd} />
           </div>
@@ -876,5 +911,66 @@ const cs: Record<string, React.CSSProperties> = {
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,
+  },
+  pickerOverlay: {
+    position: 'fixed' as const,
+    inset: 0,
+    background: 'rgba(0,0,0,0.75)',
+    zIndex: 2000,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pickerModal: {
+    background: '#111827',
+    borderRadius: 16,
+    width: 400,
+    maxHeight: 500,
+    display: 'flex',
+    flexDirection: 'column' as const,
+    overflow: 'hidden',
+    boxShadow: '0 20px 60px rgba(0,0,0,0.8)',
+  },
+  searchInput: {
+    width: '100%',
+    background: '#1f2937',
+    border: '1px solid #374151',
+    borderRadius: 8,
+    padding: '8px 12px',
+    color: '#fff',
+    fontSize: '0.9rem',
+    boxSizing: 'border-box' as const,
+    outline: 'none',
+  },
+  userRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 12,
+    padding: '10px 16px',
+    cursor: 'pointer',
+    borderBottom: '1px solid #1f2937',
+    transition: 'background 0.1s',
+  } as React.CSSProperties,
+  userAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: '50%',
+    background: '#c0392b',
+    color: '#fff',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: '0.75rem',
+    fontWeight: 800 as const,
+    flexShrink: 0,
+  },
+  pickerClose: {
+    background: 'transparent',
+    border: 'none',
+    color: '#9ca3af',
+    cursor: 'pointer',
+    fontSize: '1rem',
+    padding: 4,
+    lineHeight: 1,
   },
 };

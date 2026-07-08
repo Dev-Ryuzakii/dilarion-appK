@@ -59,17 +59,24 @@ class WebRtcManager @Inject constructor(
         PeerConnection.IceServer.builder("stun:stun2.l.google.com:19302").createIceServer(),
         PeerConnection.IceServer.builder("stun:stun3.l.google.com:19302").createIceServer(),
         PeerConnection.IceServer.builder("stun:stun4.l.google.com:19302").createIceServer(),
-        // Own VPS TURN — geographically close, same server as backend
-        PeerConnection.IceServer.builder("turn:api.dilarion.eibstratoc.com:3478")
+        // Own VPS TURN — by hostname (DNS: turn.dilarion.eibstratoc.com → 41.242.54.66, grey cloud)
+        PeerConnection.IceServer.builder("turn:turn.dilarion.eibstratoc.com:3478")
             .setUsername("dilarion").setPassword("dilarion2026").createIceServer(),
-        PeerConnection.IceServer.builder("turn:api.dilarion.eibstratoc.com:3478?transport=tcp")
+        PeerConnection.IceServer.builder("turn:turn.dilarion.eibstratoc.com:3478?transport=tcp")
             .setUsername("dilarion").setPassword("dilarion2026").createIceServer(),
-        PeerConnection.IceServer.builder("turns:api.dilarion.eibstratoc.com:5349")
+        // Own VPS TURN — raw IP fallback (works before DNS is set)
+        PeerConnection.IceServer.builder("turn:41.242.54.66:3478")
             .setUsername("dilarion").setPassword("dilarion2026").createIceServer(),
-        // Public fallback
+        PeerConnection.IceServer.builder("turn:41.242.54.66:3478?transport=tcp")
+            .setUsername("dilarion").setPassword("dilarion2026").createIceServer(),
+        // Public fallbacks
         PeerConnection.IceServer.builder("turn:a.relay.metered.ca:80")
             .setUsername("openrelayproject").setPassword("openrelayproject").createIceServer(),
         PeerConnection.IceServer.builder("turn:a.relay.metered.ca:443?transport=tcp")
+            .setUsername("openrelayproject").setPassword("openrelayproject").createIceServer(),
+        PeerConnection.IceServer.builder("turn:openrelay.metered.ca:80")
+            .setUsername("openrelayproject").setPassword("openrelayproject").createIceServer(),
+        PeerConnection.IceServer.builder("turn:openrelay.metered.ca:443?transport=tcp")
             .setUsername("openrelayproject").setPassword("openrelayproject").createIceServer(),
     )
 

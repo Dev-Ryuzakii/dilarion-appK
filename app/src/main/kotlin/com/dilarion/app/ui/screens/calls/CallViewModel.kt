@@ -7,6 +7,7 @@ import com.dilarion.app.data.model.CallActionRequest
 import com.dilarion.app.data.model.CallInitiateRequest
 import com.dilarion.app.data.model.IceCandidateRequest
 import com.dilarion.app.data.model.IncomingCallData
+import com.dilarion.app.data.model.UserInfo
 import com.dilarion.app.security.SessionManager
 import com.dilarion.app.services.NotificationHelper
 import com.dilarion.app.services.PresenceService
@@ -60,6 +61,9 @@ class CallViewModel @Inject constructor(
     val remoteVideo: StateFlow<VideoTrack?> = webRtcManager.remoteVideo
     val conferenceRemoteVideos = webRtcManager.conferenceRemoteVideos
     val eglBaseContext: EglBase.Context get() = webRtcManager.eglBaseContext
+
+    private val _users = MutableStateFlow<List<UserInfo>>(emptyList())
+    val users: StateFlow<List<UserInfo>> = _users
 
     private var timerJob: kotlinx.coroutines.Job? = null
     private var wsObserverJob: kotlinx.coroutines.Job? = null
@@ -200,6 +204,28 @@ class CallViewModel @Inject constructor(
     fun flipCamera() { webRtcManager.flipCamera() }
 
     fun clearError() { _uiState.value = _uiState.value.copy(error = null) }
+
+    fun fetchUsers() {
+        viewModelScope.launch {
+            val token = sessionManager.sessionToken.first() ?: return@launch
+            runCatching {
+                val resp = apiService.getUsers("Bearer $token")
+                if (resp.isSuccessful) _users.value = resp.body() ?: emptyList()
+            }
+        }
+    }
+
+    fun resetToIdle() {
+        timerJob?.cancel()
+        wsObserverJob?.cancel()
+        wsObserverJob = null
+        _uiState.value = CallUiState()
+        _conferenceState.value = ConferenceUiState()
+        remoteDescSet = false
+        pendingRemoteCandidates.clear()
+        pendingCandidates.clear()
+        storedOfferSdp = null
+    }
 
     private fun observeWsEvents() {
         if (wsObserverJob?.isActive == true) return

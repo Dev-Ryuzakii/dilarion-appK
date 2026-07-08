@@ -1,4 +1,4 @@
-const BASE = 'https://api.dilarion.eibstratoc.com';
+const BASE = 'https://apidilarion.eibstratoc.com';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -366,6 +366,43 @@ export async function sendCallIceCandidate(
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ call_id: callId, recipient_username: recipientUsername, candidate }),
+  });
+}
+
+// ── Conference ────────────────────────────────────────────────────────────────
+
+export async function createConference(token: string, callId: number): Promise<{ conference_id: number }> {
+  const res = await fetch(`${BASE}/calls/conference/create`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ call_id: callId }),
+  });
+  return res.json();
+}
+
+export async function conferenceInvite(token: string, conferenceId: number, username: string): Promise<void> {
+  await fetch(`${BASE}/calls/conference/${conferenceId}/invite`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ username }),
+  });
+}
+
+export async function conferenceSignal(
+  token: string, conferenceId: number,
+  to: string, signalType: string, data: any,
+): Promise<void> {
+  await fetch(`${BASE}/calls/conference/${conferenceId}/signal`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ to, signal_type: signalType, data }),
+  });
+}
+
+export async function conferenceLeave(token: string, conferenceId: number): Promise<void> {
+  await fetch(`${BASE}/calls/conference/${conferenceId}/leave`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
   });
 }
 

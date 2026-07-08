@@ -1,0 +1,676 @@
+import SwiftUI
+
+// Mirrors ChatScreen.kt exactly:
+// - Red top bar with avatar initial, name, lock icon, "end-to-end encrypted"
+// - Chat background (pattern at 0.45 alpha)
+// - Decoy text shown when locked, real when unlocked
+// - Lock/unlock button in top bar
+// - Unlock dialog with master token field
+// - Message bubbles: mine=green (#DCF8C6), other=white, rounded corners
+// - Timestamp + read receipt icons (Done / DoneAll)
+// - Date separators (Today / Yesterday / date)
+// - Input bar: attach (DM only), text field, send OR mic button
+// - @mention dropdown (groups)
+// - Private tag chip
+
+struct ChatView: View {
+    let username: String
+    let groupId: Int?
+    let groupName: String?
+
+    @StateObject private var vm = ChatViewModel()
+    @State private var inputText = ""
+    @State private var showUnlockDialog = false
+    @State private var unlockError: String? = nil
+
+    private var displayName: String { groupId != nil ? (groupName ?? "Group") : username }
+
+    var body: some View {
+        ZStack {
+            // Chat background pattern at 0.45 alpha (matches chat_bg in Kotlin)
+            ChatBackground()
+
+            VStack(spacing: 0) {
+                // Unlock banner
+                if !vm.state.isUnlocked && !vm.combinedItems().isEmpty {
+                    Button { showUnlockDialog = true } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "lock.fill")
+                                .font(.system(size: 12))
+                            Text("Tap to unlock messages with master token")
+                                .font(.system(size: 12, weight: .medium))
+                        }
+                        .foregroundColor(.dilarionRed)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .background(Color.dilarionRed.opacity(0.1))
+                    }
+                }
+
+                // Messages
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(spacing: 4) {
+                            let items = vm.combinedItems()
+                            ForEach(Array(items.enumerated()), id: \.element.id) { idx, item in
+                                let prevTs = idx > 0 ? items[idx - 1].timestamp : nil
+                                let curTs = item.timestamp
+
+                                if let ts = curTs, shouldShowDateSep(current: ts, previous: prevTs) {
+                                    DateSeparator(timestamp: ts)
+                                }
+
+                                switch item {
+                                case .textMessage(let msg):
+                                    let isMine = msg.sender == vm.state.currentUsername
+                                    MessageBubbleView(
+                                        message: msg,
+                                        isMine: isMine,
+                                        isUnlocked: vm.state.isUnlocked,
+                                        isGroup: groupId != nil,
+                                        onTapLocked: { showUnlockDialog = true }
+                                    )
+                                    .id(item.id)
+                                    .task {
+                                        if !msg.read && !isMine {
+                                            await vm.markRead(msg.id)
+                                        }
+                                    }
+                                case .mediaMessage(let media):
+                                    Text("📎 \(media.filename)")
+                                        .font(.system(size: 13))
+                                        .foregroundColor(.textSecondary)
+                                        .id(item.id)
+                                }
+                            }
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                    }
+                    .onChange(of: vm.combinedItems().count) { _ in
+                        if let last = vm.combinedItems().last {
+                            withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
+                        }
+                    }
+                }
+
+                // Typing indicator
+                if vm.partnerTyping {
+                    HStack {
+                        Text("\(displayName) is typing...")
+                            .font(.system(size: 12))
+                            .foregroundColor(.textSecondary)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 4)
+                    .background(Color.surfaceWhite.opacity(0.8))
+                }
+
+                // Input area
+                InputArea(
+                    inputText: $inputText,
+                    state: vm.state,
+                    groupId: groupId,
+                    onSend: {
+                        let text = inputText.trimmingCharacters(in: .whitespaces)
+                        guard !text.isEmpty else { return }
+                        inputText = ""
+                        vm.setMentionQuery(nil)
+                        Task { await vm.sendMessage(text) }
+                    },
+                    onTyping: { vm.sendTyping(isTyping: !inputText.isEmpty) },
+                    onMentionQuery: { q in vm.setMentionQuery(q) },
+                    onSelectMention: { member in
+                        vm.setTaggedUser(member.username)
+                        // strip @word at end of input
+                        inputText = inputText.replacingOccurrences(
+                            of: "@\\w*$", with: "", options: .regularExpression
+                        )
+                        vm.setMentionQuery(nil)
+                    },
+                    onClearTag: { vm.setTaggedUser(nil) }
+                )
+            }
+        }
+        .navigationTitle("")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                HStack(spacing: 10) {
+                    // Avatar circle
+                    Circle()
+                        .fill(Color.dilarionRedDark)
+                        .frame(width: 36, height: 36)
+                        .overlay(
+                            Text(String(displayName.prefix(1)).uppercased())
+                                .font(.system(size: 15, weight: .bold))
+                                .foregroundColor(.white)
+                        )
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(displayName)
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundColor(.white)
+                        HStack(spacing: 3) {
+                            Image(systemName: "lock.fill")
+                                .font(.system(size: 8))
+                                .foregroundColor(.white.opacity(0.7))
+                            Text("end-to-end encrypted")
+                                .font(.system(size: 10))
+                                .foregroundColor(.white.opacity(0.7))
+                        }
+                    }
+                }
+            }
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                if groupId == nil {
+                    Button {
+                        // TODO: start call
+                    } label: {
+                        Image(systemName: "phone")
+                            .foregroundColor(.white)
+                    }
+                }
+                Button { showUnlockDialog = !vm.state.isUnlocked } label: {
+                    Image(systemName: vm.state.isUnlocked ? "lock.open" : "lock")
+                        .foregroundColor(.white)
+                }
+            }
+        }
+        .toolbarBackground(Color.dilarionRed, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
+        .alert("Error", isPresented: Binding(
+            get: { vm.state.error != nil },
+            set: { if !$0 { vm.clearError() } }
+        )) {
+            Button("OK") { vm.clearError() }
+        } message: {
+            Text(vm.state.error ?? "")
+        }
+        .sheet(isPresented: $showUnlockDialog) {
+            UnlockDialogSheet(error: unlockError) { token in
+                let ok = vm.unlock(token: token)
+                if ok { showUnlockDialog = false; unlockError = nil }
+                else { unlockError = "Incorrect master token" }
+            } onDismiss: {
+                showUnlockDialog = false; unlockError = nil
+            }
+        }
+        .onAppear {
+            vm.initialize(username: username, groupId: groupId)
+        }
+    }
+
+    private func shouldShowDateSep(current: String, previous: String?) -> Bool {
+        guard let prev = previous else { return true }
+        return current.prefix(10) != prev.prefix(10)
+    }
+}
+
+// MARK: — Chat wallpaper/background
+struct ChatBackground: View {
+    var body: some View {
+        ZStack {
+            Color.backgroundGrey
+            // Pattern grid of lock icons at low opacity (mimics chat_bg drawable)
+            Canvas { ctx, size in
+                let spacing: CGFloat = 44
+                let cols = Int(size.width / spacing) + 2
+                let rows = Int(size.height / spacing) + 2
+                for row in 0..<rows {
+                    for col in 0..<cols {
+                        let x = CGFloat(col) * spacing + (row.isMultiple(of: 2) ? 0 : spacing / 2)
+                        let y = CGFloat(row) * spacing
+                        ctx.opacity = 0.045
+                        ctx.draw(
+                            Text("🔒").font(.system(size: 14)),
+                            at: CGPoint(x: x, y: y)
+                        )
+                    }
+                }
+            }
+        }
+        .ignoresSafeArea()
+    }
+}
+
+// MARK: — Message bubble
+struct MessageBubbleView: View {
+    let message: Message
+    let isMine: Bool
+    let isUnlocked: Bool
+    let isGroup: Bool
+    let onTapLocked: () -> Void
+
+    private var isPrivateTagged: Bool { message.contentType == "private_tagged" }
+    private var isEncrypted: Bool { message.contentType == "encrypted" }
+    private var hasRecipient: Bool {
+        !(message.recipient ?? "").isEmpty && message.recipient != "group"
+    }
+    private var privatePurple = Color(hex: 0xA78BFA)
+    private var showDecoy: Bool { isEncrypted && !isUnlocked }
+
+    private var bubbleColor: Color {
+        if isPrivateTagged { return Color(hex: 0x1A1020) }
+        return isMine ? .chatBubbleSelf : .chatBubbleOther
+    }
+    private var bubbleShape: some Shape {
+        if isMine {
+            return RoundedCorner(radius: 18, corners: [.topLeft, .bottomLeft, .bottomRight])
+        } else {
+            return RoundedCorner(radius: 18, corners: [.topRight, .bottomLeft, .bottomRight])
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: isMine ? .trailing : .leading, spacing: 2) {
+            // "→ @recipient" hint above bubble
+            if hasRecipient && !isPrivateTagged {
+                Text("→ @\(message.recipient ?? "")")
+                    .font(.system(size: 11))
+                    .foregroundColor(privatePurple)
+                    .padding(.leading, isGroup && !isMine ? 38 : 0)
+            }
+
+            HStack(alignment: .bottom, spacing: 6) {
+                if isMine { Spacer(minLength: 60) }
+
+                // Group sender avatar
+                if isGroup && !isMine {
+                    Circle()
+                        .fill(avatarColor(for: message.sender ?? ""))
+                        .frame(width: 32, height: 32)
+                        .overlay(
+                            Text(initials(for: message.sender ?? "?"))
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundColor(.white)
+                        )
+                }
+
+                VStack(alignment: isMine ? .trailing : .leading, spacing: 2) {
+                    // Sender name in groups
+                    if isGroup && !isMine, let sender = message.sender {
+                        Text(sender)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(avatarColor(for: sender))
+                            .padding(.leading, 4)
+                    }
+
+                    // Bubble
+                    VStack(alignment: .leading, spacing: 4) {
+                        if isPrivateTagged {
+                            HStack(spacing: 6) {
+                                Image(systemName: "lock.fill")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(privatePurple)
+                                Text("Private message for @\(message.recipient ?? "")")
+                                    .font(.system(size: 13, weight: .medium))
+                                    .foregroundColor(privatePurple)
+                            }
+                        } else if showDecoy {
+                            Text(decoyFor(id: message.id))
+                                .font(.system(size: 14))
+                                .foregroundColor(.textPrimary.opacity(0.65))
+                            HStack(spacing: 4) {
+                                Image(systemName: "lock")
+                                    .font(.system(size: 9))
+                                    .foregroundColor(.textSecondary)
+                                Text("tap to decrypt")
+                                    .font(.system(size: 11))
+                                    .foregroundColor(.textSecondary)
+                            }
+                        } else {
+                            Text(message.content ?? message.encryptedContent ?? "")
+                                .font(.system(size: 14))
+                                .foregroundColor(.textPrimary)
+                        }
+
+                        // Timestamp + read receipt
+                        HStack(spacing: 3) {
+                            Text(formatTimestamp(message.timestamp ?? ""))
+                                .font(.system(size: 11))
+                                .foregroundColor(.textSecondary)
+                            if isMine {
+                                if message.id < 0 {
+                                    // Pending
+                                    Image(systemName: "clock")
+                                        .font(.system(size: 10))
+                                        .foregroundColor(.textSecondary.opacity(0.6))
+                                } else if message.read {
+                                    // Read — double tick red (mirrors DoneAll + DilarionRed tint)
+                                    Image(systemName: "checkmark.message.fill")
+                                        .font(.system(size: 12))
+                                        .foregroundColor(.dilarionRed)
+                                } else {
+                                    // Delivered
+                                    Image(systemName: "checkmark")
+                                        .font(.system(size: 11))
+                                        .foregroundColor(.textSecondary)
+                                }
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(bubbleColor)
+                    .clipShape(bubbleShape)
+                    .frame(maxWidth: 260, alignment: isMine ? .trailing : .leading)
+                    .onTapGesture {
+                        if isEncrypted && !isUnlocked { onTapLocked() }
+                    }
+                }
+
+                if !isMine { Spacer(minLength: 60) }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: isMine ? .trailing : .leading)
+    }
+}
+
+// Custom rounded corners (mirrors Kotlin RoundedCornerShape per-corner)
+struct RoundedCorner: Shape {
+    var radius: CGFloat
+    var corners: UIRectCorner
+
+    func path(in rect: CGRect) -> Path {
+        let path = UIBezierPath(
+            roundedRect: rect,
+            byRoundingCorners: corners,
+            cornerRadii: CGSize(width: radius, height: radius)
+        )
+        return Path(path.cgPath)
+    }
+}
+
+// MARK: — Date separator
+struct DateSeparator: View {
+    let timestamp: String
+
+    private var label: String {
+        let fmts = ["yyyy-MM-dd'T'HH:mm:ss.SSSSSSZZZZZ",
+                    "yyyy-MM-dd'T'HH:mm:ssZZZZZ",
+                    "yyyy-MM-dd'T'HH:mm:ss"]
+        var date: Date? = nil
+        for fmt in fmts {
+            let df = DateFormatter(); df.dateFormat = fmt
+            if let d = df.date(from: timestamp) { date = d; break }
+        }
+        guard let d = date else { return "" }
+        if Calendar.current.isDateInToday(d) { return "Today" }
+        if Calendar.current.isDateInYesterday(d) { return "Yesterday" }
+        let df = DateFormatter(); df.dateFormat = "EEEE, d MMMM"
+        return df.string(from: d)
+    }
+
+    var body: some View {
+        if !label.isEmpty {
+            HStack {
+                Spacer()
+                Text(label)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.textSecondary)
+                    .tracking(0.5)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 5)
+                    .background(Color.borderGrey.opacity(0.55))
+                    .clipShape(Capsule())
+                Spacer()
+            }
+            .padding(.vertical, 10)
+        }
+    }
+}
+
+// MARK: — Input area
+struct InputArea: View {
+    @Binding var inputText: String
+    let state: ChatUiState
+    let groupId: Int?
+    let onSend: () -> Void
+    let onTyping: () -> Void
+    let onMentionQuery: (String?) -> Void
+    let onSelectMention: (GroupMember) -> Void
+    let onClearTag: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // @mention dropdown
+            if let query = state.mentionQuery, groupId != nil {
+                let filtered = state.groupMembers.filter {
+                    $0.username != state.currentUsername &&
+                    $0.username.localizedCaseInsensitiveContains(query)
+                }
+                if !filtered.isEmpty {
+                    VStack(spacing: 0) {
+                        ForEach(filtered) { member in
+                            Button { onSelectMention(member) } label: {
+                                HStack(spacing: 8) {
+                                    Text("@")
+                                        .font(.system(size: 12, weight: .bold))
+                                        .foregroundColor(Color(hex: 0xA78BFA))
+                                    Text(member.username)
+                                        .foregroundColor(.textPrimary)
+                                    Spacer()
+                                    Text(member.role)
+                                        .font(.system(size: 11))
+                                        .foregroundColor(.textSecondary)
+                                }
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 10)
+                            }
+                            Divider()
+                        }
+                    }
+                    .background(Color(hex: 0x1A1A1A))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .shadow(radius: 4)
+                    .padding(.horizontal, 8)
+                    .padding(.bottom, 4)
+                }
+            }
+
+            // Private tag chip
+            if let tagged = state.taggedUser {
+                HStack(spacing: 4) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "lock.fill")
+                            .font(.system(size: 9))
+                            .foregroundColor(Color(hex: 0xA78BFA))
+                        Text("Private → @\(tagged)")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(Color(hex: 0xA78BFA))
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(Color(hex: 0x1E1A2E))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color(hex: 0x4C1D95), lineWidth: 1)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+
+                    Button { onClearTag() } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 12))
+                            .foregroundColor(.textSecondary)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.top, 6)
+            }
+
+            // Main input row
+            HStack(alignment: .bottom, spacing: 8) {
+                // Attach (DM only)
+                if groupId == nil {
+                    Button { /* image picker */ } label: {
+                        Image(systemName: "paperclip")
+                            .font(.system(size: 20))
+                            .foregroundColor(.textSecondary)
+                            .frame(width: 36, height: 36)
+                    }
+                }
+
+                // Text field
+                TextField(
+                    state.taggedUser != nil
+                        ? "Private to @\(state.taggedUser!)…"
+                        : (groupId != nil ? "Message or @ to tag…" : "Message"),
+                    text: $inputText,
+                    axis: .vertical
+                )
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(Color.surfaceWhite)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 24)
+                        .stroke(state.taggedUser != nil ? Color(hex: 0x4C1D95) : Color.borderGrey, lineWidth: 1.5)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 24))
+                .lineLimit(1...5)
+                .onChange(of: inputText) { v in
+                    onTyping()
+                    if groupId != nil {
+                        let match = v.range(of: "@(\\w*)$", options: .regularExpression)
+                        if let r = match {
+                            let full = String(v[r])
+                            let query = String(full.dropFirst()) // strip @
+                            onMentionQuery(query)
+                        } else {
+                            onMentionQuery(nil)
+                        }
+                    }
+                }
+
+                // Send or Mic
+                if !inputText.trimmingCharacters(in: .whitespaces).isEmpty {
+                    Button(action: onSend) {
+                        Image(systemName: "paperplane.fill")
+                            .font(.system(size: 18))
+                            .foregroundColor(.white)
+                            .frame(width: 44, height: 44)
+                            .background(Color.dilarionRed)
+                            .clipShape(Circle())
+                    }
+                    .disabled(state.isSending)
+                } else if groupId == nil {
+                    Button { /* mic */ } label: {
+                        Image(systemName: "mic")
+                            .font(.system(size: 20))
+                            .foregroundColor(.textSecondary)
+                            .frame(width: 44, height: 44)
+                            .background(Color.borderGrey)
+                            .clipShape(Circle())
+                    }
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 8)
+            .background(Color.surfaceWhite)
+            .shadow(color: .black.opacity(0.06), radius: 4, y: -2)
+
+            if state.isUploadingMedia {
+                ProgressView(value: 0.5)
+                    .tint(.dilarionRed)
+                    .frame(height: 2)
+            }
+        }
+    }
+}
+
+// MARK: — Unlock sheet
+struct UnlockDialogSheet: View {
+    let error: String?
+    let onConfirm: (String) -> Void
+    let onDismiss: () -> Void
+
+    @State private var token = ""
+    @State private var showToken = false
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 20) {
+                Image(systemName: "key.fill")
+                    .font(.system(size: 36))
+                    .foregroundColor(.dilarionRed)
+
+                Text("Enter Master Token")
+                    .font(.system(size: 20, weight: .bold))
+
+                Text("Enter your master token to reveal real message content.")
+                    .font(.system(size: 13))
+                    .foregroundColor(.textSecondary)
+                    .multilineTextAlignment(.center)
+
+                HStack {
+                    Image(systemName: "key")
+                        .foregroundColor(.dilarionRed)
+                    Group {
+                        if showToken {
+                            TextField("Master Token", text: $token)
+                        } else {
+                            SecureField("Master Token", text: $token)
+                        }
+                    }
+                    Button { showToken.toggle() } label: {
+                        Image(systemName: showToken ? "eye.slash" : "eye")
+                            .foregroundColor(.textSecondary)
+                    }
+                }
+                .padding(14)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(error != nil ? Color.red : Color.dilarionRed, lineWidth: 1.5)
+                )
+
+                if let err = error {
+                    Text(err)
+                        .font(.system(size: 12))
+                        .foregroundColor(.red)
+                }
+
+                Button {
+                    onConfirm(token)
+                } label: {
+                    Text("Unlock")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 50)
+                        .background(Color.dilarionRed)
+                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                }
+                .disabled(token.isEmpty)
+
+                Spacer()
+            }
+            .padding(24)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Cancel") { onDismiss() }
+                        .foregroundColor(.dilarionRed)
+                }
+            }
+        }
+        .presentationDetents([.medium])
+    }
+}
+
+// MARK: — Timestamp helper
+private func formatTimestamp(_ iso: String) -> String {
+    let fmts = ["yyyy-MM-dd'T'HH:mm:ss.SSSSSSZZZZZ",
+                "yyyy-MM-dd'T'HH:mm:ssZZZZZ",
+                "yyyy-MM-dd'T'HH:mm:ss"]
+    for fmt in fmts {
+        let df = DateFormatter()
+        df.dateFormat = fmt
+        if let d = df.date(from: iso) {
+            let out = DateFormatter()
+            out.dateFormat = "HH:mm"
+            return out.string(from: d)
+        }
+    }
+    return ""
+}

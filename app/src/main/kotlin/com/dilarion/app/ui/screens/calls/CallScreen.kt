@@ -1,10 +1,13 @@
 package com.dilarion.app.ui.screens.calls
 
+import androidx.activity.ComponentActivity
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.border
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -19,6 +22,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -27,9 +31,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.compose.runtime.collectAsState
 import com.dilarion.app.data.model.IncomingCallData
+import com.dilarion.app.data.model.UserInfo
 import com.dilarion.app.ui.theme.DilarionRed
 import com.dilarion.app.ui.theme.SurfaceWhite
 import org.webrtc.EglBase
@@ -48,15 +54,21 @@ fun CallScreen(
     username: String,
     onCallEnded: () -> Unit,
     onMinimize: ((callId: Int?) -> Unit)? = null,
-    viewModel: CallViewModel = hiltViewModel(),
+    viewModel: CallViewModel = hiltViewModel(LocalContext.current as ComponentActivity),
 ) {
     var showTypeDialog by remember { mutableStateOf(true) }
     val uiState by viewModel.uiState.collectAsState()
     val localVideo by viewModel.localVideo.collectAsState()
     val remoteVideo by viewModel.remoteVideo.collectAsState()
 
+    // When coming from a previous ended call, reset to IDLE so type dialog shows cleanly
+    LaunchedEffect(Unit) {
+        if (uiState.state == CallState.ENDED) viewModel.resetToIdle()
+    }
+
+    // Only navigate away on ENDED when the call was actually active (not showing type dialog)
     LaunchedEffect(uiState.state) {
-        if (uiState.state == CallState.ENDED) {
+        if (uiState.state == CallState.ENDED && !showTypeDialog) {
             kotlinx.coroutines.delay(1200)
             onCallEnded()
         }
@@ -71,7 +83,9 @@ fun CallScreen(
         )
     }
 
-    if (showTypeDialog && uiState.state == CallState.IDLE) {
+    // No active call = IDLE or ENDED — show type dialog
+    val hasActiveCall = uiState.state != CallState.IDLE && uiState.state != CallState.ENDED
+    if (showTypeDialog && !hasActiveCall) {
         CallTypeDialog(
             username = username,
             onVoice = { showTypeDialog = false; viewModel.startOutgoingCall(username, CallType.VOICE) },
@@ -370,7 +384,8 @@ private fun VideoView(
 @Composable
 private fun CallControls(uiState: CallUiState, viewModel: CallViewModel, showFlip: Boolean, onMinimize: ((callId: Int?) -> Unit)? = null) {
     val conferenceState by viewModel.conferenceState.collectAsState()
-    var showAddDialog by remember { mutableStateOf(false) }
+    val users by viewModel.users.collectAsState()
+    var showPickerDialog by remember { mutableStateOf(false) }
 
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         // Participant chips when conference active
@@ -418,7 +433,7 @@ private fun CallControls(uiState: CallUiState, viewModel: CallViewModel, showFli
                 SmallControl(Icons.Default.FlipCameraAndroid, SurfaceWhite, viewModel::flipCamera)
             }
             // Add to call button
-            SmallControl(Icons.Default.PersonAdd, SurfaceWhite) { showAddDialog = true }
+            SmallControl(Icons.Default.PersonAdd, SurfaceWhite) { viewModel.fetchUsers(); showPickerDialog = true }
             CallActionButton(Icons.Default.CallEnd, "End", EndCallRed) { viewModel.endCall() }
             SmallControl(
                 if (uiState.isSpeaker) Icons.Default.VolumeUp else Icons.Default.VolumeOff,
@@ -432,45 +447,132 @@ private fun CallControls(uiState: CallUiState, viewModel: CallViewModel, showFli
         }
     }
 
-    if (showAddDialog) {
-        AddToCallDialog(
-            onDismiss = { showAddDialog = false },
-            onConfirm = { username ->
-                showAddDialog = false
+    if (showPickerDialog) {
+        UserPickerModal(
+            users = users,
+            onDismiss = { showPickerDialog = false },
+            onSelect = { username ->
+                showPickerDialog = false
                 uiState.callId?.let { viewModel.startConferenceAndInvite(it, username) }
             },
         )
     }
 }
 
-// ── Add-to-call dialog ──────────────────────────────────────────────────────
+// ── WhatsApp-style user picker modal ────────────────────────────────────────
 
 @Composable
-private fun AddToCallDialog(onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
-    var username by remember { mutableStateOf("") }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        icon = { Icon(Icons.Default.PersonAdd, null, tint = DilarionRed) },
-        title = { Text("Add to Call", textAlign = TextAlign.Center) },
-        text = {
-            OutlinedTextField(
-                value = username,
-                onValueChange = { username = it },
-                label = { Text("Username") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp),
-            )
-        },
-        confirmButton = {
-            Button(
-                onClick = { if (username.isNotBlank()) onConfirm(username.trim()) },
-                enabled = username.isNotBlank(),
-                colors = ButtonDefaults.buttonColors(containerColor = AcceptGreen),
-            ) { Text("Invite") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
+private fun UserPickerModal(
+    users: List<UserInfo>,
+    onDismiss: () -> Unit,
+    onSelect: (String) -> Unit,
+) {
+    var query by remember { mutableStateOf("") }
+    val filtered = remember(query, users) {
+        if (query.isBlank()) users
+        else users.filter { it.username?.contains(query, ignoreCase = true) == true }
+    }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.8f),
+            shape = RoundedCornerShape(20.dp),
+            color = Color(0xFF1A1A2E),
+        ) {
+            Column {
+                // Header
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("Add to Call", color = SurfaceWhite, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, null, tint = SurfaceWhite.copy(alpha = 0.7f))
+                    }
+                }
+                // Search bar
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    placeholder = { Text("Search users…", color = SurfaceWhite.copy(alpha = 0.4f)) },
+                    leadingIcon = { Icon(Icons.Default.Search, null, tint = SurfaceWhite.copy(alpha = 0.5f)) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                        .padding(bottom = 8.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = SurfaceWhite,
+                        unfocusedTextColor = SurfaceWhite,
+                        focusedBorderColor = DilarionRed,
+                        unfocusedBorderColor = Color(0xFF2C2C54),
+                        cursorColor = DilarionRed,
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                    singleLine = true,
+                )
+                // User list
+                if (filtered.isEmpty()) {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            if (users.isEmpty()) "Loading…" else "No users found",
+                            color = SurfaceWhite.copy(alpha = 0.4f),
+                            fontSize = 14.sp,
+                        )
+                    }
+                } else {
+                    LazyColumn(modifier = Modifier.fillMaxSize()) {
+                        items(filtered) { user ->
+                            val username = user.username ?: return@items
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onSelect(username) }
+                                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            ) {
+                                Box(
+                                    Modifier
+                                        .size(42.dp)
+                                        .clip(CircleShape)
+                                        .background(DilarionRed),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text(
+                                        username.firstOrNull()?.uppercaseChar()?.toString() ?: "?",
+                                        color = SurfaceWhite,
+                                        fontSize = 16.sp,
+                                        fontWeight = FontWeight.Bold,
+                                    )
+                                }
+                                Text(
+                                    username,
+                                    color = SurfaceWhite,
+                                    fontSize = 15.sp,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                Icon(
+                                    Icons.Default.PersonAdd,
+                                    null,
+                                    tint = AcceptGreen,
+                                    modifier = Modifier.size(20.dp),
+                                )
+                            }
+                            HorizontalDivider(color = Color(0xFF2C2C54), thickness = 0.5.dp)
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 // ── Dialogs ─────────────────────────────────────────────────────────────────
