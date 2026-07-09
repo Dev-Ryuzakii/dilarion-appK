@@ -97,7 +97,7 @@ struct LogoImage: View {
     let size: CGFloat
 
     var body: some View {
-        Group {
+        SwiftUI.Group {
             if let uiImage = UIImage(named: "dilarion_logo") {
                 Image(uiImage: uiImage)
                     .resizable()

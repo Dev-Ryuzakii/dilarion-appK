@@ -9,6 +9,8 @@ class AudioManager: NSObject, ObservableObject, AVAudioRecorderDelegate, AVAudio
 
     private var audioRecorder: AVAudioRecorder?
     private var audioPlayer: AVAudioPlayer?
+    private var notificationPlayer: AVAudioPlayer?
+    private var ringtoneAudioPlayer: AVAudioPlayer?
 
     @Published var isRecording = false
     @Published var recordingDuration: TimeInterval = 0
@@ -16,6 +18,37 @@ class AudioManager: NSObject, ObservableObject, AVAudioRecorderDelegate, AVAudio
 
     @Published var playingMediaId: String? = nil
     private var onPlaybackFinished: (() -> Void)?
+
+    func playNotificationSound() {
+        guard let url = Bundle.main.url(forResource: "beep", withExtension: "mp3") else { return }
+        do {
+            // Play notification sound concurrently without interrupting background music if possible
+            let session = AVAudioSession.sharedInstance()
+            try? session.setCategory(.ambient, mode: .default, options: [])
+            notificationPlayer = try AVAudioPlayer(contentsOf: url)
+            notificationPlayer?.play()
+        } catch {
+            print("Failed to play notification sound: \(error)")
+        }
+    }
+
+    func startRingtone() {
+        guard let url = Bundle.main.url(forResource: "ringingtone", withExtension: "mp3") else { return }
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try? session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth])
+            ringtoneAudioPlayer = try AVAudioPlayer(contentsOf: url)
+            ringtoneAudioPlayer?.numberOfLoops = -1
+            ringtoneAudioPlayer?.play()
+        } catch {
+            print("Failed to play ringtone loop: \(error)")
+        }
+    }
+
+    func stopRingtone() {
+        ringtoneAudioPlayer?.stop()
+        ringtoneAudioPlayer = nil
+    }
 
     private func setupAudioSession(forRecording: Bool) {
         let session = AVAudioSession.sharedInstance()

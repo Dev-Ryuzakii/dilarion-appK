@@ -8,6 +8,35 @@ enum APIError: Error {
     case unauthorized
 }
 
+extension APIError: CustomNSError, LocalizedError {
+    static var errorDomain: String { "Dilarion.APIError" }
+
+    var errorCode: Int {
+        switch self {
+        case .invalidURL: return 0
+        case .noData: return 1
+        case .decodingFailed: return 2
+        case .serverError(let code, _): return code
+        case .unauthorized: return 401
+        }
+    }
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidURL:
+            return "Invalid API Endpoint URL"
+        case .noData:
+            return "Empty response received from server"
+        case .decodingFailed(let err):
+            return "Failed to parse server response: \(err.localizedDescription)"
+        case .serverError(_, let msg):
+            return msg
+        case .unauthorized:
+            return "Session expired. Please log in again."
+        }
+    }
+}
+
 class APIClient {
     static let shared = APIClient()
     private init() {}
@@ -55,6 +84,12 @@ class APIClient {
         try validate(response, data)
     }
 
+    func putVoid(_ path: String) async throws {
+        guard let req = makeRequest(path: path, method: "PUT") else { throw APIError.invalidURL }
+        let (data, response) = try await URLSession.shared.data(for: req)
+        try validate(response, data)
+    }
+
     func postMultipart<T: Decodable>(
         _ path: String,
         parameters: [String: String],
@@ -78,7 +113,8 @@ class APIClient {
         // Add form fields
         for (key, value) in parameters {
             body.append("--\(boundary)\r\n".data(using: .utf8)!)
-            body.append("Content-Disposition: form-data; name=\"\(key)\"\r\n\r\n".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"\(key)\"\r\n".data(using: .utf8)!)
+            body.append("Content-Type: text/plain; charset=utf-8\r\n\r\n".data(using: .utf8)!)
             body.append("\(value)\r\n".data(using: .utf8)!)
         }
         

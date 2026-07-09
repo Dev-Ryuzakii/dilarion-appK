@@ -1,0 +1,39 @@
+name: Dilarion
+options:
+  bundleIdPrefix: com.dilarion
+targets:
+  Dilarion:
+    type: application
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources:
+      - Dilarion/Sources
+      - Dilarion/Resources
+    dependencies:
+      - package: WebRTC
+        product: WebRTC
+    entitlements:
+      path: Dilarion/Dilarion.entitlements
+      properties:
+        aps-environment: development
+    info:
+      path: Dilarion/Info.plist
+      properties:
+        CFBundleDisplayName: "Dilarionn"
+        CFBundleName: "Dilarionn"
+        UILaunchScreen:
+          UIColorName: ""
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UIStatusBarStyle: UIStatusBarStyleLightContent
+        UIViewControllerBasedStatusBarAppearance: true
+        NSMicrophoneUsageDescription: "Dilarion needs microphone access for voice notes and calls."
+        NSCameraUsageDescription: "Dilarion needs camera access for video calls."
+    settings:
+      TARGETED_DEVICE_FAMILY: 1
+      GENERATE_INFOPLIST_FILE: false
+      ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+packages:
+  WebRTC:
+    url: https://github.com/stasel/WebRTC.git
+    from: 125.0.0

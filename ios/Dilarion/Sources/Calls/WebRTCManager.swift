@@ -107,7 +107,7 @@ class WebRTCManager: NSObject, ObservableObject {
             ],
             optionalConstraints: nil
         )
-        return try await withCheckedThrowingContinuation { continuation in
+        return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<String, Error>) in
             self.peerConnection?.offer(for: constraints) { sdp, error in
                 if let error = error {
                     continuation.resume(throwing: error)
@@ -122,7 +122,7 @@ class WebRTCManager: NSObject, ObservableObject {
                         continuation.resume(throwing: error)
                         return
                     }
-                    continuation.resume(returning: sdp.sdpDescription)
+                    continuation.resume(returning: sdp.sdp)
                 }
             }
         }
@@ -147,7 +147,7 @@ class WebRTCManager: NSObject, ObservableObject {
             ],
             optionalConstraints: nil
         )
-        let answerSdp = try await withCheckedThrowingContinuation { continuation in
+        let answerSdp: String = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<String, Error>) in
             self.peerConnection?.answer(for: constraints) { sdp, error in
                 if let error = error {
                     continuation.resume(throwing: error)
@@ -161,7 +161,7 @@ class WebRTCManager: NSObject, ObservableObject {
                     if let error = error {
                         continuation.resume(throwing: error)
                     } else {
-                        continuation.resume(returning: sdp.sdpDescription)
+                        continuation.resume(returning: sdp.sdp)
                     }
                 }
             }

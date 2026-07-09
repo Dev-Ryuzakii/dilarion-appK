@@ -1,10 +1,10 @@
 import SwiftUI
 
-// Mirrors AuthScreen.kt exactly:
-// - Gradient bg (red tint → grey → surface)
+// Mirrors AuthScreen.kt — dark themed:
+// - Black gradient background
 // - Logo 110pt circular
-// - "Welcome Back" / "Sign in to continue"
-// - Card: Username + Authentication Token (with show/hide)
+// - "Welcome Back" / "Sign in to continue" in white
+// - Dark card: Username + Authentication Token (with show/hide)
 // - Red Sign In button
 // - "Secure · Private · Encrypted" footer
 
@@ -20,12 +20,12 @@ struct AuthView: View {
 
     var body: some View {
         ZStack {
-            // Gradient: DilarionRed 6% → BackgroundGrey → surface (mirrors Kotlin gradient)
+            // Dark gradient background
             LinearGradient(
                 colors: [
-                    Color.dilarionRed.opacity(0.06),
-                    Color.backgroundGrey,
-                    Color(UIColor.systemBackground).opacity(0.96),
+                    Color(hex: 0x0A0A0A),
+                    Color(hex: 0x111111),
+                    Color(hex: 0x1A1A1A),
                 ],
                 startPoint: .top,
                 endPoint: .bottom
@@ -34,32 +34,33 @@ struct AuthView: View {
 
             ScrollView {
                 VStack(spacing: 0) {
-                    Spacer().frame(height: 48)
+                    Spacer().frame(height: 64)
 
-                    // Logo
+                    // Logo — uses the actual asset from Assets.xcassets
                     LogoImage(size: 110)
 
                     Spacer().frame(height: 24)
 
                     Text("Welcome Back")
                         .font(.system(size: 28, weight: .bold))
-                        .foregroundColor(.textPrimary)
+                        .foregroundColor(.white)
 
                     Text("Sign in to continue")
                         .font(.system(size: 14))
-                        .foregroundColor(.textSecondary)
+                        .foregroundColor(.white.opacity(0.55))
                         .padding(.top, 6)
 
                     Spacer().frame(height: 40)
 
-                    // Card
+                    // Card — dark surface
                     VStack(spacing: 16) {
                         // Username field
                         HStack {
                             Image(systemName: "person")
-                                .foregroundColor(.textSecondary)
+                                .foregroundColor(.white.opacity(0.45))
                                 .frame(width: 24)
                             TextField("Username", text: $username)
+                                .foregroundColor(.white)
                                 .autocapitalization(.none)
                                 .autocorrectionDisabled()
                                 .submitLabel(.next)
@@ -67,23 +68,25 @@ struct AuthView: View {
                                 .onSubmit { focusField = .token }
                         }
                         .padding(14)
-                        .background(Color.backgroundGrey)
+                        .background(Color(hex: 0x1E1E1E))
                         .overlay(
                             RoundedRectangle(cornerRadius: 14)
-                                .stroke(focusField == .username ? Color.dilarionRed : Color.borderGrey, lineWidth: 1.5)
+                                .stroke(focusField == .username ? Color.dilarionRed : Color(hex: 0x333333), lineWidth: 1.5)
                         )
                         .clipShape(RoundedRectangle(cornerRadius: 14))
 
-                        // Authentication Token field (not "Password" — matches Kotlin label)
+                        // Authentication Token field
                         HStack {
                             Image(systemName: "lock")
-                                .foregroundColor(.textSecondary)
+                                .foregroundColor(.white.opacity(0.45))
                                 .frame(width: 24)
-                            Group {
+                            SwiftUI.Group {
                                 if showToken {
                                     TextField("Authentication Token", text: $token)
+                                        .foregroundColor(.white)
                                 } else {
                                     SecureField("Authentication Token", text: $token)
+                                        .foregroundColor(.white)
                                 }
                             }
                             .autocapitalization(.none)
@@ -96,14 +99,14 @@ struct AuthView: View {
                                 showToken.toggle()
                             } label: {
                                 Image(systemName: showToken ? "eye.slash" : "eye")
-                                    .foregroundColor(.textSecondary)
+                                    .foregroundColor(.white.opacity(0.45))
                             }
                         }
                         .padding(14)
-                        .background(Color.backgroundGrey)
+                        .background(Color(hex: 0x1E1E1E))
                         .overlay(
                             RoundedRectangle(cornerRadius: 14)
-                                .stroke(focusField == .token ? Color.dilarionRed : Color.borderGrey, lineWidth: 1.5)
+                                .stroke(focusField == .token ? Color.dilarionRed : Color(hex: 0x333333), lineWidth: 1.5)
                         )
                         .clipShape(RoundedRectangle(cornerRadius: 14))
 
@@ -132,21 +135,25 @@ struct AuthView: View {
                         .opacity((username.isEmpty || token.isEmpty) ? 0.6 : 1)
                     }
                     .padding(24)
-                    .background(Color.surfaceWhite)
+                    .background(Color(hex: 0x151515))
                     .clipShape(RoundedRectangle(cornerRadius: 20))
-                    .shadow(color: .black.opacity(0.06), radius: 8, y: 4)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 20)
+                            .stroke(Color(hex: 0x2A2A2A), lineWidth: 1)
+                    )
                     .padding(.horizontal, 24)
 
                     Spacer().frame(height: 24)
 
                     Text("Secure · Private · Encrypted")
                         .font(.system(size: 12))
-                        .foregroundColor(.textSecondary)
+                        .foregroundColor(.white.opacity(0.4))
 
                     Spacer().frame(height: 48)
                 }
             }
         }
+        .preferredColorScheme(.dark)
         .onChange(of: vm.state.success) { success in
             if success { onSuccess() }
         }

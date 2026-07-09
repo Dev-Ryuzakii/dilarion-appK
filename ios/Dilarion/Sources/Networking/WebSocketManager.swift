@@ -28,6 +28,8 @@ class WebSocketManager: ObservableObject {
         isConnected = true
         events.send(.connected)
         receive()
+        // Session is live — make sure the backend has our APNs token for offline pushes
+        NotificationManager.shared.syncTokenWithBackend()
     }
 
     func disconnect() {
@@ -73,11 +75,17 @@ class WebSocketManager: ObservableObject {
             let payload = json["data"].flatMap { $0 as? [String: Any] } ?? json
             if let msgData = try? JSONSerialization.data(withJSONObject: payload),
                let msg = try? JSONDecoder().decode(Message.self, from: msgData) {
+                AudioManager.shared.playNotificationSound()
+                NotificationManager.shared.notifyNewMessage(from: msg.sender ?? "Unknown")
                 events.send(.message(msg))
             }
         case "incoming_call":
             if let callData = try? JSONSerialization.data(withJSONObject: json),
                let call = try? JSONDecoder().decode(IncomingCallData.self, from: callData) {
+                NotificationManager.shared.notifyIncomingCall(
+                    from: call.callerUsername,
+                    isVideo: call.callType == "video"
+                )
                 events.send(.incomingCall(call))
             }
         case "typing":
@@ -85,8 +93,13 @@ class WebSocketManager: ObservableObject {
             let isTyping = json["is_typing"] as? Bool ?? false
             events.send(.typing(from: from, isTyping: isTyping))
         case "new_media":
+            AudioManager.shared.playNotificationSound()
+            NotificationManager.shared.notifyNewMedia(from: json["sender_username"] as? String)
             events.send(.newMedia)
         case "call_answer", "call_ice", "call_ended":
+            if type == "call_ended" {
+                NotificationManager.shared.cancelCallNotification()
+            }
             events.send(.callSignal(json))
         default:
             break

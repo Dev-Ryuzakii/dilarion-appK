@@ -22,7 +22,7 @@ class AuthViewModel: ObservableObject {
                 let response: LoginResponse = try await APIClient.shared.post(
                     "/auth/login",
                     body: LoginRequest(username: username.trimmingCharacters(in: .whitespaces),
-                                       password: token.trimmingCharacters(in: .whitespaces))
+                                       token: token.trimmingCharacters(in: .whitespaces))
                 )
                 if response.token.isEmpty {
                     await MainActor.run { state = AuthUiState(error: "Server returned no session token") }
@@ -30,7 +30,6 @@ class AuthViewModel: ObservableObject {
                 }
                 KeychainHelper.shared.save(key: "session_token", value: response.token)
                 KeychainHelper.shared.save(key: "username", value: response.username)
-                KeychainHelper.shared.save(key: "user_id", value: String(response.userId))
                 WebSocketManager.shared.connect(token: response.token)
                 await MainActor.run { state = AuthUiState(success: true) }
             } catch APIError.serverError(let code, _) {

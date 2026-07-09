@@ -27,7 +27,7 @@ struct HomeView: View {
 
                 VStack(spacing: 0) {
                     // Content
-                    Group {
+                    SwiftUI.Group {
                         switch selectedTab {
                         case .chats:
                             ChatsTab(state: vm.state, onOpenChat: { peer in navigateTo = peer })
@@ -150,7 +150,7 @@ struct ChatsTab: View {
     }
 
     var body: some View {
-        Group {
+        SwiftUI.Group {
             if state.isLoading {
                 SkeletonList()
             } else if threads.isEmpty {
@@ -187,7 +187,7 @@ struct GroupsTab: View {
     let onOpenGroup: (Group) -> Void
 
     var body: some View {
-        Group {
+        SwiftUI.Group {
             if state.isLoading {
                 SkeletonList()
             } else if state.groups.isEmpty {
@@ -219,7 +219,7 @@ struct CallsTab: View {
     let state: HomeUiState
 
     var body: some View {
-        Group {
+        SwiftUI.Group {
             if state.isCallHistoryLoading {
                 SkeletonList(count: 6)
             } else if state.callHistory.isEmpty {
@@ -516,15 +516,7 @@ struct NewChatSheet: View {
     }
 }
 
-// MARK: — Settings stub (navigated from HomeView toolbar)
-struct SettingsViewFull: View {
-    let onLogout: () -> Void
 
-    var body: some View {
-        Text("Settings")
-            .navigationTitle("Settings")
-    }
-}
 
 // MARK: — Helpers
 private func formatRelativeTime(_ iso: String) -> String {

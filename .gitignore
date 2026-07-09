@@ -26,3 +26,20 @@ Thumbs.db
 *.keystore
 keystore.properties
 google-services.json
+
+# iOS / Xcode
+ios/.build/
+ios/build/
+ios/Pods/
+ios/.swiftpm/
+xcuserdata/
+*.xcuserstate
+DerivedData/
+# stale duplicate project left over from Xcode template (real one: ios/Dilarion.xcodeproj)
+ios/Dilarion/Dilarion.xcodeproj/
+
+# Kotlin tooling caches
+.kotlin/
+
+# Node
+node_modules/

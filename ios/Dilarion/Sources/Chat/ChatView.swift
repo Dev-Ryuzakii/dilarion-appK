@@ -63,45 +63,7 @@ struct ChatView: View {
                                     DateSeparator(timestamp: ts)
                                 }
 
-                                switch item {
-                                case .textMessage(let msg):
-                                    let isMine = msg.sender == vm.state.currentUsername
-                                    MessageBubbleView(
-                                        message: msg,
-                                        isMine: isMine,
-                                        isUnlocked: vm.state.isUnlocked,
-                                        isGroup: groupId != nil,
-                                        onTapLocked: { showUnlockDialog = true }
-                                    )
-                                    .id(item.id)
-                                    .task {
-                                        if !msg.read && !isMine {
-                                            await vm.markRead(msg.id)
-                                        }
-                                    }
-                                case .mediaMessage(let media):
-                                    let isMine = media.sender == vm.state.currentUsername
-                                    MediaBubbleView(
-                                        media: media,
-                                        isMine: isMine,
-                                        isUnlocked: vm.state.isUnlocked,
-                                        localFilePaths: vm.state.localFilePaths,
-                                        playingMediaId: vm.state.playingMediaId,
-                                        onPlay: { mid, unlocked in
-                                            Task { await vm.playMedia(mediaId: mid, useRealAudio: unlocked) }
-                                        },
-                                        onStop: {
-                                            vm.stopPlayback()
-                                        },
-                                        onDownloadImage: { mid in
-                                            Task { await vm.downloadImageForDisplay(mediaId: mid) }
-                                        },
-                                        onTapLocked: {
-                                            showUnlockDialog = true
-                                        }
-                                    )
-                                    .id(item.id)
-                                }
+                                chatItemView(for: item)
                             }
                         }
                         .padding(.horizontal, 12)
@@ -240,6 +202,49 @@ struct ChatView: View {
         }
     }
 
+    @ViewBuilder
+    private func chatItemView(for item: ChatItem) -> some View {
+        switch item {
+        case .textMessage(let msg):
+            let isMine = msg.sender == vm.state.currentUsername
+            MessageBubbleView(
+                message: msg,
+                isMine: isMine,
+                isUnlocked: vm.state.isUnlocked,
+                isGroup: groupId != nil,
+                onTapLocked: { showUnlockDialog = true }
+            )
+            .id(item.id)
+            .task {
+                if !msg.read && !isMine {
+                    await vm.markRead(msg.id)
+                }
+            }
+        case .mediaMessage(let media):
+            let isMine = media.sender == vm.state.currentUsername
+            MediaBubbleView(
+                media: media,
+                isMine: isMine,
+                isUnlocked: vm.state.isUnlocked,
+                localFilePaths: vm.state.localFilePaths,
+                playingMediaId: vm.state.playingMediaId,
+                onPlay: { mid, unlocked in
+                    Task { await vm.playMedia(mediaId: mid, useRealAudio: unlocked) }
+                },
+                onStop: {
+                    vm.stopPlayback()
+                },
+                onDownloadImage: { mid in
+                    Task { await vm.downloadImageForDisplay(mediaId: mid) }
+                },
+                onTapLocked: {
+                    showUnlockDialog = true
+                }
+            )
+            .id(item.id)
+        }
+    }
+
     private func shouldShowDateSep(current: String, previous: String?) -> Bool {
         guard let prev = previous else { return true }
         return current.prefix(10) != prev.prefix(10)
@@ -251,22 +256,15 @@ struct ChatBackground: View {
     var body: some View {
         ZStack {
             Color.backgroundGrey
-            // Pattern grid of lock icons at low opacity (mimics chat_bg drawable)
-            Canvas { ctx, size in
-                let spacing: CGFloat = 44
-                let cols = Int(size.width / spacing) + 2
-                let rows = Int(size.height / spacing) + 2
-                for row in 0..<rows {
-                    for col in 0..<cols {
-                        let x = CGFloat(col) * spacing + (row.isMultiple(of: 2) ? 0 : spacing / 2)
-                        let y = CGFloat(row) * spacing
-                        ctx.opacity = 0.045
-                        ctx.draw(
-                            Text("🔒").font(.system(size: 14)),
-                            at: CGPoint(x: x, y: y)
-                        )
-                    }
-                }
+            // chat_bg pattern asset at 0.45 alpha, crop-scaled (matches ChatScreen.kt);
+            // the imageset carries a dark-appearance variant for dark mode
+            GeometryReader { geo in
+                Image("chat_bg")
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: geo.size.width, height: geo.size.height)
+                    .clipped()
+                    .opacity(0.45)
             }
         }
         .ignoresSafeArea()
@@ -286,7 +284,7 @@ struct MessageBubbleView: View {
     private var hasRecipient: Bool {
         !(message.recipient ?? "").isEmpty && message.recipient != "group"
     }
-    private var privatePurple = Color(hex: 0xA78BFA)
+    private var privatePurple: Color { Color(hex: 0xA78BFA) }
     private var showDecoy: Bool { isEncrypted && !isUnlocked }
 
     private var bubbleColor: Color {
@@ -648,7 +646,7 @@ struct UnlockDialogSheet: View {
                 HStack {
                     Image(systemName: "key")
                         .foregroundColor(.dilarionRed)
-                    Group {
+                    SwiftUI.Group {
                         if showToken {
                             TextField("Master Token", text: $token)
                         } else {

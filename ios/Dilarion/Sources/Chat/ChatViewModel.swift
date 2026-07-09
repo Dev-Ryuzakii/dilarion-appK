@@ -38,6 +38,7 @@ struct ChatUiState {
     var currentUsername: String = KeychainHelper.shared.read(key: "username") ?? ""
 }
 
+@MainActor
 class ChatViewModel: ObservableObject {
     @Published var state = ChatUiState()
 
@@ -45,7 +46,6 @@ class ChatViewModel: ObservableObject {
     private(set) var groupId: Int? = nil
     private var cancellables = Set<AnyCancellable>()
     private var typingTask: Task<Void, Never>? = nil
-    private var typingClearTask: Task<Void, Never>? = nil
     private var recordingURL: URL?
     @Published var partnerTyping = false
 
@@ -90,30 +90,45 @@ class ChatViewModel: ObservableObject {
 
     func loadMedia() async {
         do {
+            // GET /media/inbox → MediaInboxResponse { media_files: [...] }
             let response: MediaInboxResponse = try await APIClient.shared.get("/media/inbox")
             let me = state.currentUsername
-            let items = (response.mediaFiles ?? []).filter { item in
-                (item.sender == partnerUsername && item.recipient == me) ||
-                (item.sender == me && item.recipient == partnerUsername)
+            let files = response.mediaFiles ?? []
+            var items: [MediaItem] = []
+            for item in files {
+                if (item.sender == partnerUsername && item.recipient == me) ||
+                   (item.sender == me && item.recipient == partnerUsername) {
+                    items.append(item)
+                }
             }
+            let filteredItems = items
             await MainActor.run {
-                self.state.mediaItems = items
+                self.state.mediaItems = filteredItems
             }
         } catch {
             print("Failed to load media inbox: \(error)")
         }
     }
 
-    // MARK: — Load
+    // MARK: — Load Messages
     func loadMessages() async {
         await MainActor.run { state.isLoading = true }
         do {
             if let gid = groupId {
-                let msgs: [Message] = try await APIClient.shared.get("/groups/\(gid)/messages")
-                await MainActor.run { state.messages = msgs; state.isLoading = false }
+                // GET /messages/group/{groupId} → GroupMessagesResponse { messages: [...] }
+                let resp: GroupMessagesResponse = try await APIClient.shared.get("/messages/group/\(gid)")
+                let sorted = resp.messages.sorted { ($0.timestamp ?? "") < ($1.timestamp ?? "") }
+                await MainActor.run { state.messages = sorted; state.isLoading = false }
             } else {
-                let msgs: [Message] = try await APIClient.shared.get("/messages/conversation/\(partnerUsername)")
-                await MainActor.run { state.messages = msgs; state.isLoading = false }
+                // DM: GET /messages/inbox → filter for this peer (same as Android)
+                let resp: InboxResponse = try await APIClient.shared.get("/messages/inbox")
+                let me = state.currentUsername
+                let filtered = resp.messages.filter { msg in
+                    (msg.sender == partnerUsername && msg.recipient == me) ||
+                    (msg.sender == me && msg.recipient == partnerUsername)
+                }
+                let sorted = filtered.sorted { ($0.timestamp ?? "") < ($1.timestamp ?? "") }
+                await MainActor.run { state.messages = sorted; state.isLoading = false }
             }
         } catch {
             await MainActor.run { state.isLoading = false }
@@ -121,6 +136,7 @@ class ChatViewModel: ObservableObject {
     }
 
     private func loadGroupMembers(_ gid: Int) async {
+        // GET /groups/{groupId}/members → [GroupMember]
         let members: [GroupMember]? = try? await APIClient.shared.get("/groups/\(gid)/members")
         await MainActor.run { state.groupMembers = members ?? [] }
     }
@@ -135,66 +151,55 @@ class ChatViewModel: ObservableObject {
 
     // MARK: — Send text
     func sendMessage(_ text: String) async {
-        let masterToken = KeychainHelper.shared.read(key: "master_token") ?? ""
-        let encrypted = masterToken.isEmpty
-            ? text
-            : (try? EncryptionManager.shared.encrypt(text, masterToken: masterToken)) ?? text
+        let tagged = state.taggedUser
+        let me = state.currentUsername
 
-        await MainActor.run { state.isSending = true }
+        await MainActor.run { state.isSending = true; state.taggedUser = nil; state.mentionQuery = nil }
 
         // Optimistic message (negative id = pending)
         let optimisticId = -(Int(Date().timeIntervalSince1970 * 1000) % 100000)
         let optimistic = Message(
             id: optimisticId,
-            sender: state.currentUsername,
-            recipient: groupId == nil ? partnerUsername : nil,
+            sender: me,
+            recipient: groupId == nil ? partnerUsername : (tagged ?? "group"),
             groupId: groupId,
-            content: text,
-            encryptedContent: encrypted,
+            content: text.trimmingCharacters(in: .whitespaces),
+            encryptedContent: nil,
             decoyContent: nil,
-            contentType: masterToken.isEmpty ? nil : "encrypted",
+            contentType: nil,
             mediaType: nil,
             timestamp: ISO8601DateFormatter().string(from: Date()),
             read: false,
-            isPrivateTagged: state.taggedUser != nil ? true : nil
+            isPrivateTagged: nil
         )
-        await MainActor.run { state.messages.append(optimistic) }
-
-        let req: SendMessageRequest
-        if let gid = groupId {
-            req = SendMessageRequest(
-                recipientUsername: nil,
-                groupId: gid,
-                encryptedContent: encrypted,
-                decoyContent: nil,
-                isPrivateTagged: nil,
-                replyToId: nil,
-                taggedUsername: state.taggedUser
-            )
-        } else {
-            req = SendMessageRequest(
-                recipientUsername: partnerUsername,
-                groupId: nil,
-                encryptedContent: encrypted,
-                decoyContent: nil,
-                isPrivateTagged: state.taggedUser != nil ? true : nil,
-                replyToId: nil,
-                taggedUsername: state.taggedUser
-            )
+        await MainActor.run {
+            state.messages.append(optimistic)
+            state.messages.sort { ($0.timestamp ?? "") < ($1.timestamp ?? "") }
         }
 
         do {
-            let endpoint = groupId != nil ? "/messages/group/send" : "/messages/send"
-            let sent: Message = try await APIClient.shared.post(endpoint, body: req)
-            await MainActor.run {
-                self.state.messages.removeAll { $0.id == optimisticId }
-                self.state.messages.append(sent)
-                self.state.isSending = false
-                self.state.taggedUser = nil
+            if let gid = groupId {
+                // POST /messages/group/send → { group_id, message, addressed_to_username? }
+                let req = SendGroupMessageRequest(
+                    groupId: gid,
+                    message: text.trimmingCharacters(in: .whitespaces),
+                    addressedToUsername: tagged
+                )
+                try await APIClient.shared.postVoid("/messages/group/send", body: req)
+            } else {
+                // POST /messages/send → { username, message }
+                let req = SendDmRequest(
+                    username: partnerUsername,
+                    message: text.trimmingCharacters(in: .whitespaces)
+                )
+                try await APIClient.shared.postVoid("/messages/send", body: req)
             }
+            // Reload messages from server (same as Android)
+            await loadMessages()
+            await MainActor.run { state.isSending = false }
         } catch {
             await MainActor.run {
-                self.state.messages.removeAll { $0.id == optimisticId }
+                self.state.messages.removeAll { $0.id < 0 }
                 self.state.isSending = false
                 self.state.error = error.localizedDescription
             }
@@ -231,12 +236,9 @@ class ChatViewModel: ObservableObject {
         }
     }
 
-    // MARK: — Mark read
+    // MARK: — Mark read (PUT /messages/{id}/read — matches Android)
     func markRead(_ messageId: Int) async {
-        let endpoint = groupId != nil
-            ? "/groups/\(groupId!)/messages/\(messageId)/read"
-            : "/messages/\(messageId)/read"
-        try? await APIClient.shared.postVoid(endpoint, body: EmptyBody())
+        try? await APIClient.shared.putVoid("/messages/\(messageId)/read")
         await MainActor.run {
             if let idx = state.messages.firstIndex(where: { $0.id == messageId }) {
                 state.messages[idx].read = true
@@ -296,7 +298,7 @@ class ChatViewModel: ObservableObject {
         let filename = "voice_\(UUID().uuidString).m4a"
         let fileURL = URL(fileURLWithPath: tempDir).appendingPathComponent(filename)
         recordingURL = fileURL
-        
+
         AudioManager.shared.requestPermissions { [weak self] granted in
             guard granted else {
                 self?.state.error = "Microphone permission denied"
@@ -353,17 +355,17 @@ class ChatViewModel: ObservableObject {
             }
             return
         }
-        
+
         await MainActor.run { state.playingMediaId = mediaId }
         do {
             let endpoint = useRealAudio ? "/media/download/\(mediaId)" : "/media/decoy-voice/\(mediaId)"
             let data = try await APIClient.shared.getData(endpoint)
-            
+
             let tempDir = NSTemporaryDirectory()
             let filename = "\(cacheKey).mp4"
             let fileURL = URL(fileURLWithPath: tempDir).appendingPathComponent(filename)
             try data.write(to: fileURL)
-            
+
             await MainActor.run {
                 state.localFilePaths[cacheKey] = fileURL.path
                 AudioManager.shared.startPlaying(fileURL: fileURL, mediaId: mediaId) { [weak self] in
@@ -392,7 +394,7 @@ class ChatViewModel: ObservableObject {
             let filename = "\(cacheKey).jpg"
             let fileURL = URL(fileURLWithPath: tempDir).appendingPathComponent(filename)
             try data.write(to: fileURL)
-            
+
             await MainActor.run {
                 state.localFilePaths[cacheKey] = fileURL.path
             }

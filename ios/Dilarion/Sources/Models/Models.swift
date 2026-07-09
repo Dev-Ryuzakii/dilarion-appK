@@ -3,18 +3,18 @@ import Foundation
 // MARK: - Auth
 struct LoginRequest: Codable {
     let username: String
-    let password: String
+    let token: String
 }
 
 struct LoginResponse: Codable {
     let token: String
-    let userId: Int
     let username: String
+    let isAdmin: Bool
 
     enum CodingKeys: String, CodingKey {
-        case token = "session_token"
-        case userId = "user_id"
+        case token
         case username
+        case isAdmin = "is_admin"
     }
 }
 
@@ -35,38 +35,48 @@ struct Message: Codable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case id
-        case sender = "sender_username"
-        case recipient = "recipient_username"
+        case sender
+        case recipient
         case groupId = "group_id"
         case content
         case encryptedContent = "encrypted_content"
         case decoyContent = "decoy_content"
         case contentType = "content_type"
         case mediaType = "media_type"
-        case timestamp = "created_at"
-        case read = "is_read"
+        case timestamp
+        case read
         case isPrivateTagged = "is_private_tagged"
     }
 }
 
-// MARK: - Send
-struct SendMessageRequest: Codable {
-    let recipientUsername: String?
-    let groupId: Int?
-    let encryptedContent: String
-    let decoyContent: String?
-    let isPrivateTagged: Bool?
-    let replyToId: Int?
-    let taggedUsername: String?
+// Wrapper — GET /messages/inbox returns { messages: [...], count: N }
+struct InboxResponse: Codable {
+    let messages: [Message]
+    let count: Int?
+}
+
+// Wrapper — GET /messages/group/{id} returns { messages: [...], count: N }
+struct GroupMessagesResponse: Codable {
+    let messages: [Message]
+    let count: Int?
+}
+
+// MARK: - Send DM: POST /messages/send → { username, message }
+struct SendDmRequest: Codable {
+    let username: String
+    let message: String
+}
+
+// MARK: - Send Group: POST /messages/group/send → { group_id, message, addressed_to_username? }
+struct SendGroupMessageRequest: Codable {
+    let groupId: Int
+    let message: String
+    let addressedToUsername: String?
 
     enum CodingKeys: String, CodingKey {
-        case recipientUsername = "recipient_username"
         case groupId = "group_id"
-        case encryptedContent = "encrypted_content"
-        case decoyContent = "decoy_content"
-        case isPrivateTagged = "is_private_tagged"
-        case replyToId = "reply_to_id"
-        case taggedUsername = "tagged_username"
+        case message
+        case addressedToUsername = "addressed_to_username"
     }
 }
 
@@ -76,7 +86,8 @@ struct Group: Codable, Identifiable {
     let name: String
     let description: String?
     let createdAt: String?
-    let createdBy: String?
+    let createdBy: Int?
+    let memberCount: Int?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -84,13 +95,23 @@ struct Group: Codable, Identifiable {
         case description
         case createdAt = "created_at"
         case createdBy = "created_by"
+        case memberCount = "member_count"
     }
 }
 
 struct GroupMember: Codable, Identifiable {
-    let id: Int
+    var id: Int { userId }
+    let userId: Int
     let username: String
     let role: String
+    let joinedAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case userId = "user_id"
+        case username
+        case role
+        case joinedAt = "joined_at"
+    }
 }
 
 // MARK: - Calls
@@ -111,10 +132,11 @@ struct IncomingCallData: Codable, Identifiable {
 struct CallHistoryItem: Codable, Identifiable {
     let id: Int
     let otherPartyUsername: String?
-    let callType: String
+    let callType: String?
     let isCaller: Bool
-    let status: String
+    let status: String?
     let startedAt: String?
+    let endedAt: String?
     let duration: Int
 
     enum CodingKeys: String, CodingKey {
@@ -124,21 +146,36 @@ struct CallHistoryItem: Codable, Identifiable {
         case isCaller = "is_caller"
         case status
         case startedAt = "started_at"
+        case endedAt = "ended_at"
         case duration
     }
 }
 
+// Wrapper — GET /calls/history returns { calls: [...], count: N }
+struct CallHistoryResponse: Codable {
+    let calls: [CallHistoryItem]
+    let count: Int?
+}
+
 // MARK: - User
 struct UserProfile: Codable, Identifiable {
-    let id: Int
+    let apiId: Int?
     let username: String
-    let avatarUrl: String?
+    let registered: String?
+
+    var id: String { username }
 
     enum CodingKeys: String, CodingKey {
-        case id
+        case apiId = "id"
         case username
-        case avatarUrl = "avatar_url"
+        case registered
     }
+}
+
+// Conformance: use username for List identification
+extension UserProfile: Hashable {
+    static func == (lhs: UserProfile, rhs: UserProfile) -> Bool { lhs.username == rhs.username }
+    func hash(into hasher: inout Hasher) { hasher.combine(username) }
 }
 
 // MARK: - Media
@@ -147,8 +184,12 @@ struct MediaItem: Codable, Identifiable {
     let filename: String
     let mediaType: String
     let contentType: String?
+    let fileSize: Int?
     let sender: String?
+    let recipient: String?
     let timestamp: String?
+    let autoDelete: Bool?
+    let downloaded: Bool?
 
     var id: String { mediaId }
 
@@ -157,8 +198,12 @@ struct MediaItem: Codable, Identifiable {
         case filename
         case mediaType = "media_type"
         case contentType = "content_type"
+        case fileSize = "file_size"
         case sender
+        case recipient
         case timestamp
+        case autoDelete = "auto_delete"
+        case downloaded
     }
 }
 
@@ -246,3 +291,11 @@ struct IceCandidateRequest: Codable {
     }
 }
 
+// MARK: - Master Token
+struct MasterTokenRequest: Codable {
+    let masterToken: String
+
+    enum CodingKeys: String, CodingKey {
+        case masterToken = "master_token"
+    }
+}

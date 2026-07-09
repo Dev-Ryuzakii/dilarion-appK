@@ -29,6 +29,7 @@ struct CallUiState {
     var error: String? = nil
 }
 
+@MainActor
 class CallViewModel: ObservableObject {
     static let shared = CallViewModel()
     
@@ -42,7 +43,7 @@ class CallViewModel: ObservableObject {
     private var storedOfferSdp: String? = nil
     private var remoteDescSet = false
     private var pendingRemoteCandidates: [(sdpMid: String, sdpMLineIndex: Int32, candidate: String)] = []
-    private var ringtoneTimer: Timer?
+
     
     init() {
         setupTrackObservers()
@@ -308,7 +309,7 @@ class CallViewModel: ObservableObject {
             candidate: candidate.sdp
         )
         let req = IceCandidateRequest(callId: callId, recipientUsername: peerUsername, candidate: iceCand)
-        try? await APIClient.shared.postVoid("/calls/ice-candidate", body: req)
+        try? await APIClient.shared.postVoid("/calls/ice_candidate", body: req)
     }
     
     private func flushPendingCandidates(peerUsername: String, callId: Int) {
@@ -320,7 +321,7 @@ class CallViewModel: ObservableObject {
             )
             let req = IceCandidateRequest(callId: callId, recipientUsername: peerUsername, candidate: iceCand)
             Task {
-                try? await APIClient.shared.postVoid("/calls/ice-candidate", body: req)
+                try? await APIClient.shared.postVoid("/calls/ice_candidate", body: req)
             }
         }
         pendingCandidates.removeAll()
@@ -345,21 +346,11 @@ class CallViewModel: ObservableObject {
     }
     
     private func startRingtoneLoop() {
-        stopRingtoneLoop()
-        ringtoneTimer = Timer.scheduledTimer(withTimeInterval: 1.8, repeats: true) { _ in
-            // Play standard dialing system feedback sound
-            AudioServicesPlaySystemSound(1007)
-        }
-        AudioServicesPlaySystemSound(1007)
+        AudioManager.shared.startRingtone()
     }
     
     private func stopRingtoneLoop() {
-        ringtoneTimer?.invalidate()
-        ringtoneTimer = nil
+        AudioManager.shared.stopRingtone()
     }
-    
-    deinit {
-        timerSubscription?.cancel()
-        stopRingtoneLoop()
-    }
+
 }

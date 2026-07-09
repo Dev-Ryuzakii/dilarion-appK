@@ -10,6 +10,7 @@ struct HomeUiState {
     var currentUsername: String = KeychainHelper.shared.read(key: "username") ?? ""
 }
 
+@MainActor
 class HomeViewModel: ObservableObject {
     @Published var state = HomeUiState()
     private var cancellables = Set<AnyCancellable>()
@@ -22,11 +23,14 @@ class HomeViewModel: ObservableObject {
     func load() {
         state.isLoading = true
         Task {
-            async let msgs: [Message]? = try? APIClient.shared.get("/messages/inbox")
+            // GET /messages/inbox → InboxResponse { messages: [...] }
+            async let inboxResp: InboxResponse? = try? APIClient.shared.get("/messages/inbox")
+            // GET /groups → [Group]
             async let grps: [Group]? = try? APIClient.shared.get("/groups")
-            let (m, g) = await (msgs, grps)
+
+            let (inbox, g) = await (inboxResp, grps)
             await MainActor.run {
-                self.state.messages = m ?? []
+                self.state.messages = inbox?.messages ?? []
                 self.state.groups = g ?? []
                 self.state.isLoading = false
             }
@@ -36,9 +40,10 @@ class HomeViewModel: ObservableObject {
     func loadCallHistory() {
         state.isCallHistoryLoading = true
         Task {
-            let history: [CallHistoryItem]? = try? await APIClient.shared.get("/calls/history")
+            // GET /calls/history → CallHistoryResponse { calls: [...] }
+            let resp: CallHistoryResponse? = try? await APIClient.shared.get("/calls/history")
             await MainActor.run {
-                self.state.callHistory = history ?? []
+                self.state.callHistory = resp?.calls ?? []
                 self.state.isCallHistoryLoading = false
             }
         }
@@ -49,7 +54,6 @@ class HomeViewModel: ObservableObject {
         WebSocketManager.shared.disconnect()
         KeychainHelper.shared.delete(key: "session_token")
         KeychainHelper.shared.delete(key: "username")
-        KeychainHelper.shared.delete(key: "user_id")
         KeychainHelper.shared.delete(key: "master_token")
         completion()
     }
@@ -58,8 +62,11 @@ class HomeViewModel: ObservableObject {
         WebSocketManager.shared.events
             .receive(on: DispatchQueue.main)
             .sink { [weak self] event in
-                if case .message(let msg) = event {
-                    self?.state.messages.append(msg)
+                switch event {
+                case .message:
+                    // Reload full inbox on any new message
+                    self?.load()
+                default: break
                 }
             }
             .store(in: &cancellables)
