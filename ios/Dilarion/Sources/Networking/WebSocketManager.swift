@@ -6,6 +6,7 @@ enum WSEvent {
     case incomingCall(IncomingCallData)
     case typing(from: String, isTyping: Bool)
     case callSignal([String: Any])
+    case newMedia
     case connected
     case disconnected
 }
@@ -83,6 +84,8 @@ class WebSocketManager: ObservableObject {
             let from = json["sender_username"] as? String ?? ""
             let isTyping = json["is_typing"] as? Bool ?? false
             events.send(.typing(from: from, isTyping: isTyping))
+        case "new_media":
+            events.send(.newMedia)
         case "call_answer", "call_ice", "call_ended":
             events.send(.callSignal(json))
         default:

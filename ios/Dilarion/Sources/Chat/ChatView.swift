@@ -1,4 +1,6 @@
 import SwiftUI
+import PhotosUI
+import AVFoundation
 
 // Mirrors ChatScreen.kt exactly:
 // - Red top bar with avatar initial, name, lock icon, "end-to-end encrypted"
@@ -22,6 +24,7 @@ struct ChatView: View {
     @State private var inputText = ""
     @State private var showUnlockDialog = false
     @State private var unlockError: String? = nil
+    @State private var selectedPhotoItem: PhotosPickerItem? = nil
 
     private var displayName: String { groupId != nil ? (groupName ?? "Group") : username }
 
@@ -77,10 +80,27 @@ struct ChatView: View {
                                         }
                                     }
                                 case .mediaMessage(let media):
-                                    Text("📎 \(media.filename)")
-                                        .font(.system(size: 13))
-                                        .foregroundColor(.textSecondary)
-                                        .id(item.id)
+                                    let isMine = media.sender == vm.state.currentUsername
+                                    MediaBubbleView(
+                                        media: media,
+                                        isMine: isMine,
+                                        isUnlocked: vm.state.isUnlocked,
+                                        localFilePaths: vm.state.localFilePaths,
+                                        playingMediaId: vm.state.playingMediaId,
+                                        onPlay: { mid, unlocked in
+                                            Task { await vm.playMedia(mediaId: mid, useRealAudio: unlocked) }
+                                        },
+                                        onStop: {
+                                            vm.stopPlayback()
+                                        },
+                                        onDownloadImage: { mid in
+                                            Task { await vm.downloadImageForDisplay(mediaId: mid) }
+                                        },
+                                        onTapLocked: {
+                                            showUnlockDialog = true
+                                        }
+                                    )
+                                    .id(item.id)
                                 }
                             }
                         }
@@ -108,29 +128,39 @@ struct ChatView: View {
                 }
 
                 // Input area
-                InputArea(
-                    inputText: $inputText,
-                    state: vm.state,
-                    groupId: groupId,
-                    onSend: {
-                        let text = inputText.trimmingCharacters(in: .whitespaces)
-                        guard !text.isEmpty else { return }
-                        inputText = ""
-                        vm.setMentionQuery(nil)
-                        Task { await vm.sendMessage(text) }
-                    },
-                    onTyping: { vm.sendTyping(isTyping: !inputText.isEmpty) },
-                    onMentionQuery: { q in vm.setMentionQuery(q) },
-                    onSelectMention: { member in
-                        vm.setTaggedUser(member.username)
-                        // strip @word at end of input
-                        inputText = inputText.replacingOccurrences(
-                            of: "@\\w*$", with: "", options: .regularExpression
-                        )
-                        vm.setMentionQuery(nil)
-                    },
-                    onClearTag: { vm.setTaggedUser(nil) }
-                )
+                if vm.state.isRecording {
+                    RecordingRow(
+                        seconds: vm.state.recordingSeconds,
+                        onCancel: { vm.cancelRecording() },
+                        onSend: { Task { await vm.stopAndSendRecording() } }
+                    )
+                } else {
+                    InputArea(
+                        inputText: $inputText,
+                        state: vm.state,
+                        groupId: groupId,
+                        selectedPhotoItem: $selectedPhotoItem,
+                        onSend: {
+                            let text = inputText.trimmingCharacters(in: .whitespaces)
+                            guard !text.isEmpty else { return }
+                            inputText = ""
+                            vm.setMentionQuery(nil)
+                            Task { await vm.sendMessage(text) }
+                        },
+                        onStartRecording: { vm.startRecording() },
+                        onTyping: { vm.sendTyping(isTyping: !inputText.isEmpty) },
+                        onMentionQuery: { q in vm.setMentionQuery(q) },
+                        onSelectMention: { member in
+                            vm.setTaggedUser(member.username)
+                            // strip @word at end of input
+                            inputText = inputText.replacingOccurrences(
+                                of: "@\\w*$", with: "", options: .regularExpression
+                            )
+                            vm.setMentionQuery(nil)
+                        },
+                        onClearTag: { vm.setTaggedUser(nil) }
+                    )
+                }
             }
         }
         .navigationTitle("")
@@ -165,7 +195,7 @@ struct ChatView: View {
             ToolbarItemGroup(placement: .topBarTrailing) {
                 if groupId == nil {
                     Button {
-                        // TODO: start call
+                        CallViewModel.shared.startOutgoingCall(peerUsername: username, type: .voice)
                     } label: {
                         Image(systemName: "phone")
                             .foregroundColor(.white)
@@ -198,6 +228,15 @@ struct ChatView: View {
         }
         .onAppear {
             vm.initialize(username: username, groupId: groupId)
+        }
+        .onChange(of: selectedPhotoItem) { item in
+            guard let item = item else { return }
+            Task {
+                if let data = try? await item.loadTransferable(type: Data.self) {
+                    await vm.sendImage(data: data)
+                }
+                selectedPhotoItem = nil
+            }
         }
     }
 
@@ -427,7 +466,9 @@ struct InputArea: View {
     @Binding var inputText: String
     let state: ChatUiState
     let groupId: Int?
+    @Binding var selectedPhotoItem: PhotosPickerItem?
     let onSend: () -> Void
+    let onStartRecording: () -> Void
     let onTyping: () -> Void
     let onMentionQuery: (String?) -> Void
     let onSelectMention: (GroupMember) -> Void
@@ -504,7 +545,7 @@ struct InputArea: View {
             HStack(alignment: .bottom, spacing: 8) {
                 // Attach (DM only)
                 if groupId == nil {
-                    Button { /* image picker */ } label: {
+                    PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
                         Image(systemName: "paperclip")
                             .font(.system(size: 20))
                             .foregroundColor(.textSecondary)
@@ -555,7 +596,7 @@ struct InputArea: View {
                     }
                     .disabled(state.isSending)
                 } else if groupId == nil {
-                    Button { /* mic */ } label: {
+                    Button(action: onStartRecording) {
                         Image(systemName: "mic")
                             .font(.system(size: 20))
                             .foregroundColor(.textSecondary)
@@ -571,7 +612,8 @@ struct InputArea: View {
             .shadow(color: .black.opacity(0.06), radius: 4, y: -2)
 
             if state.isUploadingMedia {
-                ProgressView(value: 0.5)
+                ProgressView()
+                    .progressViewStyle(.linear)
                     .tint(.dilarionRed)
                     .frame(height: 2)
             }
@@ -674,3 +716,195 @@ private func formatTimestamp(_ iso: String) -> String {
     }
     return ""
 }
+
+// MARK: — Recording Row UI
+struct RecordingRow: View {
+    let seconds: Int
+    let onCancel: () -> Void
+    let onSend: () -> Void
+
+    @State private var pulseAlpha: Double = 1.0
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Circle()
+                .fill(Color.dilarionRed)
+                .frame(width: 10, height: 10)
+                .opacity(pulseAlpha)
+                .onAppear {
+                    withAnimation(Animation.easeInOut(duration: 0.6).repeatForever(autoreverses: true)) {
+                        pulseAlpha = 0.2
+                    }
+                }
+            
+            Text(String(format: "Recording %02d:%02d", seconds / 60, seconds % 60))
+                .font(.system(size: 14))
+                .foregroundColor(.textPrimary)
+            
+            Spacer()
+            
+            Button(action: onCancel) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 16))
+                    .foregroundColor(.textSecondary)
+                    .frame(width: 36, height: 36)
+            }
+            
+            Button(action: onSend) {
+                Image(systemName: "paperplane.fill")
+                    .font(.system(size: 16))
+                    .foregroundColor(.white)
+                    .frame(width: 44, height: 44)
+                    .background(Color.dilarionRed)
+                    .clipShape(Circle())
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 12)
+        .background(Color.surfaceWhite)
+        .shadow(color: .black.opacity(0.06), radius: 4, y: -2)
+    }
+}
+
+// MARK: — Media Bubble View UI
+struct MediaBubbleView: View {
+    let media: MediaItem
+    let isMine: Bool
+    let isUnlocked: Bool
+    let localFilePaths: [String: String]
+    let playingMediaId: String?
+    let onPlay: (String, Bool) -> Void
+    let onStop: () -> Void
+    let onDownloadImage: (String) -> Void
+    let onTapLocked: () -> Void
+
+    var body: some View {
+        HStack {
+            if isMine { Spacer() }
+            
+            VStack(alignment: isMine ? .trailing : .leading, spacing: 4) {
+                // Sender name if left-aligned
+                if !isMine, let sender = media.sender {
+                    Text(sender)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(.textSecondary)
+                }
+
+                // Bubble Content
+                VStack(spacing: 8) {
+                    if isVoiceNote {
+                        // Voice note UI
+                        HStack(spacing: 12) {
+                            Button {
+                                if playingMediaId == media.mediaId {
+                                    onStop()
+                                } else {
+                                    onPlay(media.mediaId, isUnlocked)
+                                }
+                            } label: {
+                                Image(systemName: playingMediaId == media.mediaId ? "stop.fill" : "play.fill")
+                                    .font(.system(size: 16))
+                                    .foregroundColor(.white)
+                                    .frame(width: 36, height: 36)
+                                    .background(Color.dilarionRed)
+                                    .clipShape(Circle())
+                            }
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(isUnlocked ? "Voice Note" : "Decoy Voice Note")
+                                    .font(.system(size: 13, weight: .bold))
+                                    .foregroundColor(.textPrimary)
+                                
+                                Text(playingMediaId == media.mediaId ? "Playing..." : "Tap to listen")
+                                    .font(.system(size: 11))
+                                    .foregroundColor(.textSecondary)
+                            }
+                            
+                            Spacer()
+                            
+                            if !isUnlocked {
+                                Image(systemName: "lock.fill")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(.textSecondary)
+                            }
+                        }
+                        .padding(12)
+                        .frame(width: 220)
+                    } else {
+                        // Image UI
+                        if isUnlocked {
+                            let cacheKey = "img_\(media.mediaId)"
+                            if let localPath = localFilePaths[cacheKey],
+                               let uiImage = UIImage(contentsOfFile: localPath) {
+                                Image(uiImage: uiImage)
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fill)
+                                    .frame(maxWidth: 240, maxHeight: 180)
+                                    .clipped()
+                                    .cornerRadius(12)
+                            } else {
+                                ProgressView()
+                                    .frame(width: 240, height: 180)
+                                    .background(Color.borderGrey)
+                                    .cornerRadius(12)
+                                    .onAppear {
+                                        onDownloadImage(media.mediaId)
+                                    }
+                            }
+                        } else {
+                            // Decoy Locked Image Placeholder
+                            Button(action: onTapLocked) {
+                                VStack(spacing: 8) {
+                                    Image(systemName: "lock.rectangle.stack.fill")
+                                        .font(.system(size: 32))
+                                        .foregroundColor(Color.dilarionRed)
+                                    Text("Encrypted Media")
+                                        .font(.system(size: 13, weight: .bold))
+                                        .foregroundColor(.textPrimary)
+                                    Text("Tap to decrypt")
+                                        .font(.system(size: 11))
+                                        .foregroundColor(.textSecondary)
+                                }
+                                .frame(width: 240, height: 150)
+                                .background(Color.borderGrey)
+                                .cornerRadius(12)
+                            }
+                        }
+                    }
+                }
+                .background(isMine ? Color.dilarionRed.opacity(0.1) : Color.borderGrey.opacity(0.4))
+                .cornerRadius(16)
+                
+                // Timestamp
+                if let ts = media.timestamp {
+                    Text(formatTime(ts))
+                        .font(.system(size: 9))
+                        .foregroundColor(.textSecondary)
+                }
+            }
+            .id(media.mediaId)
+            
+            if !isMine { Spacer() }
+        }
+    }
+
+    private var isVoiceNote: Bool {
+        media.mediaType.lowercased() == "voice" || media.filename.hasSuffix(".m4a") || media.filename.hasSuffix(".wav")
+    }
+
+    private func formatTime(_ ts: String) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        var date = formatter.date(from: ts)
+        if date == nil {
+            let simpleFormatter = ISO8601DateFormatter()
+            simpleFormatter.formatOptions = [.withInternetDateTime]
+            date = simpleFormatter.date(from: ts)
+        }
+        guard let date = date else { return "" }
+        let outFormatter = DateFormatter()
+        outFormatter.dateFormat = "HH:mm"
+        return outFormatter.string(from: date)
+    }
+}
+

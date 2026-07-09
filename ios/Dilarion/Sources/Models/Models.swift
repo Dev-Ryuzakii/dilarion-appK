@@ -161,3 +161,88 @@ struct MediaItem: Codable, Identifiable {
         case timestamp
     }
 }
+
+struct MediaInboxResponse: Codable {
+    let mediaFiles: [MediaItem]?
+    let count: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case mediaFiles = "media_files"
+        case count
+    }
+}
+
+struct MediaUploadResponse: Codable {
+    let mediaId: String?
+    let filename: String?
+    let mediaType: String?
+    let message: String?
+
+    enum CodingKeys: String, CodingKey {
+        case mediaId = "media_id"
+        case filename
+        case mediaType = "media_type"
+        case message
+    }
+}
+
+// MARK: - Empty Body
+struct EmptyBody: Codable {}
+
+// MARK: - Call Signaling
+struct CallInitiateRequest: Codable {
+    let recipientUsername: String
+    let callType: String
+    let offerSdp: String?
+
+    enum CodingKeys: String, CodingKey {
+        case recipientUsername = "recipient_username"
+        case callType = "call_type"
+        case offerSdp = "offer_sdp"
+    }
+}
+
+struct CallActionRequest: Codable {
+    let callId: Int
+    let action: String
+    let answerSdp: String?
+    let mastertoken: String?
+
+    enum CodingKeys: String, CodingKey {
+        case callId = "call_id"
+        case action
+        case answerSdp = "answer_sdp"
+        case mastertoken
+    }
+}
+
+struct CallResponse: Codable {
+    let callId: Int?
+    let status: String?
+    let timestamp: String?
+
+    enum CodingKeys: String, CodingKey {
+        case callId = "call_id"
+        case status
+        case timestamp
+    }
+}
+
+struct WebRTCIceCandidate: Codable {
+    let sdpMid: String
+    let sdpMLineIndex: Int
+    let candidate: String
+}
+
+struct IceCandidateRequest: Codable {
+    let callId: Int
+    let recipientUsername: String
+    let candidate: WebRTCIceCandidate
+
+    enum CodingKeys: String, CodingKey {
+        case callId = "call_id"
+        case recipientUsername = "recipient_username"
+        case candidate
+    }
+}
+

@@ -16,6 +16,7 @@ struct DilarionApp: App {
 struct RootView: View {
     @EnvironmentObject var appState: AppState
     @StateObject private var splashVM = SplashViewModel()
+    @ObservedObject private var callVM = CallViewModel.shared
 
     var body: some View {
         Group {
@@ -29,5 +30,14 @@ struct RootView: View {
             }
         }
         .onReceive(splashVM.$destination) { _ in }
+        .fullScreenCover(isPresented: Binding(
+            get: { callVM.uiState.state != .idle },
+            set: { if !$0 { callVM.resetToIdle() } }
+        )) {
+            let masterToken = KeychainHelper.shared.read(key: "master_token") ?? ""
+            CallScreen(vm: callVM, masterToken: masterToken) {
+                callVM.resetToIdle()
+            }
+        }
     }
 }

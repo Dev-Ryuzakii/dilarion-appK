@@ -24,6 +24,7 @@ struct ChatUiState {
     var messages: [Message] = []
     var mediaItems: [MediaItem] = []
     var groupMembers: [GroupMember] = []
+    var localFilePaths: [String: String] = [:]
     var isLoading: Bool = false
     var isSending: Bool = false
     var isRecording: Bool = false
@@ -45,7 +46,12 @@ class ChatViewModel: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private var typingTask: Task<Void, Never>? = nil
     private var typingClearTask: Task<Void, Never>? = nil
+    private var recordingURL: URL?
     @Published var partnerTyping = false
+
+    init() {
+        setupAudioObservers()
+    }
 
     func initialize(username: String, groupId: Int?) {
         self.partnerUsername = username
@@ -54,6 +60,47 @@ class ChatViewModel: ObservableObject {
         Task { await loadMessages() }
         if let gid = groupId {
             Task { await loadGroupMembers(gid) }
+        } else {
+            Task { await loadMedia() }
+        }
+    }
+
+    private func setupAudioObservers() {
+        AudioManager.shared.$isRecording
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] isRec in
+                self?.state.isRecording = isRec
+            }
+            .store(in: &cancellables)
+
+        AudioManager.shared.$recordingDuration
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] dur in
+                self?.state.recordingSeconds = Int(dur)
+            }
+            .store(in: &cancellables)
+
+        AudioManager.shared.$playingMediaId
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] playingId in
+                self?.state.playingMediaId = playingId
+            }
+            .store(in: &cancellables)
+    }
+
+    func loadMedia() async {
+        do {
+            let response: MediaInboxResponse = try await APIClient.shared.get("/media/inbox")
+            let me = state.currentUsername
+            let items = (response.mediaFiles ?? []).filter { item in
+                (item.sender == partnerUsername && item.recipient == me) ||
+                (item.sender == me && item.recipient == partnerUsername)
+            }
+            await MainActor.run {
+                self.state.mediaItems = items
+            }
+        } catch {
+            print("Failed to load media inbox: \(error)")
         }
     }
 
@@ -214,9 +261,143 @@ class ChatViewModel: ObservableObject {
                     if inThisChat { self.state.messages.append(msg) }
                 case .typing(let from, let isTyping):
                     if from == self.partnerUsername { self.partnerTyping = isTyping }
+                case .newMedia:
+                    if self.groupId == nil {
+                        Task { await self.loadMedia() }
+                    }
                 default: break
                 }
             }
             .store(in: &cancellables)
+    }
+
+    // MARK: — Media Actions
+    func sendImage(data: Data) async {
+        await MainActor.run { state.isUploadingMedia = true }
+        do {
+            let parameters = ["username": partnerUsername]
+            let filename = "upload_\(Int(Date().timeIntervalSince1970)).jpg"
+            let _: MediaUploadResponse = try await APIClient.shared.postMultipart(
+                "/media/upload_raw",
+                parameters: parameters,
+                fileData: data,
+                fileName: filename,
+                mimeType: "image/jpeg"
+            )
+            await loadMedia()
+        } catch {
+            await MainActor.run { state.error = error.localizedDescription }
+        }
+        await MainActor.run { state.isUploadingMedia = false }
+    }
+
+    func startRecording() {
+        let tempDir = NSTemporaryDirectory()
+        let filename = "voice_\(UUID().uuidString).m4a"
+        let fileURL = URL(fileURLWithPath: tempDir).appendingPathComponent(filename)
+        recordingURL = fileURL
+        
+        AudioManager.shared.requestPermissions { [weak self] granted in
+            guard granted else {
+                self?.state.error = "Microphone permission denied"
+                return
+            }
+            let success = AudioManager.shared.startRecording(to: fileURL)
+            if !success {
+                self?.state.error = "Failed to start audio recording"
+            }
+        }
+    }
+
+    func stopAndSendRecording() async {
+        guard let url = AudioManager.shared.stopRecording() else { return }
+        await MainActor.run { state.isUploadingMedia = true }
+        do {
+            let data = try Data(contentsOf: url)
+            let parameters = [
+                "username": partnerUsername,
+                "content_type": "media/voice"
+            ]
+            let filename = url.lastPathComponent
+            let _: MediaUploadResponse = try await APIClient.shared.postMultipart(
+                "/media/upload_raw",
+                parameters: parameters,
+                fileData: data,
+                fileName: filename,
+                mimeType: "audio/m4a"
+            )
+            try? FileManager.default.removeItem(at: url)
+            await loadMedia()
+        } catch {
+            await MainActor.run { state.error = error.localizedDescription }
+        }
+        await MainActor.run { state.isUploadingMedia = false }
+    }
+
+    func cancelRecording() {
+        AudioManager.shared.cancelRecording()
+        if let url = recordingURL {
+            try? FileManager.default.removeItem(at: url)
+        }
+        recordingURL = nil
+    }
+
+    func playMedia(mediaId: String, useRealAudio: Bool) async {
+        let cacheKey = "\(useRealAudio ? "real" : "fake")_\(mediaId)"
+        if let localPath = state.localFilePaths[cacheKey] {
+            let url = URL(fileURLWithPath: localPath)
+            await MainActor.run {
+                AudioManager.shared.startPlaying(fileURL: url, mediaId: mediaId) { [weak self] in
+                    self?.state.playingMediaId = nil
+                }
+            }
+            return
+        }
+        
+        await MainActor.run { state.playingMediaId = mediaId }
+        do {
+            let endpoint = useRealAudio ? "/media/download/\(mediaId)" : "/media/decoy-voice/\(mediaId)"
+            let data = try await APIClient.shared.getData(endpoint)
+            
+            let tempDir = NSTemporaryDirectory()
+            let filename = "\(cacheKey).mp4"
+            let fileURL = URL(fileURLWithPath: tempDir).appendingPathComponent(filename)
+            try data.write(to: fileURL)
+            
+            await MainActor.run {
+                state.localFilePaths[cacheKey] = fileURL.path
+                AudioManager.shared.startPlaying(fileURL: fileURL, mediaId: mediaId) { [weak self] in
+                    self?.state.playingMediaId = nil
+                }
+            }
+        } catch {
+            await MainActor.run {
+                state.error = error.localizedDescription
+                state.playingMediaId = nil
+            }
+        }
+    }
+
+    func stopPlayback() {
+        AudioManager.shared.stopPlaying()
+        state.playingMediaId = nil
+    }
+
+    func downloadImageForDisplay(mediaId: String) async {
+        let cacheKey = "img_\(mediaId)"
+        if state.localFilePaths[cacheKey] != nil { return }
+        do {
+            let data = try await APIClient.shared.getData("/media/download/\(mediaId)")
+            let tempDir = NSTemporaryDirectory()
+            let filename = "\(cacheKey).jpg"
+            let fileURL = URL(fileURLWithPath: tempDir).appendingPathComponent(filename)
+            try data.write(to: fileURL)
+            
+            await MainActor.run {
+                state.localFilePaths[cacheKey] = fileURL.path
+            }
+        } catch {
+            print("Failed to download image \(mediaId): \(error)")
+        }
     }
 }
