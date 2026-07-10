@@ -30,6 +30,26 @@ class AuthViewModel: ObservableObject {
                 }
                 KeychainHelper.shared.save(key: "session_token", value: response.token)
                 KeychainHelper.shared.save(key: "username", value: response.username)
+
+                // Generate the E2EE keypair ONCE per device. Regenerating on every
+                // login would rotate the identity and make all previously received
+                // messages permanently undecryptable.
+                let existingKey = KeychainHelper.shared.read(key: "private_key")
+                if existingKey == nil || existingKey?.isEmpty == true {
+                    if let (pubB64, privB64) = EncryptionManager.shared.generateKeyPair() {
+                        KeychainHelper.shared.save(key: "private_key", value: privB64)
+                        do {
+                            struct UpdateKeyRequest: Codable { let public_key: String }
+                            let _: EmptyBody = try await APIClient.shared.post(
+                                "/users/update_public_key",
+                                body: UpdateKeyRequest(public_key: pubB64)
+                            )
+                        } catch {
+                            print("Failed to upload public key: \(error)")
+                        }
+                    }
+                }
+                
                 WebSocketManager.shared.connect(token: response.token)
                 await MainActor.run { state = AuthUiState(success: true) }
             } catch APIError.serverError(let code, _) {

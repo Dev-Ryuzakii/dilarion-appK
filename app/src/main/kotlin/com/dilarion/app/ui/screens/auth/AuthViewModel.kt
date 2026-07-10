@@ -13,6 +13,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -58,8 +59,18 @@ class AuthViewModel @Inject constructor(
                     _uiState.value = AuthUiState(error = "Server returned no session token")
                     return@launch
                 }
-                val (pubB64, privB64) = cryptoManager.generateKeyPair()
-                apiService.updatePublicKey("Bearer $token", com.dilarion.app.data.model.UpdatePublicKeyRequest(pubB64))
+                // Generate the E2EE keypair ONCE per device. Regenerating on every
+                // login would rotate the identity and make all previously received
+                // messages permanently undecryptable.
+                val existingPriv = sessionManager.privateKey.first()
+                val existingPub = sessionManager.publicKey.first()
+                val (pubB64, privB64) = if (existingPriv.isNullOrBlank() || existingPub.isNullOrBlank()) {
+                    val kp = cryptoManager.generateKeyPair()
+                    apiService.updatePublicKey("Bearer $token", com.dilarion.app.data.model.UpdatePublicKeyRequest(kp.first))
+                    kp
+                } else {
+                    Pair(existingPub, existingPriv)
+                }
                 sessionManager.saveSession(token, body.username, privB64, pubB64)
                 presenceService.connect(token)
                 MonitoringForegroundService.start(context)

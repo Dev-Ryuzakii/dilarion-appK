@@ -64,6 +64,7 @@ class ChatViewModel @Inject constructor(
     private val apiService: ApiService,
     private val sessionManager: SessionManager,
     private val presenceService: PresenceService,
+    private val cryptoManager: com.dilarion.app.security.CryptoManager,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ChatUiState())
@@ -113,6 +114,7 @@ class ChatViewModel @Inject constructor(
         val saved = _uiState.value.savedMasterToken
         return if (saved != null && enteredToken == saved) {
             _uiState.value = _uiState.value.copy(isUnlocked = true)
+            loadMessages()
             true
         } else false
     }
@@ -121,19 +123,40 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             val token = sessionManager.sessionToken.first() ?: return@launch
             val bearer = "Bearer $token"
+            val privKey = sessionManager.privateKey.first()
+            val me = _uiState.value.currentUsername
             runCatching {
-                val messages: List<Message> = if (groupId != null) {
+                val rawMessages: List<Message> = if (groupId != null) {
                     apiService.getGroupMessages(bearer, groupId!!).body()?.messages ?: emptyList()
                 } else {
-                    val me = _uiState.value.currentUsername
                     apiService.getInbox(bearer).body()?.messages
                         ?.filter { msg ->
                             (msg.sender == peerUsername && msg.recipient == me) ||
                                     (msg.sender == me && msg.recipient == peerUsername)
                         } ?: emptyList()
                 }
+                
+                val decrypted = rawMessages.map { msg ->
+                    if (_uiState.value.isUnlocked && msg.content != null && msg.encryptedKey != null && msg.iv != null && privKey != null && privKey.isNotBlank()) {
+                        try {
+                            var encKey = msg.encryptedKey
+                            if (encKey.startsWith("{")) {
+                                val mapType = object : com.google.gson.reflect.TypeToken<Map<String, String>>() {}.type
+                                val keysMap: Map<String, String> = com.google.gson.Gson().fromJson(encKey, mapType)
+                                encKey = keysMap[me] ?: encKey
+                            }
+                            val plain = cryptoManager.decryptMessage(msg.content, encKey, msg.iv, privKey)
+                            msg.copy(content = plain)
+                        } catch (e: Exception) {
+                            msg.copy(content = "[Decryption Failed]")
+                        }
+                    } else {
+                        msg
+                    }
+                }
+
                 _uiState.value = _uiState.value.copy(
-                    messages = messages.sortedBy { it.timestamp },
+                    messages = decrypted.sortedBy { it.timestamp },
                     isLoading = false,
                 )
             }.onFailure {
@@ -179,10 +202,28 @@ class ChatViewModel @Inject constructor(
             )
 
             runCatching {
+                val decoys = listOf("hey are you free tonight", "what are you up to later", "just wanted to check in with you", "hope everything is going well with you", "did you eat anything yet today", "have so much work piled up right now")
+                val decoy = decoys.random()
+
                 if (groupId != null) {
-                    apiService.sendGroupMessage(bearer, SendGroupMessageRequest(groupId!!, text.trim(), tagged))
+                    val pubKeys = mutableMapOf<String, String>()
+                    for (member in _uiState.value.groupMembers) {
+                        if (member.username != me) {
+                            val pk = apiService.getPublicKey(bearer, member.username).body()?.get("public_key")
+                            if (pk != null) pubKeys[member.username] = pk
+                        }
+                    }
+                    val myPk = apiService.getPublicKey(bearer, me).body()?.get("public_key")
+                    if (myPk != null) pubKeys[me] = myPk
+
+                    val (ciphertext, encKeysMap, iv) = cryptoManager.encryptGroupMessage(text.trim(), pubKeys)
+                    val encryptedKeyJson = com.google.gson.Gson().toJson(encKeysMap)
+                    apiService.sendGroupMessage(bearer, SendGroupMessageRequest(groupId!!, ciphertext, tagged, encryptedKeyJson, iv, decoy))
                 } else {
-                    apiService.sendDm(bearer, SendDmRequest(peerUsername, text.trim()))
+                    val pubKeyResponse = apiService.getPublicKey(bearer, peerUsername)
+                    val pubKeyB64 = pubKeyResponse.body()?.get("public_key") ?: throw Exception("Recipient public key not found")
+                    val (ciphertext, encryptedKey, iv) = cryptoManager.encryptMessage(text.trim(), pubKeyB64)
+                    apiService.sendDm(bearer, SendDmRequest(peerUsername, ciphertext, encryptedKey, iv, decoy))
                 }
                 loadMessages()
             }.onFailure {

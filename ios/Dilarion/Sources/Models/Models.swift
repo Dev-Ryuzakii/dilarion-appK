@@ -27,6 +27,8 @@ struct Message: Codable, Identifiable {
     let content: String?
     let encryptedContent: String?
     let decoyContent: String?
+    let encryptedKey: String?
+    let iv: String?
     let contentType: String?
     let mediaType: String?
     let timestamp: String?
@@ -41,6 +43,8 @@ struct Message: Codable, Identifiable {
         case content
         case encryptedContent = "encrypted_content"
         case decoyContent = "decoy_content"
+        case encryptedKey = "encrypted_key"
+        case iv
         case contentType = "content_type"
         case mediaType = "media_type"
         case timestamp
@@ -65,6 +69,17 @@ struct GroupMessagesResponse: Codable {
 struct SendDmRequest: Codable {
     let username: String
     let message: String
+    let encryptedKey: String?
+    let iv: String?
+    let decoyContent: String?
+
+    enum CodingKeys: String, CodingKey {
+        case username
+        case message
+        case encryptedKey = "encrypted_key"
+        case iv
+        case decoyContent = "decoy_content"
+    }
 }
 
 // MARK: - Send Group: POST /messages/group/send → { group_id, message, addressed_to_username? }
@@ -72,11 +87,17 @@ struct SendGroupMessageRequest: Codable {
     let groupId: Int
     let message: String
     let addressedToUsername: String?
+    let encryptedKey: String?
+    let iv: String?
+    let decoyContent: String?
 
     enum CodingKeys: String, CodingKey {
         case groupId = "group_id"
         case message
         case addressedToUsername = "addressed_to_username"
+        case encryptedKey = "encrypted_key"
+        case iv
+        case decoyContent = "decoy_content"
     }
 }
 

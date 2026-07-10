@@ -114,22 +114,55 @@ class ChatViewModel: ObservableObject {
     func loadMessages() async {
         await MainActor.run { state.isLoading = true }
         do {
+            var rawMessages: [Message] = []
             if let gid = groupId {
                 // GET /messages/group/{groupId} → GroupMessagesResponse { messages: [...] }
                 let resp: GroupMessagesResponse = try await APIClient.shared.get("/messages/group/\(gid)")
-                let sorted = resp.messages.sorted { ($0.timestamp ?? "") < ($1.timestamp ?? "") }
-                await MainActor.run { state.messages = sorted; state.isLoading = false }
+                rawMessages = resp.messages
             } else {
                 // DM: GET /messages/inbox → filter for this peer (same as Android)
                 let resp: InboxResponse = try await APIClient.shared.get("/messages/inbox")
                 let me = state.currentUsername
-                let filtered = resp.messages.filter { msg in
+                rawMessages = resp.messages.filter { msg in
                     (msg.sender == partnerUsername && msg.recipient == me) ||
                     (msg.sender == me && msg.recipient == partnerUsername)
                 }
-                let sorted = filtered.sorted { ($0.timestamp ?? "") < ($1.timestamp ?? "") }
-                await MainActor.run { state.messages = sorted; state.isLoading = false }
             }
+            
+            var decryptedMessages: [Message] = []
+            let privKeyB64 = KeychainHelper.shared.read(key: "private_key")
+            let me = state.currentUsername
+            
+            for var msg in rawMessages {
+                if state.isUnlocked, let content = msg.content, let encKey = msg.encryptedKey, let iv = msg.iv, let pk = privKeyB64, !pk.isEmpty {
+                    do {
+                        var actualEncKey = encKey
+                        if encKey.hasPrefix("{"), let data = encKey.data(using: .utf8), let map = try? JSONDecoder().decode([String: String].self, from: data) {
+                            actualEncKey = map[me] ?? encKey
+                        }
+                        let plain = try EncryptionManager.shared.decryptMessage(ciphertextB64: content, encryptedKeyB64: actualEncKey, ivB64: iv, privateKeyB64: pk)
+                        msg = Message(
+                            id: msg.id, sender: msg.sender, recipient: msg.recipient, groupId: msg.groupId, 
+                            content: plain, encryptedContent: msg.encryptedContent, decoyContent: msg.decoyContent, 
+                            encryptedKey: msg.encryptedKey, iv: msg.iv,
+                            contentType: msg.contentType, mediaType: msg.mediaType, timestamp: msg.timestamp, 
+                            read: msg.read, isPrivateTagged: msg.isPrivateTagged
+                        )
+                    } catch {
+                        msg = Message(
+                            id: msg.id, sender: msg.sender, recipient: msg.recipient, groupId: msg.groupId, 
+                            content: "[Decryption Failed]", encryptedContent: msg.encryptedContent, decoyContent: msg.decoyContent, 
+                            encryptedKey: msg.encryptedKey, iv: msg.iv,
+                            contentType: msg.contentType, mediaType: msg.mediaType, timestamp: msg.timestamp, 
+                            read: msg.read, isPrivateTagged: msg.isPrivateTagged
+                        )
+                    }
+                }
+                decryptedMessages.append(msg)
+            }
+            
+            let sorted = decryptedMessages.sorted { ($0.timestamp ?? "") < ($1.timestamp ?? "") }
+            await MainActor.run { state.messages = sorted; state.isLoading = false }
         } catch {
             await MainActor.run { state.isLoading = false }
         }
@@ -183,6 +216,8 @@ class ChatViewModel: ObservableObject {
             content: text.trimmingCharacters(in: .whitespaces),
             encryptedContent: nil,
             decoyContent: nil,
+            encryptedKey: nil,
+            iv: nil,
             contentType: nil,
             mediaType: nil,
             timestamp: ISO8601DateFormatter().string(from: Date()),
@@ -195,19 +230,50 @@ class ChatViewModel: ObservableObject {
         }
 
         do {
+            let decoys = ["hey are you free tonight", "what are you up to later", "just wanted to check in with you", "hope everything is going well with you", "did you eat anything yet today", "have so much work piled up right now"]
+            let decoy = decoys.randomElement()!
+            let plaintext = text.trimmingCharacters(in: .whitespaces)
+            
             if let gid = groupId {
-                // POST /messages/group/send → { group_id, message, addressed_to_username? }
+                var pubKeys = [String: String]()
+                for member in state.groupMembers {
+                    if member.username != me {
+                        do {
+                            let resp: [String: String] = try await APIClient.shared.get("/users/\(member.username)/public_key")
+                            if let pk = resp["public_key"] { pubKeys[member.username] = pk }
+                        } catch {}
+                    }
+                }
+                do {
+                    let resp: [String: String] = try await APIClient.shared.get("/users/\(me)/public_key")
+                    if let pk = resp["public_key"] { pubKeys[me] = pk }
+                } catch {}
+                
+                let (ciphertext, encKeysMap, iv) = try EncryptionManager.shared.encryptGroupMessage(plaintext, memberPublicKeys: pubKeys)
+                let encKeysData = try JSONEncoder().encode(encKeysMap)
+                let encKeysJson = String(data: encKeysData, encoding: .utf8)
+
                 let req = SendGroupMessageRequest(
                     groupId: gid,
-                    message: text.trimmingCharacters(in: .whitespaces),
-                    addressedToUsername: tagged
+                    message: ciphertext,
+                    addressedToUsername: tagged,
+                    encryptedKey: encKeysJson,
+                    iv: iv,
+                    decoyContent: decoy
                 )
                 try await APIClient.shared.postVoid("/messages/group/send", body: req)
             } else {
-                // POST /messages/send → { username, message }
+                let resp: [String: String] = try await APIClient.shared.get("/users/\(partnerUsername)/public_key")
+                guard let pubKey = resp["public_key"] else { throw URLError(.badServerResponse) }
+                
+                let (ciphertext, encKey, iv) = try EncryptionManager.shared.encryptMessage(plaintext, recipientPublicKeyB64: pubKey)
+
                 let req = SendDmRequest(
                     username: partnerUsername,
-                    message: text.trimmingCharacters(in: .whitespaces)
+                    message: ciphertext,
+                    encryptedKey: encKey,
+                    iv: iv,
+                    decoyContent: decoy
                 )
                 try await APIClient.shared.postVoid("/messages/send", body: req)
             }
@@ -229,10 +295,12 @@ class ChatViewModel: ObservableObject {
             // No saved token — save this one and unlock
             KeychainHelper.shared.save(key: "master_token", value: token)
             state.isUnlocked = true
+            Task { await loadMessages() }
             return true
         }
         if token == masterToken {
             state.isUnlocked = true
+            Task { await loadMessages() }
             return true
         }
         return false

@@ -12,6 +12,9 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
+import javax.crypto.spec.OAEPParameterSpec
+import java.security.spec.MGF1ParameterSpec
+import javax.crypto.spec.PSource
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -50,6 +53,27 @@ class CryptoManager @Inject constructor() {
         )
     }
 
+    fun encryptGroupMessage(plaintext: String, memberPublicKeys: Map<String, String>): Triple<String, Map<String, String>, String> {
+        val aesKey = generateAesKey()
+        val iv = ByteArray(12).also { java.security.SecureRandom().nextBytes(it) }
+        val ciphertext = aesEncrypt(plaintext.toByteArray(), aesKey, iv)
+        
+        val encryptedKeysMap = mutableMapOf<String, String>()
+        for ((username, pubKeyB64) in memberPublicKeys) {
+            if (pubKeyB64.isNotBlank()) {
+                val pubKey = decodePublicKey(pubKeyB64)
+                val encKey = rsaEncryptKey(aesKey.encoded, pubKey)
+                encryptedKeysMap[username] = Base64.encodeToString(encKey, Base64.NO_WRAP)
+            }
+        }
+        
+        return Triple(
+            Base64.encodeToString(ciphertext, Base64.NO_WRAP),
+            encryptedKeysMap,
+            Base64.encodeToString(iv, Base64.NO_WRAP)
+        )
+    }
+
     fun decryptMessage(ciphertextB64: String, encryptedKeyB64: String, ivB64: String, privateKeyB64: String): String {
         val aesKeyBytes = rsaDecryptKey(Base64.decode(encryptedKeyB64, Base64.NO_WRAP), decodePrivateKey(privateKeyB64))
         val aesKey = SecretKeySpec(aesKeyBytes, "AES")
@@ -80,13 +104,15 @@ class CryptoManager @Inject constructor() {
 
     private fun rsaEncryptKey(keyBytes: ByteArray, publicKey: PublicKey): ByteArray {
         val cipher = Cipher.getInstance(RSA_ALGO)
-        cipher.init(Cipher.ENCRYPT_MODE, publicKey)
+        val spec = OAEPParameterSpec("SHA-256", "MGF1", MGF1ParameterSpec.SHA256, PSource.PSpecified.DEFAULT)
+        cipher.init(Cipher.ENCRYPT_MODE, publicKey, spec)
         return cipher.doFinal(keyBytes)
     }
 
     private fun rsaDecryptKey(encryptedKey: ByteArray, privateKey: PrivateKey): ByteArray {
         val cipher = Cipher.getInstance(RSA_ALGO)
-        cipher.init(Cipher.DECRYPT_MODE, privateKey)
+        val spec = OAEPParameterSpec("SHA-256", "MGF1", MGF1ParameterSpec.SHA256, PSource.PSpecified.DEFAULT)
+        cipher.init(Cipher.DECRYPT_MODE, privateKey, spec)
         return cipher.doFinal(encryptedKey)
     }
 

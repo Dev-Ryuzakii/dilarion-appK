@@ -32,6 +32,8 @@ data class Message(
     val delivered: Boolean = false,
     @SerializedName("group_id")              val groupId: Int? = null,
     @SerializedName("decoy_content")         val decoyContent: String? = null,
+    @SerializedName("encrypted_key")         val encryptedKey: String? = null,
+    val iv: String? = null,
     @SerializedName("is_admin_announcement") val isAdminAnnouncement: Boolean = false,
 )
 
@@ -49,6 +51,9 @@ data class GroupMessagesResponse(
 data class SendDmRequest(
     val username: String,
     val message: String,
+    @SerializedName("encrypted_key") val encryptedKey: String? = null,
+    val iv: String? = null,
+    @SerializedName("decoy_content") val decoyContent: String? = null,
 )
 
 // Send group: POST /messages/group/send → {group_id, message, addressed_to_username?}
@@ -56,6 +61,9 @@ data class SendGroupMessageRequest(
     @SerializedName("group_id") val groupId: Int,
     val message: String,
     @SerializedName("addressed_to_username") val addressedToUsername: String? = null,
+    @SerializedName("encrypted_key") val encryptedKey: String? = null,
+    val iv: String? = null,
+    @SerializedName("decoy_content") val decoyContent: String? = null,
 )
 
 data class GroupMember(
