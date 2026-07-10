@@ -360,9 +360,24 @@ class ChatViewModel @Inject constructor(
 
     fun getCombinedItems(): List<ChatItem> {
         val s = _uiState.value
-        return (s.messages.map { ChatItem.TextMessage(it) } +
+        return (s.messages.filter { !isMediaFilenameMessage(it, s.mediaItems) }
+                    .map { ChatItem.TextMessage(it) } +
                 s.mediaItems.map { ChatItem.MediaMessage(it) })
             .sortedBy { it.timestamp ?: "" }
+    }
+
+    // Media uploads produce a companion text message whose content is just the
+    // stored filename (e.g. "40a98e3e-….jpg") — the media bubble already renders
+    // the attachment, so hide these.
+    private val mediaFilenameRegex = Regex(
+        "^(upload_\\d+|voice_[0-9a-fA-F-]+|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\\.(jpg|jpeg|png|gif|heic|mp4|mov|m4a|wav|mp3)$"
+    )
+
+    private fun isMediaFilenameMessage(message: Message, mediaItems: List<MediaItem>): Boolean {
+        val content = message.content?.trim().orEmpty()
+        if (content.isEmpty()) return false
+        if (mediaItems.any { it.filename == content }) return true
+        return mediaFilenameRegex.matches(content)
     }
 
     private fun observeWebSocket() {

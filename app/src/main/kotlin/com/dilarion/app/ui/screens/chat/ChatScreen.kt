@@ -6,6 +6,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -20,7 +22,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -33,6 +38,8 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.compose.runtime.collectAsState
 import coil.compose.AsyncImage
@@ -88,6 +95,7 @@ fun ChatScreen(
     var inputText by remember { mutableStateOf("") }
     var showUnlockDialog by remember { mutableStateOf(false) }
     var unlockError by remember { mutableStateOf<String?>(null) }
+    var viewerImagePath by remember { mutableStateOf<String?>(null) }
 
     val combinedItems = remember(uiState.messages, uiState.mediaItems) {
         viewModel.getCombinedItems()
@@ -128,6 +136,10 @@ fun ChatScreen(
                 else unlockError = "Incorrect master token"
             },
         )
+    }
+
+    viewerImagePath?.let { path ->
+        FullScreenImageViewer(imagePath = path, onDismiss = { viewerImagePath = null })
     }
 
     Scaffold(
@@ -279,6 +291,7 @@ fun ChatScreen(
                                             viewModel.playMedia(mediaItem.mediaId, uiState.isUnlocked, context)
                                         }
                                     },
+                                    onImageTap = { path -> viewerImagePath = path },
                                     onLockTap = { showUnlockDialog = true },
                                 )
                             }
@@ -473,6 +486,7 @@ private fun MediaBubble(
     isPlaying: Boolean,
     localImagePath: String?,
     onPlayTap: () -> Unit,
+    onImageTap: (String) -> Unit,
     onLockTap: () -> Unit,
 ) {
     val bubbleColor = if (isMine) ChatBubbleSelf else ChatBubbleOther
@@ -543,7 +557,11 @@ private fun MediaBubble(
                             .crossfade(true)
                             .build(),
                         contentDescription = "Image",
-                        modifier = Modifier.fillMaxWidth().heightIn(max = 200.dp).clip(RoundedCornerShape(12.dp)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 200.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable { onImageTap(localImagePath) },
                         contentScale = ContentScale.Crop,
                     )
                 } else {
@@ -563,6 +581,66 @@ private fun MediaBubble(
                 color = TextSecondary,
                 modifier = Modifier.align(Alignment.End).padding(end = 4.dp),
             )
+        }
+    }
+}
+
+// ── Full-screen image viewer (WhatsApp-style) ────────────────────────────────
+
+@Composable
+private fun FullScreenImageViewer(imagePath: String, onDismiss: () -> Unit) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        var scale by remember { mutableFloatStateOf(1f) }
+        var offset by remember { mutableStateOf(Offset.Zero) }
+
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(Color.Black)
+                .pointerInput(Unit) {
+                    detectTransformGestures { _, pan, zoom, _ ->
+                        scale = (scale * zoom).coerceIn(1f, 5f)
+                        offset = if (scale > 1f) offset + pan else Offset.Zero
+                    }
+                }
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onDoubleTap = {
+                            if (scale > 1f) { scale = 1f; offset = Offset.Zero }
+                            else scale = 2.5f
+                        },
+                    )
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            AsyncImage(
+                model = ImageRequest.Builder(LocalContext.current)
+                    .data(File(imagePath))
+                    .build(),
+                contentDescription = "Image",
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer(
+                        scaleX = scale,
+                        scaleY = scale,
+                        translationX = offset.x,
+                        translationY = offset.y,
+                    ),
+                contentScale = ContentScale.Fit,
+            )
+            IconButton(
+                onClick = onDismiss,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .statusBarsPadding()
+                    .padding(12.dp)
+                    .background(Color.White.copy(alpha = 0.15f), CircleShape),
+            ) {
+                Icon(Icons.Default.Close, "Close", tint = Color.White)
+            }
         }
     }
 }
@@ -761,14 +839,6 @@ private fun MessageBubble(
                             color = TextPrimary.copy(alpha = 0.65f),
                             style = MaterialTheme.typography.bodyMedium,
                         )
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                            modifier = Modifier.padding(top = 4.dp),
-                        ) {
-                            Icon(Icons.Default.Lock, null, tint = TextSecondary, modifier = Modifier.size(10.dp))
-                            Text("tap to decrypt", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
-                        }
                     } else {
                         Text(message.content ?: "", color = TextPrimary, style = MaterialTheme.typography.bodyMedium)
                     }

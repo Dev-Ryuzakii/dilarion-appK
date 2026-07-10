@@ -151,7 +151,7 @@ private fun ChatsTab(uiState: HomeUiState, onOpenChat: (String) -> Unit) {
         items(threads, key = { "dm_${it.first}" }) { (peer, last, unread) ->
             ConversationRow(
                 title    = peer,
-                subtitle = "Encrypted message",
+                subtitle = "",
                 time     = last.timestamp ?: "",
                 unread   = unread,
                 isGroup  = false,
@@ -181,7 +181,7 @@ private fun GroupsTab(uiState: HomeUiState, onOpenGroupChat: (Int, String) -> Un
             val unread = groupMsgs.count { !it.read }
             ConversationRow(
                 title    = group.name,
-                subtitle = if (groupMsgs.isEmpty()) "No messages yet" else "Encrypted message",
+                subtitle = if (groupMsgs.isEmpty()) "No messages yet" else "",
                 time     = groupMsgs.maxByOrNull { it.timestamp ?: "" }?.timestamp ?: group.createdAt,
                 unread   = unread,
                 isGroup  = true,
@@ -329,14 +329,18 @@ private fun ConversationRow(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    subtitle,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = TextSecondary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
+                if (subtitle.isNotEmpty()) {
+                    Text(
+                        subtitle,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                } else {
+                    Spacer(Modifier.weight(1f))
+                }
                 if (unread > 0) {
                     Box(
                         modifier = Modifier.size(20.dp).clip(CircleShape).background(DilarionRed),
