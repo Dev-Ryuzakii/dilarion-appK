@@ -17,43 +17,14 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     func configure() {
         let center = UNUserNotificationCenter.current()
         center.delegate = self
-        center.requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
-            guard granted else { return }
-            DispatchQueue.main.async {
-                UIApplication.shared.registerForRemoteNotifications()
-            }
-        }
+        center.requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
     }
 
-    // MARK: - APNs device token → backend
-
-    private struct RegisterDeviceRequest: Codable {
-        let pushToken: String
-        let platform: String
-
-        enum CodingKeys: String, CodingKey {
-            case pushToken = "push_token"
-            case platform
-        }
-    }
-
-    /// Called from AppDelegate when APNs issues a device token.
-    func deviceTokenRegistered(_ tokenHex: String) {
-        UserDefaults.standard.set(tokenHex, forKey: "apns_device_token")
-        syncTokenWithBackend()
-    }
-
-    /// Uploads the stored APNs token once a session exists. Safe to call repeatedly.
-    func syncTokenWithBackend() {
-        guard let tokenHex = UserDefaults.standard.string(forKey: "apns_device_token"),
-              KeychainHelper.shared.read(key: "session_token") != nil else { return }
-        Task {
-            try? await APIClient.shared.postVoid(
-                "/notifications/register-device",
-                body: RegisterDeviceRequest(pushToken: tokenHex, platform: "ios")
-            )
-        }
-    }
+    // NOTE: APNs remote push (killed-app notifications) removed for now — it
+    // requires a paid Apple Developer account for the aps-environment
+    // entitlement. The backend /notifications/register-device endpoint and
+    // push sender stay in place; re-add registerForRemoteNotifications +
+    // AppDelegate token handling once the account is paid and the p8 key set.
 
     // Matches Android buildMessageNotification: "New message" / "From <sender>"
     func notifyNewMessage(from sender: String) {

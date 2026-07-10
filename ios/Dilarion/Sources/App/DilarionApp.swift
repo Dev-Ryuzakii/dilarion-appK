@@ -1,27 +1,7 @@
 import SwiftUI
-import UIKit
-
-// Receives the APNs device token and hands it to NotificationManager
-class AppDelegate: NSObject, UIApplicationDelegate {
-    func application(
-        _ application: UIApplication,
-        didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
-    ) {
-        let tokenHex = deviceToken.map { String(format: "%02x", $0) }.joined()
-        NotificationManager.shared.deviceTokenRegistered(tokenHex)
-    }
-
-    func application(
-        _ application: UIApplication,
-        didFailToRegisterForRemoteNotificationsWithError error: Error
-    ) {
-        print("APNs registration failed: \(error.localizedDescription)")
-    }
-}
 
 @main
 struct DilarionApp: App {
-    @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var appState = AppState()
     @AppStorage(AppearanceMode.storageKey) private var appearanceRaw = AppearanceMode.system.rawValue
 

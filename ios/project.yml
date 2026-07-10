@@ -12,10 +12,6 @@ targets:
     dependencies:
       - package: WebRTC
         product: WebRTC
-    entitlements:
-      path: Dilarion/Dilarion.entitlements
-      properties:
-        aps-environment: development
     info:
       path: Dilarion/Info.plist
       properties:

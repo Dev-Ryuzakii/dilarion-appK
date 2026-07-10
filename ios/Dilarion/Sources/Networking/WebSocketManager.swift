@@ -28,8 +28,6 @@ class WebSocketManager: ObservableObject {
         isConnected = true
         events.send(.connected)
         receive()
-        // Session is live — make sure the backend has our APNs token for offline pushes
-        NotificationManager.shared.syncTokenWithBackend()
     }
 
     func disconnect() {
