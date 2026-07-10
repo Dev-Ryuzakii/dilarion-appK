@@ -143,10 +143,27 @@ class ChatViewModel: ObservableObject {
 
     // MARK: — Combined items (text + media sorted by timestamp)
     func combinedItems() -> [ChatItem] {
-        let textItems = state.messages.map { ChatItem.textMessage($0) }
+        let textItems = state.messages
+            .filter { !isMediaFilenameMessage($0) }
+            .map { ChatItem.textMessage($0) }
         let mediaItems = state.mediaItems.map { ChatItem.mediaMessage($0) }
         return (textItems + mediaItems)
             .sorted { ($0.timestamp ?? "") < ($1.timestamp ?? "") }
+    }
+
+    // Media uploads produce a companion text message whose content is just the
+    // stored filename (e.g. "40a98e3e-….jpg") — the media bubble already renders
+    // the attachment, so hide these.
+    private static let mediaFilenameRegex = try! NSRegularExpression(
+        pattern: #"^(upload_\d+|voice_[0-9a-fA-F-]+|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\.(jpg|jpeg|png|gif|heic|mp4|mov|m4a|wav|mp3)$"#
+    )
+
+    private func isMediaFilenameMessage(_ msg: Message) -> Bool {
+        let content = (msg.content ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !content.isEmpty else { return false }
+        if state.mediaItems.contains(where: { $0.filename == content }) { return true }
+        let range = NSRange(content.startIndex..., in: content)
+        return Self.mediaFilenameRegex.firstMatch(in: content, options: [], range: range) != nil
     }
 
     // MARK: — Send text

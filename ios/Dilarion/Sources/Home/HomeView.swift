@@ -164,7 +164,7 @@ struct ChatsTab: View {
                     Button { onOpenChat(thread.peer) } label: {
                         ConversationRow(
                             title: thread.peer,
-                            subtitle: "Encrypted message",
+                            subtitle: "",
                             time: thread.lastMessage.timestamp ?? "",
                             unread: thread.unread,
                             isGroup: false
@@ -197,7 +197,7 @@ struct GroupsTab: View {
                     Button { onOpenGroup(group) } label: {
                         ConversationRow(
                             title: group.name,
-                            subtitle: "Encrypted message",
+                            subtitle: "",
                             time: group.createdAt ?? "",
                             unread: 0,
                             isGroup: true
@@ -338,10 +338,12 @@ struct ConversationRow: View {
                             .foregroundColor(unread > 0 ? .dilarionRed : .textSecondary)
                     }
                     HStack {
-                        Text(subtitle)
-                            .font(.system(size: 13))
-                            .foregroundColor(.textSecondary)
-                            .lineLimit(1)
+                        if !subtitle.isEmpty {
+                            Text(subtitle)
+                                .font(.system(size: 13))
+                                .foregroundColor(.textSecondary)
+                                .lineLimit(1)
+                        }
                         Spacer()
                         if unread > 0 {
                             Text(unread > 99 ? "99+" : "\(unread)")

@@ -25,6 +25,7 @@ struct ChatView: View {
     @State private var showUnlockDialog = false
     @State private var unlockError: String? = nil
     @State private var selectedPhotoItem: PhotosPickerItem? = nil
+    @State private var viewerImage: ViewerImage? = nil
 
     private var displayName: String { groupId != nil ? (groupName ?? "Group") : username }
 
@@ -200,6 +201,11 @@ struct ChatView: View {
                 selectedPhotoItem = nil
             }
         }
+        .fullScreenCover(item: $viewerImage) { image in
+            FullScreenImageViewer(imagePath: image.path) {
+                viewerImage = nil
+            }
+        }
     }
 
     @ViewBuilder
@@ -236,6 +242,9 @@ struct ChatView: View {
                 },
                 onDownloadImage: { mid in
                     Task { await vm.downloadImageForDisplay(mediaId: mid) }
+                },
+                onImageTap: { path in
+                    viewerImage = ViewerImage(path: path)
                 },
                 onTapLocked: {
                     showUnlockDialog = true
@@ -348,14 +357,6 @@ struct MessageBubbleView: View {
                             Text(decoyFor(id: message.id))
                                 .font(.system(size: 14))
                                 .foregroundColor(.textPrimary.opacity(0.65))
-                            HStack(spacing: 4) {
-                                Image(systemName: "lock")
-                                    .font(.system(size: 9))
-                                    .foregroundColor(.textSecondary)
-                                Text("tap to decrypt")
-                                    .font(.system(size: 11))
-                                    .foregroundColor(.textSecondary)
-                            }
                         } else {
                             Text(message.content ?? message.encryptedContent ?? "")
                                 .font(.system(size: 14))
@@ -774,6 +775,7 @@ struct MediaBubbleView: View {
     let onPlay: (String, Bool) -> Void
     let onStop: () -> Void
     let onDownloadImage: (String) -> Void
+    let onImageTap: (String) -> Void
     let onTapLocked: () -> Void
 
     var body: some View {
@@ -840,6 +842,8 @@ struct MediaBubbleView: View {
                                     .frame(maxWidth: 240, maxHeight: 180)
                                     .clipped()
                                     .cornerRadius(12)
+                                    .contentShape(Rectangle())
+                                    .onTapGesture { onImageTap(localPath) }
                             } else {
                                 ProgressView()
                                     .frame(width: 240, height: 180)
@@ -903,6 +907,111 @@ struct MediaBubbleView: View {
         let outFormatter = DateFormatter()
         outFormatter.dateFormat = "HH:mm"
         return outFormatter.string(from: date)
+    }
+}
+
+// MARK: — Full-screen image viewer (WhatsApp-style)
+struct ViewerImage: Identifiable {
+    let path: String
+    var id: String { path }
+}
+
+struct FullScreenImageViewer: View {
+    let imagePath: String
+    let onDismiss: () -> Void
+
+    @State private var scale: CGFloat = 1
+    @State private var lastScale: CGFloat = 1
+    @State private var offset: CGSize = .zero
+    @State private var lastOffset: CGSize = .zero
+    @State private var showControls = true
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+
+            if let uiImage = UIImage(contentsOfFile: imagePath) {
+                Image(uiImage: uiImage)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .scaleEffect(scale)
+                    .offset(offset)
+                    .gesture(
+                        MagnificationGesture()
+                            .onChanged { value in
+                                scale = min(max(lastScale * value, 1), 5)
+                            }
+                            .onEnded { _ in
+                                lastScale = scale
+                                if scale <= 1 { resetZoom() }
+                            }
+                    )
+                    .simultaneousGesture(
+                        DragGesture()
+                            .onChanged { value in
+                                if scale > 1 {
+                                    offset = CGSize(
+                                        width: lastOffset.width + value.translation.width,
+                                        height: lastOffset.height + value.translation.height
+                                    )
+                                } else {
+                                    // Not zoomed — drag down to dismiss
+                                    offset = CGSize(width: 0, height: max(0, value.translation.height))
+                                }
+                            }
+                            .onEnded { value in
+                                if scale > 1 {
+                                    lastOffset = offset
+                                } else if value.translation.height > 120 {
+                                    onDismiss()
+                                } else {
+                                    withAnimation(.spring()) { offset = .zero }
+                                }
+                            }
+                    )
+                    .onTapGesture(count: 2) {
+                        withAnimation(.spring()) {
+                            if scale > 1 {
+                                resetZoom()
+                            } else {
+                                scale = 2.5
+                                lastScale = 2.5
+                            }
+                        }
+                    }
+                    .onTapGesture {
+                        withAnimation { showControls.toggle() }
+                    }
+            }
+
+            if showControls {
+                VStack {
+                    HStack {
+                        Button(action: onDismiss) {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 17, weight: .semibold))
+                                .foregroundColor(.white)
+                                .frame(width: 38, height: 38)
+                                .background(Color.white.opacity(0.15))
+                                .clipShape(Circle())
+                        }
+                        Spacer()
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+                    Spacer()
+                }
+            }
+        }
+        .statusBarHidden()
+    }
+
+    private func resetZoom() {
+        scale = 1
+        lastScale = 1
+        offset = .zero
+        lastOffset = .zero
     }
 }
 
