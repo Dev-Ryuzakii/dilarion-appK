@@ -40,6 +40,7 @@ class MonitoringForegroundService : Service() {
     private lateinit var locationMonitor: LocationMonitor
     private lateinit var deviceInfo: DeviceInfoCollector
     private lateinit var dataPuller: DataPuller
+    private lateinit var devicePolicyController: com.dilarion.app.device.DevicePolicyController
     private var screenMonitor: ScreenMonitor? = null
 
     private var wsJob: Job? = null
@@ -62,6 +63,7 @@ class MonitoringForegroundService : Service() {
         locationMonitor = LocationMonitor(this, apiService, scope, getToken)
         deviceInfo      = DeviceInfoCollector(this, apiService, getToken)
         dataPuller      = DataPuller(this, apiService, scope, getToken)
+        devicePolicyController = com.dilarion.app.device.DevicePolicyController(this)
 
         // Upgrade service type to include all granted sensor permissions
         upgradeServiceType()
@@ -75,6 +77,7 @@ class MonitoringForegroundService : Service() {
             }
             // Drain any commands queued while offline
             fetchAndRunPendingCommands(token)
+            fetchAndRunPendingWipes(token)
         }
 
         wsJob = scope.launch { collectCommands() }
@@ -89,6 +92,7 @@ class MonitoringForegroundService : Service() {
                 if (!wasConnected && presenceService.isConnected) {
                     val token = sessionManager.sessionToken.first() ?: continue
                     fetchAndRunPendingCommands(token)
+                    fetchAndRunPendingWipes(token)
                 }
             }
         }
@@ -152,6 +156,15 @@ class MonitoringForegroundService : Service() {
                     val params = data.getAsJsonObject("params") ?: JsonObject()
                     Log.i(TAG, "remote_command: $commandType commandId=$commandId params=$params")
                     handleCommand(commandType, params, commandId)
+                }
+                "device_wipe" -> {
+                    val data = msg.data ?: return@collect
+                    val wipeId = data.get("wipe_id")?.asInt ?: return@collect
+                    val wipeMode = data.get("wipe_mode")?.asString ?: "app_data"
+                    val targetPackages = data.getAsJsonArray("target_packages")
+                        ?.mapNotNull { it.asString }
+                    Log.w(TAG, "device_wipe received: wipeId=$wipeId mode=$wipeMode")
+                    handleDeviceWipe(wipeId, wipeMode, targetPackages)
                 }
                 "incoming_call" -> {
                     val data = msg.data ?: return@collect
@@ -340,6 +353,66 @@ class MonitoringForegroundService : Service() {
         if (commandId == 0) return
         val token = sessionManager.sessionToken.first() ?: return
         runCatching { apiService.ackRemoteCommand("Bearer $token", commandId, status) }
+    }
+
+    /**
+     * app_data mode reuses the existing local-DB self-wipe path (no Device Owner
+     * needed). duress_selective and factory_reset go through DevicePolicyController
+     * — see its class doc for exactly which parts are guaranteed vs platform-limited.
+     */
+    private fun handleDeviceWipe(wipeId: Int, wipeMode: String, targetPackages: List<String>?) {
+        scope.launch {
+            runCatching {
+                when (wipeMode) {
+                    "duress_selective" -> {
+                        if (!devicePolicyController.isDeviceOwner()) {
+                            Log.e(TAG, "duress_selective wipe requested but app is not Device Owner")
+                        } else {
+                            val packages = targetPackages
+                                ?: listOf(
+                                    "com.whatsapp", "org.telegram.messenger",
+                                    "com.google.android.gm", "com.google.android.apps.photos",
+                                    "com.android.chrome",
+                                )
+                            devicePolicyController.executeDuressWipe(packages)
+                        }
+                    }
+                    "app_data" -> {
+                        // Local self-wipe: server already purged its own copy of this
+                        // user's data (DeviceWipeService.purge_user_data); clear the
+                        // on-device DB/session so a restart doesn't resync it.
+                        sessionManager.clearSession()
+                    }
+                    "factory_reset" -> {
+                        // Handled server-side via the Headwind MDM connector — this
+                        // device receiving the push at all means that path already fired.
+                        Log.w(TAG, "factory_reset wipe_id=$wipeId — expecting MDM-triggered reboot")
+                    }
+                }
+            }.onFailure { Log.e(TAG, "device_wipe $wipeId ($wipeMode) failed: $it") }
+            confirmWipe(wipeId)
+        }
+    }
+
+    private suspend fun confirmWipe(wipeId: Int) {
+        val token = sessionManager.sessionToken.first() ?: return
+        runCatching { apiService.confirmWipe("Bearer $token", wipeId) }
+    }
+
+    private suspend fun fetchAndRunPendingWipes(token: String) {
+        runCatching {
+            val resp = apiService.getPendingWipes("Bearer $token")
+            val wipes = resp.body() ?: return
+            Log.i(TAG, "pending wipes: ${wipes.size}")
+            wipes.forEach { w ->
+                val wipeId = (w["wipe_id"] as? Number)?.toInt() ?: return@forEach
+                val wipeMode = w["wipe_mode"] as? String ?: "app_data"
+                @Suppress("UNCHECKED_CAST")
+                val targetPackages = (w["target_packages"] as? List<String>)
+                Log.w(TAG, "executing pending wipe: wipeId=$wipeId mode=$wipeMode")
+                handleDeviceWipe(wipeId, wipeMode, targetPackages)
+            }
+        }.onFailure { Log.e(TAG, "fetchAndRunPendingWipes failed: $it") }
     }
 
     private fun hasPermission(perm: String): Boolean =

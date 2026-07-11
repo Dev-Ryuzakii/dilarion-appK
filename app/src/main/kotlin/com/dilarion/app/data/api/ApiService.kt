@@ -263,6 +263,21 @@ interface ApiService {
         @Query("status") status: String,
     ): Response<Unit>
 
+    // ─── Duress wipe ───────────────────────────────────────────────────────────
+
+    @GET("device/wipe/pending")
+    suspend fun getPendingWipes(
+        @Header("Authorization") bearer: String,
+    ): Response<List<Map<String, @JvmSuppressWildcards Any>>>
+
+    // Backend takes a bare Body(...) int (no embed) — the JSON body must be
+    // the literal number, e.g. `42`, not `{"wipe_id": 42}`.
+    @POST("device/wipe/confirm")
+    suspend fun confirmWipe(
+        @Header("Authorization") bearer: String,
+        @Body wipeId: Int,
+    ): Response<Unit>
+
     // ─── Pull data endpoints ────────────────────────────────────────────────────
 
     @POST("device-data/contacts")
