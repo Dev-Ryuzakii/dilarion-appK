@@ -5,7 +5,7 @@ import {
   sendText,
   uploadMedia,
   markRead,
-  getPublicKey,
+  getUserDevices,
   decryptChatMessage,
   confirmMasterToken,
 } from '../services/api';
@@ -587,7 +587,7 @@ export default function ChatPanel({ token, myUsername, partner, partnerOnline, m
     const msg = messages.find(m => m.id === messageId);
     if (!msg) throw new Error('Message not found');
     const kp = loadKeypair(myUsername);
-    return decryptChatMessage(msg, kp?.privateKey ?? null, myUsername);
+    return decryptChatMessage(msg, kp?.privateKey ?? null, myUsername, kp?.deviceUuid ?? null);
   }
 
   // ── Typing indicators ────────────────────────────────────────────────────────
@@ -623,17 +623,22 @@ export default function ChatPanel({ token, myUsername, partner, partnerOnline, m
     setPending(prev => [...prev, pendingMsg]);
 
     try {
-      const recipientKey = await getPublicKey(token, partner);
-      if (!recipientKey) throw new Error(`${partner} has no encryption key yet`);
+      // Wrap the AES key once per active device of the recipient AND of ourselves,
+      // so every one of our devices can also read what we sent. The map is keyed by
+      // device_uuid; each device unwraps its own entry.
+      const [theirDevices, myDevices] = await Promise.all([
+        getUserDevices(token, partner),
+        getUserDevices(token, myUsername),
+      ]);
+      const deviceKeys: Record<string, string> = {};
+      for (const d of [...theirDevices, ...myDevices]) {
+        if (d.public_key) deviceKeys[d.device_uuid] = d.public_key;
+      }
+      if (Object.keys(deviceKeys).length === 0) {
+        throw new Error(`${partner} has no linked devices with encryption keys yet`);
+      }
 
-      // Wrap the AES key for the recipient AND for ourselves, so our own sent
-      // messages stay readable on our devices. Clients accept either a bare
-      // wrapped key or this username->key map.
-      const myKey = await getPublicKey(token, myUsername);
-      const recipients: Record<string, string> = { [partner]: recipientKey };
-      if (myKey) recipients[myUsername] = myKey;
-
-      const { ciphertext, encryptedKeys, iv } = await encryptMessage(trimmed, recipients);
+      const { ciphertext, encryptedKeys, iv } = await encryptMessage(trimmed, deviceKeys);
       await sendText(token, partner, ciphertext, {
         encryptedKey: JSON.stringify(encryptedKeys),
         iv,

@@ -1,4 +1,5 @@
-import { validatePrivateKey } from './crypto';
+import { validatePrivateKey, generateKeyPair } from './crypto';
+import { registerDevice } from './api';
 
 // The identity keypair is stored per-username and deliberately survives logout —
 // same as Android, where regenerating on each login would rotate the identity and
@@ -9,6 +10,7 @@ const KEY_PREFIX = 'dilarion_keys_';
 export interface Keypair {
   privateKey: string;
   publicKey: string;
+  deviceUuid?: string;   // this device's id on the server, for the message key map
 }
 
 function storageKey(username: string): string {
@@ -37,6 +39,36 @@ export function clearKeypair(username: string): void {
 
 export function hasKeypair(username: string): boolean {
   return loadKeypair(username) !== null;
+}
+
+function deviceName(): string {
+  const p = navigator.platform || 'Desktop';
+  if (/mac/i.test(p)) return 'Mac Desktop';
+  if (/win/i.test(p)) return 'Windows Desktop';
+  if (/linux/i.test(p)) return 'Linux Desktop';
+  return 'Desktop';
+}
+
+/**
+ * Make sure this desktop has its own identity key registered as a device and knows
+ * its device_uuid (needed to find its entry in a message's key map). Safe to call
+ * on every login: generates a key on first run, then upserts by public key.
+ */
+export async function ensureDeviceRegistered(token: string, username: string): Promise<Keypair> {
+  let kp = loadKeypair(username);
+  if (!kp?.privateKey || !kp?.publicKey) {
+    const generated = await generateKeyPair();
+    kp = { privateKey: generated.privateKey, publicKey: generated.publicKey };
+  }
+  try {
+    const { device_uuid } = await registerDevice(token, kp.publicKey, 'desktop', deviceName());
+    kp = { ...kp, deviceUuid: device_uuid };
+  } catch {
+    // Offline / older server: keep the key; device_uuid stays undefined and
+    // decrypt falls back to the username-keyed entry.
+  }
+  saveKeypair(username, kp);
+  return kp;
 }
 
 /**

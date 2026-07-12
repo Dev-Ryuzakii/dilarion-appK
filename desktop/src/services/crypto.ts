@@ -130,17 +130,26 @@ export async function decryptMessage(
 }
 
 /**
- * Group rows store `encrypted_key` as a JSON map of username -> wrapped key.
- * DMs store the wrapped key directly. Returns null when this user has no entry,
- * which means the message was encrypted before they joined / without their key.
+ * Find this device's wrapped AES key inside a message's `encrypted_key`.
+ *
+ * Multi-device messages store a JSON map keyed by device_uuid. Older messages used
+ * a map keyed by username, and the oldest DMs stored the wrapped key directly. We
+ * try device_uuid, then username, then treat a non-JSON value as a bare key, so a
+ * device can still read history sent under the previous schemes.
  */
-export function resolveEncryptedKey(encryptedKey: string, username: string): string | null {
+export function resolveEncryptedKey(
+  encryptedKey: string,
+  deviceUuid: string | null,
+  username: string,
+): string | null {
   const trimmed = encryptedKey?.trim();
   if (!trimmed) return null;
   if (!trimmed.startsWith('{')) return trimmed;
   try {
     const map = JSON.parse(trimmed) as Record<string, string>;
-    return map[username] ?? null;
+    if (deviceUuid && map[deviceUuid]) return map[deviceUuid];
+    if (map[username]) return map[username];
+    return null;
   } catch {
     return trimmed;
   }

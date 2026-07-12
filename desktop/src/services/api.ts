@@ -49,6 +49,81 @@ export async function login(username: string, token: string): Promise<unknown> {
   return res.json();
 }
 
+// ── Device linking (multi-device) ───────────────────────────────────────────────
+
+export interface DeviceKey {
+  device_uuid: string;
+  public_key: string;
+  platform: string;
+}
+
+// New device posts its public key and gets a nonce to render as a QR code.
+export async function linkStart(publicKey: string, platform: string, deviceName: string): Promise<{ nonce: string; expires_in: number }> {
+  const res = await fetch(`${BASE}/devices/link/start`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ public_key: publicKey, platform, device_name: deviceName }),
+  });
+  if (!res.ok) throw new Error('Failed to start device link');
+  return res.json();
+}
+
+export interface LinkStatus {
+  status: 'pending' | 'approved' | 'expired';
+  session_token?: string;
+  device_uuid?: string;
+  username?: string;
+}
+
+export async function linkStatus(nonce: string): Promise<LinkStatus> {
+  const res = await fetch(`${BASE}/devices/link/status/${encodeURIComponent(nonce)}`);
+  if (!res.ok) throw new Error('Failed to poll link status');
+  return res.json();
+}
+
+// Register/refresh this device's key against an existing session (returns device_uuid).
+export async function registerDevice(token: string, publicKey: string, platform: string, deviceName: string): Promise<{ device_uuid: string }> {
+  const res = await fetch(`${BASE}/devices/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ public_key: publicKey, platform, device_name: deviceName }),
+  });
+  if (!res.ok) throw new Error('Failed to register device');
+  return res.json();
+}
+
+// All active device public keys for a user — sender wraps the AES key per device.
+export async function getUserDevices(token: string, username: string): Promise<DeviceKey[]> {
+  const res = await fetch(`${BASE}/users/${encodeURIComponent(username)}/devices`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) return [];
+  const body = await res.json();
+  return body.devices ?? [];
+}
+
+export interface MyDevice {
+  device_uuid: string;
+  platform: string;
+  device_name: string;
+  created_at: string | null;
+  last_seen: string | null;
+}
+
+export async function listMyDevices(token: string): Promise<MyDevice[]> {
+  const res = await fetch(`${BASE}/devices`, { headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) return [];
+  const body = await res.json();
+  return body.devices ?? [];
+}
+
+export async function revokeDevice(token: string, deviceUuid: string): Promise<void> {
+  await fetch(`${BASE}/devices/${encodeURIComponent(deviceUuid)}/revoke`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  }).catch(() => {});
+}
+
 // ── Users ──────────────────────────────────────────────────────────────────────
 
 export async function getUsers(token: string): Promise<Contact[]> {
@@ -281,11 +356,12 @@ export async function decryptChatMessage(
   msg: ChatMessage,
   privateKey: string | null,
   currentUsername: string,
+  deviceUuid: string | null = null,
 ): Promise<string> {
   if (!privateKey) throw new MissingKeyError();
   if (!msg.encrypted_key || !msg.iv) throw new LegacyMessageError();
 
-  const wrapped = resolveEncryptedKey(msg.encrypted_key, currentUsername);
+  const wrapped = resolveEncryptedKey(msg.encrypted_key, deviceUuid, currentUsername);
   if (!wrapped) throw new LegacyMessageError();
 
   try {

@@ -1,9 +1,12 @@
 import { useState } from 'react';
 import { login } from '../services/api';
 
-interface Props { onLogin: (token: string, username: string) => void; }
+interface Props {
+  onLogin: (token: string, username: string) => void;
+  onLinkDevice?: () => void;
+}
 
-export default function LoginScreen({ onLogin }: Props) {
+export default function LoginScreen({ onLogin, onLinkDevice }: Props) {
   const [username, setUsername]   = useState('');
   const [userToken, setUserToken] = useState('');
   const [showToken, setShowToken] = useState(false);
@@ -78,6 +81,15 @@ export default function LoginScreen({ onLogin }: Props) {
             {loading ? 'Signing in…' : 'Sign In'}
           </button>
         </form>
+
+        {onLinkDevice && (
+          <>
+            <div style={s.divider}><span style={s.dividerText}>or</span></div>
+            <button type="button" style={s.linkBtn} onClick={onLinkDevice}>
+              Link with phone (scan QR)
+            </button>
+          </>
+        )}
       </div>
     </div>
   );
@@ -103,6 +115,20 @@ function EyeOffIcon() {
 }
 
 const s: Record<string, React.CSSProperties> = {
+  divider: {
+    display: 'flex', alignItems: 'center', width: '100%',
+    margin: '0.25rem 0', color: '#3a3a3a',
+    borderTop: '1px solid #1e1e1e', position: 'relative',
+  },
+  dividerText: {
+    position: 'absolute', left: '50%', top: -10, transform: 'translateX(-50%)',
+    background: '#141414', padding: '0 10px', fontSize: '0.72rem', color: '#6b7280',
+  },
+  linkBtn: {
+    background: 'transparent', color: '#93c5fd', border: '1px solid #1e1e1e',
+    borderRadius: 10, padding: '10px 0', width: '100%', fontSize: '0.85rem',
+    fontWeight: 600, cursor: 'pointer',
+  },
   root: {
     flex: 1,
     display: 'flex',

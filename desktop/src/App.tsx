@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import LoginScreen from './screens/LoginScreen';
+import LinkDeviceScreen from './screens/LinkDeviceScreen';
 import HomeScreen from './screens/HomeScreen';
+import { ensureDeviceRegistered } from './services/keys';
 import './App.css';
 
 const SESSION_KEY = 'dilarion_session';
@@ -35,10 +37,15 @@ function saveSession(token: string, username: string) {
 
 export default function App() {
   const [session, setSession] = useState<{ token: string; username: string } | null>(loadSession);
+  const [linking, setLinking] = useState(false);
 
   function handleLogin(t: string, u: string) {
     saveSession(t, u);
+    // Make sure this desktop has its own device key registered so others can
+    // encrypt to it and it can find its own entry when decrypting.
+    ensureDeviceRegistered(t, u).catch(() => {});
     setSession({ token: t, username: u });
+    setLinking(false);
   }
 
   function handleLogout() {
@@ -46,6 +53,11 @@ export default function App() {
     setSession(null);
   }
 
-  if (!session) return <LoginScreen onLogin={handleLogin} />;
-  return <HomeScreen token={session.token} username={session.username} onLogout={handleLogout} />;
+  if (session) {
+    return <HomeScreen token={session.token} username={session.username} onLogout={handleLogout} />;
+  }
+  if (linking) {
+    return <LinkDeviceScreen onLinked={handleLogin} onBack={() => setLinking(false)} />;
+  }
+  return <LoginScreen onLogin={handleLogin} onLinkDevice={() => setLinking(true)} />;
 }

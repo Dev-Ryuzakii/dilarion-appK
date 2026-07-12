@@ -6,7 +6,7 @@ import {
   getGroupMessages,
   getGroupMembers,
   sendGroupMessage,
-  getPublicKey,
+  getUserDevices,
   decryptChatMessage,
   confirmMasterToken,
 } from '../services/api';
@@ -413,7 +413,7 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
     const msg = messages.find(m => m.id === messageId);
     if (!msg) throw new Error('Message not found');
     const kp = loadKeypair(myUsername);
-    return decryptChatMessage(msg, kp?.privateKey ?? null, myUsername);
+    return decryptChatMessage(msg, kp?.privateKey ?? null, myUsername, kp?.deviceUuid ?? null);
   }
 
   async function handleSend() {
@@ -425,22 +425,22 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
     setTaggedUser(null);
     setMentionQuery(null);
     try {
-      // Wrap the message key for every member who has published a public key,
-      // ourselves included, so each of them (and we) can read it back.
+      // Wrap the message key once per active device of every member (ourselves
+      // included), keyed by device_uuid, so each member's every device can read it.
       const members = await getGroupMembers(token, group.id);
-      const memberKeys: Record<string, string> = {};
+      const usernames = new Set<string>(members.map(m => m.username));
+      usernames.add(myUsername);
+      const deviceKeys: Record<string, string> = {};
       await Promise.all(
-        members.map(async m => {
-          const pk = await getPublicKey(token, m.username);
-          if (pk) memberKeys[m.username] = pk;
+        [...usernames].map(async u => {
+          const devices = await getUserDevices(token, u);
+          for (const d of devices) {
+            if (d.public_key) deviceKeys[d.device_uuid] = d.public_key;
+          }
         }),
       );
-      if (!memberKeys[myUsername]) {
-        const myKey = await getPublicKey(token, myUsername);
-        if (myKey) memberKeys[myUsername] = myKey;
-      }
 
-      const { ciphertext, encryptedKeys, iv } = await encryptMessage(trimmed, memberKeys);
+      const { ciphertext, encryptedKeys, iv } = await encryptMessage(trimmed, deviceKeys);
       await sendGroupMessage(
         token,
         group.id,
