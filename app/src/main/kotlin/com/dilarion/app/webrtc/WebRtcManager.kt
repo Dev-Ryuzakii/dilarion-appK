@@ -21,6 +21,9 @@ import kotlin.coroutines.resumeWithException
 
 private const val TAG = "WebRtcManager"
 
+/** Minimal info needed to reattach a UI to an in-progress call. */
+data class CallSession(val callId: Int, val partner: String, val isVideo: Boolean)
+
 @Singleton
 class WebRtcManager @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -47,6 +50,14 @@ class WebRtcManager @Inject constructor(
     @Volatile var callActive: Boolean = false
     // Track user's speaker preference so ICE reconnect doesn't override it
     @Volatile private var userSpeakerOn: Boolean = true
+
+    // Lightweight snapshot of the live call so a CallViewModel recreated after a
+    // minimize (or config change) can reattach instead of starting a new call.
+    private val _activeSession = MutableStateFlow<CallSession?>(null)
+    val activeSession: StateFlow<CallSession?> = _activeSession
+    fun setActiveSession(session: CallSession?) { _activeSession.value = session }
+    /** True when a peer connection is live and we have a session to reattach to. */
+    fun hasActiveCall(): Boolean = callActive && _activeSession.value != null
 
     // Conference: map peerUsername → PeerConnection for multi-party calls
     private val conferencePeers = mutableMapOf<String, PeerConnection>()
@@ -477,6 +488,7 @@ class WebRtcManager @Inject constructor(
     fun closeCall() {
         closeConference()
         callActive = false
+        _activeSession.value = null
         try { videoCapturer?.stopCapture() } catch (_: Exception) {}
         videoCapturer?.dispose()
         videoCapturer = null

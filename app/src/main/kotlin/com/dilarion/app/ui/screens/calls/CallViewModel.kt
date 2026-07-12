@@ -11,6 +11,7 @@ import com.dilarion.app.data.model.UserInfo
 import com.dilarion.app.security.SessionManager
 import com.dilarion.app.services.NotificationHelper
 import com.dilarion.app.services.PresenceService
+import com.dilarion.app.webrtc.CallSession
 import com.dilarion.app.webrtc.WebRtcManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -95,6 +96,7 @@ class CallViewModel @Inject constructor(
                 if (callId != null) {
                     // Stay CALLING until WS confirms callee received; state → RINGING via WS "calling" event
                     _uiState.value = _uiState.value.copy(callId = callId)
+                    rememberSession()
                     flushPendingCandidates(token, peerUsername, callId)
                 } else {
                     _uiState.value = _uiState.value.copy(error = "Failed to initiate call", state = CallState.ENDED)
@@ -115,6 +117,7 @@ class CallViewModel @Inject constructor(
             callId = incoming.callId,
             callType = if (incoming.callType == "video") CallType.VIDEO else CallType.VOICE,
         )
+        rememberSession()
         observeWsEvents()
         viewModelScope.launch {
             runCatching {
@@ -157,6 +160,7 @@ class CallViewModel @Inject constructor(
                 )
                 flushPendingCandidates(token, peerUsername, callId)
                 _uiState.value = _uiState.value.copy(state = CallState.CONNECTED)
+                rememberSession()
                 startTimer()
             }.onFailure { e ->
                 _uiState.value = _uiState.value.copy(error = e.message)
@@ -247,6 +251,7 @@ class CallViewModel @Inject constructor(
                                 }
                                 pendingRemoteCandidates.clear()
                                 _uiState.value = _uiState.value.copy(state = CallState.CONNECTED)
+                                rememberSession()
                                 startTimer()
                             }
                             "calling" -> _uiState.value = _uiState.value.copy(state = CallState.RINGING)
@@ -501,9 +506,44 @@ class CallViewModel @Inject constructor(
         }
     }
 
+    // Snapshot the live call so a minimized-then-reopened screen can reattach.
+    private fun rememberSession() {
+        val s = _uiState.value
+        webRtcManager.setActiveSession(
+            CallSession(s.callId ?: 0, s.peerUsername, s.callType == CallType.VIDEO)
+        )
+    }
+
+    /**
+     * When the call screen reopens (after minimizing) a fresh ViewModel is created.
+     * If the singleton still holds a live call, restore CONNECTED state and rewire
+     * signaling/timer instead of prompting for a new call. Returns true if reattached.
+     */
+    fun reattachIfActive(): Boolean {
+        if (_uiState.value.state != CallState.IDLE) return true  // this VM already owns the call
+        val session = webRtcManager.activeSession.value
+        if (!webRtcManager.hasActiveCall() || session == null) return false
+        _uiState.value = CallUiState(
+            state = CallState.CONNECTED,
+            peerUsername = session.partner,
+            callId = session.callId,
+            callType = if (session.isVideo) CallType.VIDEO else CallType.VOICE,
+        )
+        remoteDescSet = true
+        observeWsEvents()
+        startTimer()
+        return true
+    }
+
     override fun onCleared() {
         super.onCleared()
         timerJob?.cancel()
-        webRtcManager.closeCall()
+        // Only tear down the live connection on an actual end. If a call is still
+        // active when this ViewModel is cleared, the screen is going away for a
+        // minimize / config change — keep the singleton call alive to reattach.
+        val st = _uiState.value.state
+        if (st == CallState.ENDED || st == CallState.IDLE) {
+            webRtcManager.closeCall()
+        }
     }
 }

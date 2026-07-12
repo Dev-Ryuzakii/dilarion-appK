@@ -56,7 +56,10 @@ fun CallScreen(
     onMinimize: ((callId: Int?) -> Unit)? = null,
     viewModel: CallViewModel = hiltViewModel(LocalContext.current as ComponentActivity),
 ) {
-    var showTypeDialog by remember { mutableStateOf(true) }
+    // If we arrived here by reopening a minimized call, reattach to the live call
+    // before first paint so we show the call, not the "new call" type dialog.
+    val reattached = remember { viewModel.reattachIfActive() }
+    var showTypeDialog by remember { mutableStateOf(!reattached) }
     val uiState by viewModel.uiState.collectAsState()
     val localVideo by viewModel.localVideo.collectAsState()
     val remoteVideo by viewModel.remoteVideo.collectAsState()
