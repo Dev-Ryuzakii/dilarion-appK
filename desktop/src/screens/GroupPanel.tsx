@@ -7,9 +7,13 @@ import {
   getGroupMembers,
   sendGroupMessage,
   downloadMedia,
-  decryptMessage,
+  getPublicKey,
+  decryptChatMessage,
   confirmMasterToken,
 } from '../services/api';
+import { encryptMessage } from '../services/crypto';
+import { generateDecoy } from '../services/decoy';
+import { loadKeypair } from '../services/keys';
 import { presenceService, WsMessage } from '../services/presence';
 import { LockIcon, CameraIcon, MicIcon as MicIconSvg, PaperclipIcon as PaperclipIconSvg, SpinnerIcon } from '../components/Icons';
 
@@ -26,6 +30,17 @@ interface Props {
 function isEncrypted(ct: string | null | undefined): boolean {
   return ct === 'encrypted';
 }
+
+// Legacy rows written by the old server fallback. These strings must never reach
+// the screen — a decoy that says "encrypted" is not a decoy.
+const DECOY_PLACEHOLDERS = [
+  '[ENCRYPTED MESSAGE] Tap to decrypt',
+  '[ENCRYPTED GROUP MESSAGE] Tap to decrypt',
+];
+function isPlaceholderDecoy(text: string | null | undefined): boolean {
+  return !!text && DECOY_PLACEHOLDERS.includes(text.trim());
+}
+
 function isVoice(ct: string | null | undefined): boolean {
   return !!(ct === 'media/voice' || ct?.startsWith('audio/'));
 }
@@ -181,7 +196,9 @@ function EncryptedBubble({ token, messageId, decoyContent, masterToken, onDecryp
     );
   }
 
-  const displayText = decoyContent || '…';
+  // Older rows may still carry the server's old placeholder, which defeats the
+  // point of a decoy by advertising that the message is encrypted; never render it.
+  const displayText = isPlaceholderDecoy(decoyContent) ? '…' : (decoyContent || '…');
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -195,10 +212,6 @@ function EncryptedBubble({ token, messageId, decoyContent, masterToken, onDecryp
         }}>
           {loading ? '…' : displayText}
         </span>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <LockIcon size={10} color="var(--text-muted)" />
-          <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)' }}>tap to decrypt</span>
-        </div>
       </div>
       {inputVisible && !masterToken && (
         <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>
@@ -444,6 +457,7 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
   const [loading, setLoading] = useState(true);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
   const [taggedUser, setTaggedUser] = useState<string | null>(null);
   const [members, setMembers] = useState<GroupMember[]>([]);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
@@ -487,9 +501,13 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
     return () => presenceService.removeListener(handler);
   }, [group.id, loadMessages]);
 
-  async function handleDecrypt(mToken: string, messageId: number): Promise<string> {
-    const result = await decryptMessage(token, mToken, messageId);
-    return result.content;
+  // The master token gates the reveal in the UI; the decryption itself uses the
+  // device's private key against this user's entry in the message's key map.
+  async function handleDecrypt(_mToken: string, messageId: number): Promise<string> {
+    const msg = messages.find(m => m.id === messageId);
+    if (!msg) throw new Error('Message not found');
+    const kp = loadKeypair(myUsername);
+    return decryptChatMessage(msg, kp?.privateKey ?? null, myUsername);
   }
 
   async function handleSend() {
@@ -501,11 +519,34 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
     setTaggedUser(null);
     setMentionQuery(null);
     try {
-      await sendGroupMessage(token, group.id, trimmed, savedTagged ?? undefined);
+      // Wrap the message key for every member who has published a public key,
+      // ourselves included, so each of them (and we) can read it back.
+      const members = await getGroupMembers(token, group.id);
+      const memberKeys: Record<string, string> = {};
+      await Promise.all(
+        members.map(async m => {
+          const pk = await getPublicKey(token, m.username);
+          if (pk) memberKeys[m.username] = pk;
+        }),
+      );
+      if (!memberKeys[myUsername]) {
+        const myKey = await getPublicKey(token, myUsername);
+        if (myKey) memberKeys[myUsername] = myKey;
+      }
+
+      const { ciphertext, encryptedKeys, iv } = await encryptMessage(trimmed, memberKeys);
+      await sendGroupMessage(
+        token,
+        group.id,
+        ciphertext,
+        { encryptedKey: JSON.stringify(encryptedKeys), iv, decoyContent: generateDecoy() },
+        savedTagged ?? undefined,
+      );
       await loadMessages();
-    } catch {
+    } catch (err: any) {
       setText(trimmed);
       setTaggedUser(savedTagged);
+      setSendError(err?.message || 'Failed to send message');
     } finally {
       setSending(false);
     }
@@ -626,6 +667,28 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
               <p style={{ padding: '10px 14px', color: 'var(--text-muted)', fontSize: '0.8rem' }}>No members match</p>
             )}
           </div>
+        </div>
+      )}
+
+      {sendError && (
+        <div style={{
+          padding: '8px 16px',
+          background: 'rgba(239,68,68,0.12)',
+          borderTop: '1px solid rgba(239,68,68,0.3)',
+          color: '#fca5a5',
+          fontSize: '0.78rem',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          gap: 12,
+        }}>
+          <span>{sendError}</span>
+          <button
+            onClick={() => setSendError(null)}
+            style={{ background: 'none', border: 'none', color: '#fca5a5', cursor: 'pointer', fontSize: '0.9rem' }}
+          >
+            ✕
+          </button>
         </div>
       )}
 

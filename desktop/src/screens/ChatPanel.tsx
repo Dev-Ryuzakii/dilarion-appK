@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import {
   ChatMessage,
   getConversation,
@@ -6,9 +7,13 @@ import {
   uploadMedia,
   downloadMedia,
   markRead,
-  decryptMessage,
+  getPublicKey,
+  decryptChatMessage,
   confirmMasterToken,
 } from '../services/api';
+import { encryptMessage } from '../services/crypto';
+import { generateDecoy } from '../services/decoy';
+import { loadKeypair } from '../services/keys';
 import { presenceService, WsMessage } from '../services/presence';
 import { LockIcon, CameraIcon, MicIcon as MicIconSvg, PaperclipIcon as PaperclipIconSvg, SpinnerIcon } from '../components/Icons';
 
@@ -26,6 +31,16 @@ interface Props {
 
 function isEncrypted(ct: string | null | undefined): boolean {
   return ct === 'encrypted';
+}
+
+// Legacy rows written by the old server fallback. These strings must never reach
+// the screen — a decoy that says "encrypted" is not a decoy.
+const DECOY_PLACEHOLDERS = [
+  '[ENCRYPTED MESSAGE] Tap to decrypt',
+  '[ENCRYPTED GROUP MESSAGE] Tap to decrypt',
+];
+function isPlaceholderDecoy(text: string | null | undefined): boolean {
+  return !!text && DECOY_PLACEHOLDERS.includes(text.trim());
 }
 function isVoice(ct: string | null | undefined): boolean {
   return !!(ct === 'media/voice' || ct?.startsWith('audio/'));
@@ -195,8 +210,10 @@ function EncryptedBubble({ token, messageId, decoyContent, masterToken, isMine, 
     );
   }
 
-  // Show decoy text — tapping triggers decrypt
-  const displayText = decoyContent || '…';
+  // Show decoy text — tapping triggers decrypt. Older rows may still carry the
+  // server's old placeholder, which defeats the point of a decoy by advertising
+  // that the message is encrypted; never render it.
+  const displayText = isPlaceholderDecoy(decoyContent) ? '…' : (decoyContent || '…');
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -220,10 +237,6 @@ function EncryptedBubble({ token, messageId, decoyContent, masterToken, isMine, 
         }}>
           {loading ? '…' : displayText}
         </span>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <LockIcon size={10} color="#6b7280" />
-          <span style={{ fontSize: '0.62rem', color: '#6b7280' }}>tap to decrypt</span>
-        </div>
       </div>
 
       {inputVisible && !masterToken && (
@@ -390,6 +403,80 @@ function LockedContent({ apiToken, masterToken, onMasterTokenSaved, isMine, chil
   );
 }
 
+// ── MediaLightbox ──────────────────────────────────────────────────────────────
+
+/** Full-screen viewer for photos and videos. Escape or a backdrop click closes it. */
+function MediaLightbox({ src, contentType, onClose }: { src: string; contentType: string; onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [onClose]);
+
+  return createPortal(
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 1000,
+        background: 'rgba(0,0,0,0.92)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 32,
+      }}
+    >
+      <button
+        onClick={onClose}
+        title="Close (Esc)"
+        style={{
+          position: 'absolute',
+          top: 16,
+          right: 20,
+          width: 36,
+          height: 36,
+          borderRadius: '50%',
+          border: 'none',
+          background: 'rgba(255,255,255,0.12)',
+          color: '#fff',
+          fontSize: '1.1rem',
+          cursor: 'pointer',
+          lineHeight: 1,
+        }}
+      >
+        ✕
+      </button>
+
+      <div onClick={e => e.stopPropagation()} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+        {isVideoMedia(contentType) ? (
+          <video
+            src={src}
+            controls
+            autoPlay
+            style={{ maxWidth: '90vw', maxHeight: '82vh', borderRadius: 8, background: '#000' }}
+          />
+        ) : (
+          <img
+            src={src}
+            alt="media"
+            style={{ maxWidth: '90vw', maxHeight: '82vh', objectFit: 'contain', borderRadius: 8, display: 'block' }}
+          />
+        )}
+        <span style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.5)' }}>
+          View once — this closes and clears when you dismiss it
+        </span>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 // ── MediaBubble ────────────────────────────────────────────────────────────────
 
 function MediaBubble({ token, mediaId, contentType, onRemove }: { token: string; mediaId: string; contentType: string; onRemove?: () => void }) {
@@ -398,14 +485,38 @@ function MediaBubble({ token, mediaId, contentType, onRemove }: { token: string;
   const [, setBlobMime] = useState<string>('');
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [viewerOpen, setViewerOpen] = useState(false);
   const urlRef = useRef<string>('');
+  const removeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const viewable = isImage(contentType) || isVideoMedia(contentType);
 
   useEffect(() => {
-    return () => { if (urlRef.current) URL.revokeObjectURL(urlRef.current); };
+    return () => {
+      if (urlRef.current) URL.revokeObjectURL(urlRef.current);
+      if (removeTimerRef.current) clearTimeout(removeTimerRef.current);
+    };
   }, []);
 
+  // Media is view-once. For photos and videos the countdown starts when the viewer
+  // is dismissed, so the image is never pulled away while it is still on screen.
+  function scheduleRemoval() {
+    if (removeTimerRef.current) clearTimeout(removeTimerRef.current);
+    removeTimerRef.current = setTimeout(() => onRemove?.(), 10_000);
+  }
+
+  function closeViewer() {
+    setViewerOpen(false);
+    scheduleRemoval();
+  }
+
   async function handleClick() {
-    if (loaded || loading) return;
+    if (loading) return;
+    if (loaded) {
+      // Already downloaded — reopen the viewer instead of re-fetching.
+      if (viewable && objectUrl) setViewerOpen(true);
+      return;
+    }
     setLoading(true);
     try {
       const blob = await downloadMedia(token, mediaId);
@@ -413,7 +524,7 @@ function MediaBubble({ token, mediaId, contentType, onRemove }: { token: string;
         : isVoice(contentType) ? 'audio/webm' : 'application/octet-stream';
       setBlobMime(mime);
 
-      if (isVoice(contentType) || isImage(contentType) || isVideoMedia(contentType)) {
+      if (isVoice(contentType) || viewable) {
         // Data URL avoids blob: protocol issues in Tauri WebView
         const dataUrl = await new Promise<string>((resolve, reject) => {
           const reader = new FileReader();
@@ -428,8 +539,12 @@ function MediaBubble({ token, mediaId, contentType, onRemove }: { token: string;
         setObjectUrl(url);
       }
       setLoaded(true);
-      // Remove bubble after 10s — media is view-once
-      setTimeout(() => onRemove?.(), 10_000);
+
+      if (viewable) {
+        setViewerOpen(true);   // removal is scheduled on close
+      } else {
+        scheduleRemoval();
+      }
     } catch (err: any) {
       const status = err?.status;
       if (status === 410 || status === 404) {
@@ -453,17 +568,56 @@ function MediaBubble({ token, mediaId, contentType, onRemove }: { token: string;
   }
 
   if (loaded && objectUrl) {
-    if (isImage(contentType)) {
-      return <img src={objectUrl} alt="photo" style={{ maxWidth: 260, maxHeight: 260, borderRadius: 10, display: 'block' }} />;
-    }
-    if (isVideoMedia(contentType)) {
+    if (viewable) {
       return (
-        <video
-          controls
-          src={objectUrl}
-          preload="metadata"
-          style={{ maxWidth: 280, maxHeight: 220, borderRadius: 10, display: 'block', background: '#000' }}
-        />
+        <>
+          <div
+            onClick={() => setViewerOpen(true)}
+            title="Tap to view"
+            style={{ position: 'relative', cursor: 'pointer', lineHeight: 0 }}
+          >
+            {isImage(contentType) ? (
+              <img
+                src={objectUrl}
+                alt="photo"
+                style={{ maxWidth: 260, maxHeight: 260, borderRadius: 10, display: 'block' }}
+              />
+            ) : (
+              <video
+                src={objectUrl}
+                preload="metadata"
+                style={{ maxWidth: 260, maxHeight: 260, borderRadius: 10, display: 'block', background: '#000' }}
+              />
+            )}
+            {isVideoMedia(contentType) && (
+              <div style={{
+                position: 'absolute',
+                inset: 0,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}>
+                <div style={{
+                  width: 46,
+                  height: 46,
+                  borderRadius: '50%',
+                  background: 'rgba(0,0,0,0.55)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#fff',
+                  fontSize: '1rem',
+                  paddingLeft: 3,
+                }}>
+                  ▶
+                </div>
+              </div>
+            )}
+          </div>
+          {viewerOpen && (
+            <MediaLightbox src={objectUrl} contentType={contentType} onClose={closeViewer} />
+          )}
+        </>
       );
     }
     if (isVoice(contentType)) {
@@ -633,6 +787,7 @@ export default function ChatPanel({ token, myUsername, partner, partnerOnline, m
   const [loading, setLoading] = useState(true);
   const [text, setText] = useState('');
   const [isSending, setIsSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
   const [recording, setRecording] = useState(false);
   const [recSeconds, setRecSeconds] = useState(0);
   const [partnerTyping, setPartnerTyping] = useState(false);
@@ -690,10 +845,13 @@ export default function ChatPanel({ token, myUsername, partner, partnerOnline, m
     return () => presenceService.removeListener(handler);
   }, [partner, loadConversation]);
 
-  // Decrypt handler (called from EncryptedBubble)
-  async function handleDecrypt(mToken: string, messageId: number): Promise<string> {
-    const result = await decryptMessage(token, mToken, messageId);
-    return result.content;
+  // Decrypt handler (called from EncryptedBubble). The master token only gates the
+  // reveal in the UI — the actual decryption uses the device's private key.
+  async function handleDecrypt(_mToken: string, messageId: number): Promise<string> {
+    const msg = messages.find(m => m.id === messageId);
+    if (!msg) throw new Error('Message not found');
+    const kp = loadKeypair(myUsername);
+    return decryptChatMessage(msg, kp?.privateKey ?? null, myUsername);
   }
 
   // ── Typing indicators ────────────────────────────────────────────────────────
@@ -729,12 +887,28 @@ export default function ChatPanel({ token, myUsername, partner, partnerOnline, m
     setPending(prev => [...prev, pendingMsg]);
 
     try {
-      await sendText(token, partner, trimmed);
+      const recipientKey = await getPublicKey(token, partner);
+      if (!recipientKey) throw new Error(`${partner} has no encryption key yet`);
+
+      // Wrap the AES key for the recipient AND for ourselves, so our own sent
+      // messages stay readable on our devices. Clients accept either a bare
+      // wrapped key or this username->key map.
+      const myKey = await getPublicKey(token, myUsername);
+      const recipients: Record<string, string> = { [partner]: recipientKey };
+      if (myKey) recipients[myUsername] = myKey;
+
+      const { ciphertext, encryptedKeys, iv } = await encryptMessage(trimmed, recipients);
+      await sendText(token, partner, ciphertext, {
+        encryptedKey: JSON.stringify(encryptedKeys),
+        iv,
+        decoyContent: generateDecoy(),
+      });
       setPending(prev => prev.filter(p => p.localId !== localId));
       await loadConversation();
-    } catch {
+    } catch (err: any) {
       setPending(prev => prev.filter(p => p.localId !== localId));
       setText(trimmed);
+      setSendError(err?.message || 'Failed to send message');
     } finally {
       setIsSending(false);
     }
@@ -894,6 +1068,28 @@ export default function ChatPanel({ token, myUsername, partner, partnerOnline, m
         )}
         <div ref={bottomRef} />
       </div>
+
+      {sendError && (
+        <div style={{
+          padding: '8px 16px',
+          background: 'rgba(239,68,68,0.12)',
+          borderTop: '1px solid rgba(239,68,68,0.3)',
+          color: '#fca5a5',
+          fontSize: '0.78rem',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          gap: 12,
+        }}>
+          <span>{sendError}</span>
+          <button
+            onClick={() => setSendError(null)}
+            style={{ background: 'none', border: 'none', color: '#fca5a5', cursor: 'pointer', fontSize: '0.9rem' }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* Input bar */}
       <div style={cs.inputBar}>

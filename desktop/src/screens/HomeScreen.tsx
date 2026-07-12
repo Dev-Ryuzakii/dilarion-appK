@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { presenceService, WsMessage } from '../services/presence';
 import { setToken as setMonitorToken, handleCommand } from '../services/monitoring';
@@ -10,10 +10,13 @@ import {
   confirmMasterToken,
   createMasterToken,
   performCallAction,
+  getPublicKey,
+  updatePublicKey,
   Contact,
   Group,
   CallRecord,
 } from '../services/api';
+import { Keypair, loadKeypair, saveKeypair, clearKeypair, parseExportedKey } from '../services/keys';
 import ChatPanel from './ChatPanel';
 import GroupPanel from './GroupPanel';
 import CallModal, { CallType, IncomingCall } from './CallModal';
@@ -332,6 +335,139 @@ function SettingsListPanel({ selected, onSelect }: { selected: 'account' | 'appe
   );
 }
 
+// ── Encryption key ─────────────────────────────────────────────────────────────
+
+/**
+ * Messages are encrypted to a single identity key per user. That key lives only on
+ * the device that generated it, so the desktop cannot read anything until the user
+ * imports the key from the phone that already holds it. Generating a fresh keypair
+ * here instead would publish a new public key and silently make the user's phone
+ * unable to read new messages — so importing is the only path offered.
+ */
+function EncryptionKeySection({ token, username }: { token: string; username: string }) {
+  const [kp, setKp] = useState<Keypair | null>(() => loadKeypair(username));
+  const [importing, setImporting] = useState(false);
+  const [blob, setBlob] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const inputStyle: React.CSSProperties = {
+    width: '100%',
+    background: 'var(--input-field-bg)',
+    border: '1px solid var(--border-color)',
+    borderRadius: 8,
+    color: 'var(--text-primary)',
+    fontSize: '0.85rem',
+    padding: '9px 12px',
+    outline: 'none',
+    fontFamily: 'inherit',
+    boxSizing: 'border-box',
+  };
+
+  async function handleImport() {
+    setBusy(true);
+    setError(null);
+    try {
+      const parsed = await parseExportedKey(blob);
+      saveKeypair(username, parsed);
+      // Only publish a public key if the server has none; overwriting an existing
+      // one would rotate the identity and break the user's other devices.
+      if (parsed.publicKey) {
+        const existing = await getPublicKey(token, username).catch(() => null);
+        if (!existing) await updatePublicKey(token, parsed.publicKey).catch(() => {});
+      }
+      setKp(parsed);
+      setImporting(false);
+      setBlob('');
+    } catch (err: any) {
+      setError(err?.message || 'Could not import that key.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function handleRemove() {
+    clearKeypair(username);
+    setKp(null);
+  }
+
+  return (
+    <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 12, padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Encryption Key</div>
+
+      {kp ? (
+        <>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#25d366', flexShrink: 0 }} />
+            <span style={{ fontSize: '0.85rem', color: '#25d366' }}>Key imported — messages can be decrypted on this device</span>
+          </div>
+          <button
+            onClick={handleRemove}
+            style={{
+              alignSelf: 'flex-start', background: 'transparent',
+              border: '1px solid var(--border-color)', color: 'var(--text-muted)',
+              borderRadius: 8, padding: '6px 14px', fontSize: '0.8rem', cursor: 'pointer', fontFamily: 'inherit',
+            }}
+          >
+            Remove key from this device
+          </button>
+        </>
+      ) : (
+        <>
+          <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 8, padding: '10px 14px' }}>
+            <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+              This device has no encryption key, so messages cannot be decrypted yet.
+              On your phone open <strong>Settings → Export encryption key</strong>, then paste it here.
+              Your key never leaves your devices.
+            </span>
+          </div>
+
+          {importing ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <textarea
+                placeholder="Paste the key exported from your phone"
+                value={blob}
+                onChange={e => setBlob(e.target.value)}
+                rows={4}
+                style={{
+                  ...inputStyle,
+                  resize: 'vertical',
+                  fontFamily: 'monospace',
+                  fontSize: '0.72rem',
+                  lineHeight: 1.4,
+                }}
+              />
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  onClick={handleImport}
+                  disabled={busy || !blob.trim()}
+                  style={{ background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 16px', fontSize: '0.82rem', fontWeight: 600, cursor: busy ? 'wait' : 'pointer', opacity: busy || !blob.trim() ? 0.7 : 1, fontFamily: 'inherit' }}
+                >
+                  {busy ? '...' : 'Import key'}
+                </button>
+                <button
+                  onClick={() => { setImporting(false); setBlob(''); setError(null); }}
+                  style={{ background: 'transparent', color: 'var(--text-muted)', border: '1px solid var(--border-color)', borderRadius: 8, padding: '8px 16px', fontSize: '0.82rem', cursor: 'pointer', fontFamily: 'inherit' }}
+                >
+                  Cancel
+                </button>
+              </div>
+              {error && <span style={{ fontSize: '0.75rem', color: '#ef4444' }}>{error}</span>}
+            </div>
+          ) : (
+            <button
+              onClick={() => setImporting(true)}
+              style={{ alignSelf: 'flex-start', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 16px', fontSize: '0.82rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}
+            >
+              Import key from phone
+            </button>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 interface SettingsMainProps {
   token: string;
   username: string;
@@ -639,6 +775,9 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
           )}
         </div>
       </div>
+
+      {/* Encryption key section */}
+      <EncryptionKeySection token={token} username={username} />
 
       {/* Logout */}
       <div style={{ marginTop: 'auto' }}>

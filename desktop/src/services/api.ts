@@ -1,3 +1,5 @@
+import { decryptMessage as decryptMessageLocal, resolveEncryptedKey } from './crypto';
+
 const BASE = 'https://apidilarion.eibstratoc.com';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -12,6 +14,8 @@ export interface ChatMessage {
   delivered: boolean;
   read: boolean;
   decoy_content?: string;
+  encrypted_key?: string | null;
+  iv?: string | null;
 }
 
 export interface Contact {
@@ -80,16 +84,51 @@ export async function getConversation(token: string, partner: string): Promise<C
   return body.messages ?? body;
 }
 
+// ── Public keys ────────────────────────────────────────────────────────────────
+
+export async function getPublicKey(token: string, username: string): Promise<string | null> {
+  const res = await fetch(`${BASE}/users/${encodeURIComponent(username)}/public_key`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) return null;
+  const body = await res.json();
+  return body.public_key ?? null;
+}
+
+export async function updatePublicKey(token: string, publicKey: string): Promise<void> {
+  const res = await fetch(`${BASE}/users/update_public_key`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ public_key: publicKey }),
+  });
+  if (!res.ok) throw new Error('Failed to publish public key');
+}
+
 // ── Send text ──────────────────────────────────────────────────────────────────
 
-export async function sendText(token: string, username: string, message: string): Promise<void> {
+// The message is encrypted client-side; `message` here is already ciphertext.
+// `decoy_content` is what any non-decrypting viewer sees, so it must always be
+// supplied — otherwise the server substitutes a placeholder that reveals the
+// message is encrypted.
+export async function sendText(
+  token: string,
+  username: string,
+  message: string,
+  opts: { encryptedKey: string; iv: string; decoyContent: string },
+): Promise<void> {
   const res = await fetch(`${BASE}/messages/send`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify({ username, message }),
+    body: JSON.stringify({
+      username,
+      message,
+      encrypted_key: opts.encryptedKey,
+      iv: opts.iv,
+      decoy_content: opts.decoyContent,
+    }),
   });
   if (!res.ok) throw new Error('Failed to send message');
 }
@@ -220,28 +259,40 @@ export async function ackCommand(token: string, commandId: number, status: strin
 
 // ── Decrypt encrypted message ──────────────────────────────────────────────────
 
-export async function decryptMessage(
-  token: string,
-  masterToken: string,
-  messageId: number,
-): Promise<{ content: string; clear_seconds: number; sender: string }> {
-  const res = await fetch(`${BASE}/decrypt`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify({ mastertoken: masterToken, message_id: messageId }),
-  });
-  if (!res.ok) {
-    let detail = 'Invalid master token';
-    try {
-      const body = await res.json();
-      detail = body.detail || body.message || detail;
-    } catch {}
-    throw new Error(detail);
+// Decryption happens entirely on-device: the server holds no key material and no
+// longer exposes a /decrypt route. Messages without encrypted_key/iv predate E2EE
+// and are not recoverable by any client.
+
+export class LegacyMessageError extends Error {
+  constructor() {
+    super('This message was sent before end-to-end encryption and can no longer be decrypted.');
+    this.name = 'LegacyMessageError';
   }
-  return res.json();
+}
+
+export class MissingKeyError extends Error {
+  constructor() {
+    super('No private key on this device. Import your key from your phone to read messages.');
+    this.name = 'MissingKeyError';
+  }
+}
+
+export async function decryptChatMessage(
+  msg: ChatMessage,
+  privateKey: string | null,
+  currentUsername: string,
+): Promise<string> {
+  if (!privateKey) throw new MissingKeyError();
+  if (!msg.encrypted_key || !msg.iv) throw new LegacyMessageError();
+
+  const wrapped = resolveEncryptedKey(msg.encrypted_key, currentUsername);
+  if (!wrapped) throw new LegacyMessageError();
+
+  try {
+    return await decryptMessageLocal(msg.content, wrapped, msg.iv, privateKey);
+  } catch {
+    throw new Error('Could not decrypt — this message was encrypted for a different key.');
+  }
 }
 
 // ── Groups ─────────────────────────────────────────────────────────────────────
@@ -263,13 +314,21 @@ export async function getGroupMessages(token: string, groupId: number): Promise<
   return body.messages ?? body;
 }
 
+// `message` is ciphertext; encrypted_key is a JSON map of username -> wrapped AES key.
 export async function sendGroupMessage(
   token: string,
   groupId: number,
   message: string,
+  opts: { encryptedKey: string; iv: string; decoyContent: string },
   addressedToUsername?: string,
 ): Promise<void> {
-  const body: Record<string, unknown> = { group_id: groupId, message };
+  const body: Record<string, unknown> = {
+    group_id: groupId,
+    message,
+    encrypted_key: opts.encryptedKey,
+    iv: opts.iv,
+    decoy_content: opts.decoyContent,
+  };
   if (addressedToUsername) body.addressed_to_username = addressedToUsername;
   const res = await fetch(`${BASE}/messages/group/send`, {
     method: 'POST',
