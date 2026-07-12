@@ -6,7 +6,6 @@ import {
   getGroupMessages,
   getGroupMembers,
   sendGroupMessage,
-  downloadMedia,
   getPublicKey,
   decryptChatMessage,
   confirmMasterToken,
@@ -15,7 +14,8 @@ import { encryptMessage } from '../services/crypto';
 import { generateDecoy } from '../services/decoy';
 import { loadKeypair } from '../services/keys';
 import { presenceService, WsMessage } from '../services/presence';
-import { LockIcon, CameraIcon, MicIcon as MicIconSvg, PaperclipIcon as PaperclipIconSvg, SpinnerIcon } from '../components/Icons';
+import { LockIcon } from '../components/Icons';
+import MediaBubble from '../components/MediaBubble';
 
 interface Props {
   token: string;
@@ -251,100 +251,6 @@ function PrivateTagBubble({ recipient }: { recipient: string }) {
   );
 }
 
-// ── MediaBubble ────────────────────────────────────────────────────────────────
-
-function MediaBubble({ token, mediaId, contentType }: { token: string; mediaId: string; contentType: string }) {
-  const [loaded, setLoaded] = useState(false);
-  const [objectUrl, setObjectUrl] = useState<string | null>(null);
-  const [blobMime, setBlobMime] = useState<string>('');
-  const [loadError, setLoadError] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const urlRef = useRef<string>('');
-
-  useEffect(() => {
-    return () => { if (urlRef.current) URL.revokeObjectURL(urlRef.current); };
-  }, []);
-
-  async function handleClick() {
-    if (loaded || loading) return;
-    setLoading(true);
-    try {
-      const blob = await downloadMedia(token, mediaId);
-      const mime = blob.type && !blob.type.startsWith('media/') ? blob.type
-        : isVoice(contentType) ? 'audio/webm' : 'application/octet-stream';
-      setBlobMime(mime);
-      const url = URL.createObjectURL(blob);
-      urlRef.current = url;
-      setObjectUrl(url);
-      setLoaded(true);
-    } catch (err: any) {
-      const status = err?.status;
-      if (status === 410) {
-        setLoadError(true);
-      } else {
-        setLoadError(true);
-      }
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  if (loadError) {
-    return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 10 }}>
-        {isVoice(contentType) ? <MicIconSvg size={22} color="var(--text-muted)" /> : <PaperclipIconSvg size={22} color="var(--text-muted)" />}
-        <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>Viewed &amp; deleted</span>
-      </div>
-    );
-  }
-
-  if (loaded && objectUrl) {
-    if (isImage(contentType)) {
-      return <img src={objectUrl} alt="photo" style={{ maxWidth: 260, maxHeight: 260, borderRadius: 10, display: 'block' }} />;
-    }
-    if (isVoice(contentType)) {
-      return (
-        <audio controls style={{ maxWidth: 240, display: 'block' }}>
-          <source src={objectUrl} type={blobMime || 'audio/webm'} />
-          Your browser does not support audio playback.
-        </audio>
-      );
-    }
-    return (
-      <a href={objectUrl} download={mediaId} style={{ color: 'var(--accent)', fontSize: '0.83rem', textDecoration: 'underline' }}>
-        Download file
-      </a>
-    );
-  }
-
-  let label = 'File';
-  let iconEl: React.ReactNode = <PaperclipIconSvg size={22} color="var(--text-muted)" />;
-  if (isImage(contentType)) { iconEl = <CameraIcon size={22} color="var(--text-muted)" />; label = 'Photo'; }
-  else if (isVoice(contentType)) { iconEl = <MicIconSvg size={22} color="var(--text-muted)" />; label = 'Voice note'; }
-
-  return (
-    <button
-      onClick={handleClick}
-      disabled={loading}
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 10,
-        background: 'var(--bg-card)',
-        border: '1px solid var(--border-color)',
-        borderRadius: 10,
-        padding: '12px 16px',
-        cursor: loading ? 'wait' : 'pointer',
-        color: 'var(--text-muted)',
-        fontSize: '0.85rem',
-        opacity: loading ? 0.7 : 1,
-      }}
-    >
-      {loading ? <SpinnerIcon size={22} /> : iconEl}
-      <span>{loading ? 'Loading...' : label}</span>
-    </button>
-  );
-}
 
 // ── Message bubble ─────────────────────────────────────────────────────────────
 
