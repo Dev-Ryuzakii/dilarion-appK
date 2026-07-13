@@ -26,6 +26,7 @@ class SessionManager @Inject constructor(
         val PRIVATE_KEY    = stringPreferencesKey("private_key")
         val PUBLIC_KEY     = stringPreferencesKey("public_key")
         val MASTER_TOKEN   = stringPreferencesKey("master_token")
+        val DEVICE_UUID    = stringPreferencesKey("device_uuid")
     }
 
     val sessionToken: Flow<String?> = context.dataStore.data.map { it[Keys.SESSION_TOKEN] }
@@ -33,6 +34,8 @@ class SessionManager @Inject constructor(
     val privateKey: Flow<String?>    = context.dataStore.data.map { it[Keys.PRIVATE_KEY] }
     val publicKey: Flow<String?>     = context.dataStore.data.map { it[Keys.PUBLIC_KEY] }
     val masterToken: Flow<String?>   = context.dataStore.data.map { it[Keys.MASTER_TOKEN] }
+    // This device's server id, used to find our own entry in a message's key map.
+    val deviceUuid: Flow<String?>    = context.dataStore.data.map { it[Keys.DEVICE_UUID] }
 
     suspend fun saveSession(token: String, username: String, privateKey: String, publicKey: String) {
         context.dataStore.edit { prefs ->
@@ -45,6 +48,10 @@ class SessionManager @Inject constructor(
 
     suspend fun saveMasterToken(masterToken: String) {
         context.dataStore.edit { it[Keys.MASTER_TOKEN] = masterToken }
+    }
+
+    suspend fun saveDeviceUuid(deviceUuid: String) {
+        context.dataStore.edit { it[Keys.DEVICE_UUID] = deviceUuid }
     }
 
     suspend fun clearSession() {

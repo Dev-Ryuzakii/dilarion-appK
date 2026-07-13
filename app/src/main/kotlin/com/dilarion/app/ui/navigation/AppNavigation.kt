@@ -26,6 +26,7 @@ import com.dilarion.app.ui.screens.home.HomeViewModel
 import com.dilarion.app.ui.screens.mastertoken.MasterTokenSetupScreen
 import com.dilarion.app.ui.screens.newchat.NewChatScreen
 import com.dilarion.app.ui.screens.settings.SettingsScreen
+import com.dilarion.app.ui.screens.devices.LinkedDevicesScreen
 import com.dilarion.app.ui.screens.splash.SplashScreen
 
 @Composable
@@ -180,12 +181,17 @@ fun AppNavigation(pendingIncomingCall: IncomingCallData? = null) {
             SettingsScreen(
                 onBack = { navController.popBackStack() },
                 onMasterToken = { navController.navigate(Screen.MasterToken.route) },
+                onLinkedDevices = { navController.navigate(Screen.LinkedDevices.route) },
                 onLogout = {
                     navController.navigate(Screen.Auth.route) {
                         popUpTo(Screen.Home.route) { inclusive = true }
                     }
                 },
             )
+        }
+
+        composable(Screen.LinkedDevices.route) {
+            LinkedDevicesScreen(onBack = { navController.popBackStack() })
         }
     }
 

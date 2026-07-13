@@ -25,6 +25,37 @@ interface ApiService {
         @Body request: UpdatePublicKeyRequest,
     ): Response<Unit>
 
+    // ─── Multi-device linking ────────────────────────────────────────────────────
+
+    @POST("devices/register")
+    suspend fun registerDevice(
+        @Header("Authorization") bearer: String,
+        @Body request: DeviceRegisterRequest,
+    ): Response<DeviceRegisterResponse>
+
+    @POST("devices/link/approve")
+    suspend fun approveDeviceLink(
+        @Header("Authorization") bearer: String,
+        @Body request: DeviceLinkApproveRequest,
+    ): Response<Unit>
+
+    @GET("users/{username}/devices")
+    suspend fun getUserDevices(
+        @Header("Authorization") bearer: String,
+        @Path("username") username: String,
+    ): Response<UserDevicesResponse>
+
+    @GET("devices")
+    suspend fun getMyDevices(
+        @Header("Authorization") bearer: String,
+    ): Response<MyDevicesResponse>
+
+    @POST("devices/{deviceUuid}/revoke")
+    suspend fun revokeDevice(
+        @Header("Authorization") bearer: String,
+        @Path("deviceUuid") deviceUuid: String,
+    ): Response<Unit>
+
     // ─── Messages ──────────────────────────────────────────────────────────────
 
     @GET("messages/inbox")

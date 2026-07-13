@@ -124,6 +124,7 @@ class ChatViewModel @Inject constructor(
             val token = sessionManager.sessionToken.first() ?: return@launch
             val bearer = "Bearer $token"
             val privKey = sessionManager.privateKey.first()
+            val myDeviceUuid = sessionManager.deviceUuid.first()
             val me = _uiState.value.currentUsername
             runCatching {
                 val rawMessages: List<Message> = if (groupId != null) {
@@ -143,7 +144,9 @@ class ChatViewModel @Inject constructor(
                             if (encKey.startsWith("{")) {
                                 val mapType = object : com.google.gson.reflect.TypeToken<Map<String, String>>() {}.type
                                 val keysMap: Map<String, String> = com.google.gson.Gson().fromJson(encKey, mapType)
-                                encKey = keysMap[me] ?: encKey
+                                // Prefer our device_uuid entry; fall back to the legacy
+                                // username-keyed entry for older messages.
+                                encKey = keysMap[myDeviceUuid] ?: keysMap[me] ?: encKey
                             }
                             val plain = cryptoManager.decryptMessage(msg.content, encKey, msg.iv, privKey)
                             msg.copy(content = plain)
@@ -205,25 +208,27 @@ class ChatViewModel @Inject constructor(
                 val decoys = listOf("hey are you free tonight", "what are you up to later", "just wanted to check in with you", "hope everything is going well with you", "did you eat anything yet today", "have so much work piled up right now")
                 val decoy = decoys.random()
 
-                if (groupId != null) {
-                    val pubKeys = mutableMapOf<String, String>()
-                    for (member in _uiState.value.groupMembers) {
-                        if (member.username != me) {
-                            val pk = apiService.getPublicKey(bearer, member.username).body()?.get("public_key")
-                            if (pk != null) pubKeys[member.username] = pk
-                        }
+                // Wrap the AES key once per active device (keyed by device_uuid) of
+                // every recipient and of ourselves, so all of everyone's devices read it.
+                val recipients: Set<String> = if (groupId != null) {
+                    (_uiState.value.groupMembers.map { it.username } + me).toSet()
+                } else {
+                    setOf(peerUsername, me)
+                }
+                val deviceKeys = mutableMapOf<String, String>()
+                for (u in recipients) {
+                    apiService.getUserDevices(bearer, u).body()?.devices?.forEach { d ->
+                        if (d.publicKey.isNotBlank()) deviceKeys[d.deviceUuid] = d.publicKey
                     }
-                    val myPk = apiService.getPublicKey(bearer, me).body()?.get("public_key")
-                    if (myPk != null) pubKeys[me] = myPk
+                }
+                if (deviceKeys.isEmpty()) throw Exception("No linked devices with encryption keys")
 
-                    val (ciphertext, encKeysMap, iv) = cryptoManager.encryptGroupMessage(text.trim(), pubKeys)
-                    val encryptedKeyJson = com.google.gson.Gson().toJson(encKeysMap)
+                val (ciphertext, encKeysMap, iv) = cryptoManager.encryptGroupMessage(text.trim(), deviceKeys)
+                val encryptedKeyJson = com.google.gson.Gson().toJson(encKeysMap)
+                if (groupId != null) {
                     apiService.sendGroupMessage(bearer, SendGroupMessageRequest(groupId!!, ciphertext, tagged, encryptedKeyJson, iv, decoy))
                 } else {
-                    val pubKeyResponse = apiService.getPublicKey(bearer, peerUsername)
-                    val pubKeyB64 = pubKeyResponse.body()?.get("public_key") ?: throw Exception("Recipient public key not found")
-                    val (ciphertext, encryptedKey, iv) = cryptoManager.encryptMessage(text.trim(), pubKeyB64)
-                    apiService.sendDm(bearer, SendDmRequest(peerUsername, ciphertext, encryptedKey, iv, decoy))
+                    apiService.sendDm(bearer, SendDmRequest(peerUsername, ciphertext, encryptedKeyJson, iv, decoy))
                 }
                 loadMessages()
             }.onFailure {

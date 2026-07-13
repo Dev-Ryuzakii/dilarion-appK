@@ -19,6 +19,45 @@ data class UpdatePublicKeyRequest(
     @SerializedName("public_key") val publicKey: String,
 )
 
+// ─── Multi-device linking ──────────────────────────────────────────────────────
+
+data class DeviceRegisterRequest(
+    @SerializedName("public_key") val publicKey: String,
+    val platform: String,
+    @SerializedName("device_name") val deviceName: String? = null,
+)
+
+data class DeviceRegisterResponse(
+    @SerializedName("device_uuid") val deviceUuid: String,
+    val platform: String? = null,
+)
+
+data class DeviceLinkApproveRequest(
+    val nonce: String,
+)
+
+data class DeviceKey(
+    @SerializedName("device_uuid") val deviceUuid: String,
+    @SerializedName("public_key") val publicKey: String,
+    val platform: String? = null,
+)
+
+data class UserDevicesResponse(
+    val devices: List<DeviceKey> = emptyList(),
+)
+
+data class MyDevice(
+    @SerializedName("device_uuid") val deviceUuid: String,
+    val platform: String = "",
+    @SerializedName("device_name") val deviceName: String? = null,
+    @SerializedName("created_at") val createdAt: String? = null,
+    @SerializedName("last_seen") val lastSeen: String? = null,
+)
+
+data class MyDevicesResponse(
+    val devices: List<MyDevice> = emptyList(),
+)
+
 // ─── Messages ─────────────────────────────────────────────────────────────────
 
 data class Message(

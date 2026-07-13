@@ -10,19 +10,16 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.ExitToApp
-import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.collectAsState
@@ -34,92 +31,12 @@ import com.dilarion.app.ui.theme.*
 fun SettingsScreen(
     onBack: () -> Unit,
     onMasterToken: () -> Unit = {},
+    onLinkedDevices: () -> Unit = {},
     onLogout: (() -> Unit)? = null,
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
     var showLogoutDialog by remember { mutableStateOf(false) }
-    var showExportDialog by remember { mutableStateOf(false) }
-    var exportTokenInput by remember { mutableStateOf("") }
-    val clipboard = LocalClipboardManager.current
-
-    if (showExportDialog) {
-        val exported = uiState.exportedKey
-        AlertDialog(
-            onDismissRequest = {
-                showExportDialog = false
-                exportTokenInput = ""
-                viewModel.clearExportedKey()
-            },
-            title = { Text(if (exported == null) "Export encryption key" else "Your encryption key") },
-            text = {
-                if (exported == null) {
-                    Column {
-                        Text(
-                            "This key lets a device read your messages. Only paste it into your own Dilarion desktop app — never share it with anyone.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = TextSecondary,
-                        )
-                        Spacer(Modifier.height(12.dp))
-                        OutlinedTextField(
-                            value = exportTokenInput,
-                            onValueChange = { exportTokenInput = it },
-                            label = { Text("Master token") },
-                            singleLine = true,
-                            visualTransformation = PasswordVisualTransformation(),
-                            isError = uiState.exportError != null,
-                            supportingText = uiState.exportError?.let { { Text(it, color = DilarionRed) } },
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                    }
-                } else {
-                    Column {
-                        Text(
-                            "Copy this and paste it into Settings → Encryption Key on your desktop app.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = TextSecondary,
-                        )
-                        Spacer(Modifier.height(12.dp))
-                        Text(
-                            exported,
-                            style = MaterialTheme.typography.bodySmall,
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 10.sp,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(max = 180.dp)
-                                .verticalScroll(rememberScrollState())
-                                .background(BackgroundGrey, RoundedCornerShape(8.dp))
-                                .padding(10.dp),
-                        )
-                    }
-                }
-            },
-            confirmButton = {
-                if (exported == null) {
-                    TextButton(
-                        onClick = { viewModel.exportKey(exportTokenInput) },
-                        enabled = exportTokenInput.isNotBlank(),
-                    ) {
-                        Text("Reveal key")
-                    }
-                } else {
-                    TextButton(onClick = { clipboard.setText(AnnotatedString(exported)) }) {
-                        Text("Copy")
-                    }
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = {
-                    showExportDialog = false
-                    exportTokenInput = ""
-                    viewModel.clearExportedKey()
-                }) {
-                    Text(if (exported == null) "Cancel" else "Done")
-                }
-            },
-        )
-    }
 
     if (showLogoutDialog) {
         AlertDialog(
@@ -226,27 +143,27 @@ fun SettingsScreen(
 
             Spacer(Modifier.height(12.dp))
 
-            // ── Encryption key section ────────────────────────────────────────
-            SettingsSectionHeader("Encryption Key")
+            // ── Linked devices section ────────────────────────────────────────
+            SettingsSectionHeader("Devices")
 
             SettingsCard {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { showExportDialog = true }
+                        .clickable { onLinkedDevices() }
                         .padding(horizontal = 16.dp, vertical = 14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Icon(Icons.Default.Key, null, tint = DilarionRed, modifier = Modifier.size(22.dp))
+                    Icon(Icons.Default.Devices, null, tint = DilarionRed, modifier = Modifier.size(22.dp))
                     Spacer(Modifier.width(16.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            "Export encryption key",
+                            "Linked devices",
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.Medium,
                         )
                         Text(
-                            "Import it on desktop to read your messages there",
+                            "Scan a QR to link your desktop; unlink devices",
                             style = MaterialTheme.typography.bodySmall,
                             color = TextSecondary,
                         )

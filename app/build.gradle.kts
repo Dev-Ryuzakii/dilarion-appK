@@ -87,4 +87,7 @@ dependencies {
     implementation(libs.coil.compose)
 
     implementation("io.getstream:stream-webrtc-android:1.3.8")
+
+    // QR scanning for device linking
+    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
 }

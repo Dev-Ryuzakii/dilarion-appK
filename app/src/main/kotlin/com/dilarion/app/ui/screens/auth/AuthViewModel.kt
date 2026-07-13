@@ -72,6 +72,16 @@ class AuthViewModel @Inject constructor(
                     Pair(existingPub, existingPriv)
                 }
                 sessionManager.saveSession(token, body.username, privB64, pubB64)
+
+                // Register this phone as a device so senders can encrypt to it and
+                // we know our device_uuid for finding our entry in a key map.
+                runCatching {
+                    val resp = apiService.registerDevice(
+                        "Bearer $token",
+                        com.dilarion.app.data.model.DeviceRegisterRequest(pubB64, "android", android.os.Build.MODEL),
+                    )
+                    resp.body()?.deviceUuid?.let { sessionManager.saveDeviceUuid(it) }
+                }
                 presenceService.connect(token)
                 MonitoringForegroundService.start(context)
                 _uiState.value = AuthUiState(success = true)
