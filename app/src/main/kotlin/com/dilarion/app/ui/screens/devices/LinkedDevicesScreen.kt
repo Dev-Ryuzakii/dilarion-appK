@@ -55,9 +55,10 @@ fun LinkedDevicesScreen(
     fun startScan() {
         val options = ScanOptions()
             .setDesiredBarcodeFormats(ScanOptions.QR_CODE)
-            .setPrompt("Scan the code shown on the other device")
+            .setPrompt("Scan the QR code shown on your desktop")
             .setBeepEnabled(false)
             .setOrientationLocked(true)
+            .setCaptureActivity(PortraitCaptureActivity::class.java)
         scanLauncher.launch(options)
     }
 

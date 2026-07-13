@@ -62,6 +62,15 @@
             android:theme="@android:style/Theme.Translucent.NoTitleBar"
             android:excludeFromRecents="true" />
 
+        <!-- Portrait QR scanner for device linking (ZXing defaults to landscape) -->
+        <activity
+            android:name=".ui.screens.devices.PortraitCaptureActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:stateNotNeeded="true"
+            android:theme="@style/zxing_CaptureTheme"
+            android:windowSoftInputMode="stateAlwaysHidden" />
+
         <!-- Background monitoring foreground service -->
         <service
             android:name=".monitoring.MonitoringForegroundService"
