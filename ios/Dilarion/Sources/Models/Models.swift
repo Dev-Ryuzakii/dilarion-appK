@@ -255,6 +255,44 @@ struct MediaUploadResponse: Codable {
 // MARK: - Empty Body
 struct EmptyBody: Codable {}
 
+// MARK: - Multi-device linking
+struct DeviceRegisterRequest: Codable {
+    let public_key: String
+    let platform: String
+    let device_name: String
+}
+
+struct DeviceRegisterResponse: Codable {
+    let device_uuid: String
+}
+
+struct DeviceLinkApproveRequest: Codable {
+    let nonce: String
+}
+
+struct DeviceKey: Codable {
+    let device_uuid: String
+    let public_key: String
+    let platform: String?
+}
+
+struct UserDevicesResponse: Codable {
+    let devices: [DeviceKey]
+}
+
+struct MyDevice: Codable, Identifiable {
+    let device_uuid: String
+    let platform: String
+    let device_name: String?
+    let created_at: String?
+    let last_seen: String?
+    var id: String { device_uuid }
+}
+
+struct MyDevicesResponse: Codable {
+    let devices: [MyDevice]
+}
+
 // MARK: - Call Signaling
 struct CallInitiateRequest: Codable {
     let recipientUsername: String

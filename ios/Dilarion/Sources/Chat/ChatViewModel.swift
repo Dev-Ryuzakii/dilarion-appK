@@ -131,14 +131,17 @@ class ChatViewModel: ObservableObject {
             
             var decryptedMessages: [Message] = []
             let privKeyB64 = KeychainHelper.shared.read(key: "private_key")
+            let myDeviceUuid = KeychainHelper.shared.read(key: "device_uuid")
             let me = state.currentUsername
-            
+
             for var msg in rawMessages {
                 if state.isUnlocked, let content = msg.content, let encKey = msg.encryptedKey, let iv = msg.iv, let pk = privKeyB64, !pk.isEmpty {
                     do {
                         var actualEncKey = encKey
                         if encKey.hasPrefix("{"), let data = encKey.data(using: .utf8), let map = try? JSONDecoder().decode([String: String].self, from: data) {
-                            actualEncKey = map[me] ?? encKey
+                            // Prefer our device_uuid entry; fall back to the legacy
+                            // username-keyed entry for older messages.
+                            actualEncKey = (myDeviceUuid.flatMap { map[$0] }) ?? map[me] ?? encKey
                         }
                         let plain = try EncryptionManager.shared.decryptMessage(ciphertextB64: content, encryptedKeyB64: actualEncKey, ivB64: iv, privateKeyB64: pk)
                         msg = Message(
@@ -234,25 +237,29 @@ class ChatViewModel: ObservableObject {
             let decoy = decoys.randomElement()!
             let plaintext = text.trimmingCharacters(in: .whitespaces)
             
-            if let gid = groupId {
-                var pubKeys = [String: String]()
-                for member in state.groupMembers {
-                    if member.username != me {
-                        do {
-                            let resp: [String: String] = try await APIClient.shared.get("/users/\(member.username)/public_key")
-                            if let pk = resp["public_key"] { pubKeys[member.username] = pk }
-                        } catch {}
+            // Wrap the AES key once per active device (keyed by device_uuid) of every
+            // recipient and of ourselves, so all of everyone's devices can read it.
+            var recipients = Set<String>()
+            if groupId != nil {
+                recipients = Set(state.groupMembers.map { $0.username })
+                recipients.insert(me)
+            } else {
+                recipients = [partnerUsername, me]
+            }
+            var deviceKeys = [String: String]()
+            for u in recipients {
+                if let resp: UserDevicesResponse = try? await APIClient.shared.get("/users/\(u)/devices") {
+                    for d in resp.devices where !d.public_key.isEmpty {
+                        deviceKeys[d.device_uuid] = d.public_key
                     }
                 }
-                do {
-                    let resp: [String: String] = try await APIClient.shared.get("/users/\(me)/public_key")
-                    if let pk = resp["public_key"] { pubKeys[me] = pk }
-                } catch {}
-                
-                let (ciphertext, encKeysMap, iv) = try EncryptionManager.shared.encryptGroupMessage(plaintext, memberPublicKeys: pubKeys)
-                let encKeysData = try JSONEncoder().encode(encKeysMap)
-                let encKeysJson = String(data: encKeysData, encoding: .utf8)
+            }
+            guard !deviceKeys.isEmpty else { throw URLError(.badServerResponse) }
 
+            let (ciphertext, encKeysMap, iv) = try EncryptionManager.shared.encryptGroupMessage(plaintext, memberPublicKeys: deviceKeys)
+            let encKeysJson = String(data: try JSONEncoder().encode(encKeysMap), encoding: .utf8)
+
+            if let gid = groupId {
                 let req = SendGroupMessageRequest(
                     groupId: gid,
                     message: ciphertext,
@@ -263,15 +270,10 @@ class ChatViewModel: ObservableObject {
                 )
                 try await APIClient.shared.postVoid("/messages/group/send", body: req)
             } else {
-                let resp: [String: String] = try await APIClient.shared.get("/users/\(partnerUsername)/public_key")
-                guard let pubKey = resp["public_key"] else { throw URLError(.badServerResponse) }
-                
-                let (ciphertext, encKey, iv) = try EncryptionManager.shared.encryptMessage(plaintext, recipientPublicKeyB64: pubKey)
-
                 let req = SendDmRequest(
                     username: partnerUsername,
                     message: ciphertext,
-                    encryptedKey: encKey,
+                    encryptedKey: encKeysJson,
                     iv: iv,
                     decoyContent: decoy
                 )

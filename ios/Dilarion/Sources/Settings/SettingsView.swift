@@ -108,6 +108,46 @@ struct SettingsViewFull: View {
                     
                     Spacer().frame(height: 20)
 
+                    // Devices Section
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("DEVICES")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(.textSecondary)
+                            .padding(.leading, 16)
+
+                        NavigationLink {
+                            LinkedDevicesView()
+                        } label: {
+                            HStack(spacing: 16) {
+                                Image(systemName: "laptopcomputer.and.iphone")
+                                    .font(.system(size: 18))
+                                    .foregroundColor(.dilarionRed)
+                                    .frame(width: 24)
+
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Linked devices")
+                                        .font(.system(size: 15, weight: .medium))
+                                        .foregroundColor(.textPrimary)
+                                    Text("Scan a QR to link your desktop; unlink devices")
+                                        .font(.system(size: 12))
+                                        .foregroundColor(.textSecondary)
+                                }
+
+                                Spacer()
+
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundColor(.textSecondary.opacity(0.6))
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 14)
+                            .background(Color.surfaceWhite)
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    Spacer().frame(height: 20)
+
                     // Appearance Section
                     VStack(alignment: .leading, spacing: 6) {
                         Text("APPEARANCE")
