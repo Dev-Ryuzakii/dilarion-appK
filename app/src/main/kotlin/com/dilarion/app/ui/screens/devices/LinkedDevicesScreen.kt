@@ -1,18 +1,29 @@
 package com.dilarion.app.ui.screens.devices
 
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.DesktopWindows
 import androidx.compose.material.icons.filled.Devices
-import androidx.compose.material.icons.filled.QrCodeScanner
+import androidx.compose.material.icons.filled.Laptop
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.PhoneIphone
+import androidx.compose.material.icons.filled.Smartphone
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -60,40 +71,65 @@ fun LinkedDevicesScreen(
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = DilarionRed),
             )
         },
-        floatingActionButton = {
-            ExtendedFloatingActionButton(
-                onClick = { startScan() },
-                containerColor = DilarionRed,
-                contentColor = SurfaceWhite,
-                icon = { Icon(Icons.Default.QrCodeScanner, null) },
-                text = { Text("Link a device") },
-            )
-        },
         snackbarHost = { SnackbarHost(snackbar) },
         containerColor = BackgroundGrey,
     ) { padding ->
-        Column(modifier = Modifier.fillMaxSize().padding(padding)) {
-            Text(
-                "Scan the QR shown on your desktop or another device to link it. Each device gets its own key; you can unlink any of them here.",
-                style = MaterialTheme.typography.bodySmall,
-                color = TextSecondary,
-                modifier = Modifier.padding(16.dp),
-            )
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .verticalScroll(rememberScrollState()),
+        ) {
+            // ── Illustration + link button card ────────────────────────────────
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(SurfaceWhite)
+                    .padding(vertical = 24.dp, horizontal = 16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Icon(Icons.Default.PhoneIphone, null, tint = DilarionRed, modifier = Modifier.size(40.dp))
+                    Text("♥", color = DilarionRed, style = MaterialTheme.typography.titleLarge)
+                    Icon(Icons.Default.Laptop, null, tint = DilarionRed, modifier = Modifier.size(48.dp))
+                }
+                Spacer(Modifier.height(16.dp))
+                Text(
+                    "You can link other devices to this account.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = TextSecondary,
+                    modifier = Modifier.padding(horizontal = 8.dp),
+                )
+                Spacer(Modifier.height(20.dp))
+                Button(
+                    onClick = { startScan() },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(24.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = DilarionRed, contentColor = SurfaceWhite),
+                    contentPadding = PaddingValues(vertical = 14.dp),
+                ) {
+                    Icon(Icons.Default.Add, null, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Link a device", fontWeight = FontWeight.SemiBold)
+                }
+            }
 
+            // ── Device list ────────────────────────────────────────────────────
             if (uiState.loading) {
                 Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(color = DilarionRed)
                 }
-            } else if (uiState.devices.isEmpty()) {
-                Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
-                    Text("No linked devices yet", color = TextSecondary)
-                }
-            } else {
-                LazyColumn(
-                    contentPadding = PaddingValues(horizontal = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    items(uiState.devices, key = { it.deviceUuid }) { device ->
+            } else if (uiState.devices.isNotEmpty()) {
+                Text(
+                    "LINKED DEVICES",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextSecondary,
+                    modifier = Modifier.padding(start = 16.dp, top = 4.dp, bottom = 6.dp),
+                )
+                Column {
+                    uiState.devices.forEach { device ->
                         DeviceRow(
                             name = device.deviceName ?: device.platform.replaceFirstChar { it.uppercase() },
                             platform = device.platform,
@@ -102,9 +138,43 @@ fun LinkedDevicesScreen(
                         )
                     }
                 }
+                Text(
+                    "Tap a device to unlink it.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondary,
+                    modifier = Modifier.padding(16.dp),
+                )
+            }
+
+            Spacer(Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.Top,
+            ) {
+                Icon(Icons.Default.Lock, null, tint = TextSecondary, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "Your personal messages are end-to-end encrypted on all of your linked devices.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondary,
+                )
             }
         }
     }
+}
+
+private fun platformIcon(platform: String): ImageVector = when (platform) {
+    "desktop" -> Icons.Default.DesktopWindows
+    "ios"     -> Icons.Default.PhoneIphone
+    "android" -> Icons.Default.Smartphone
+    else       -> Icons.Default.Devices
+}
+
+private fun prettyLastSeen(iso: String?): String {
+    if (iso.isNullOrBlank()) return "Active"
+    // Show the date/time portion without over-engineering timezone parsing.
+    val t = iso.replace("T", " ").take(16)
+    return "Last active $t"
 }
 
 @Composable
@@ -123,27 +193,25 @@ private fun DeviceRow(name: String, platform: String, lastSeen: String?, onRevok
         )
     }
 
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
-        elevation = CardDefaults.cardElevation(0.dp),
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { confirm = true }
+            .background(SurfaceWhite)
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
+        Box(
+            modifier = Modifier.size(40.dp).clip(CircleShape).background(BackgroundGrey),
+            contentAlignment = Alignment.Center,
         ) {
-            Icon(Icons.Default.Devices, null, tint = DilarionRed, modifier = Modifier.size(22.dp))
-            Spacer(Modifier.width(16.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-                Text(
-                    platform.replaceFirstChar { it.uppercase() } + (lastSeen?.let { " · active" } ?: ""),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = TextSecondary,
-                )
-            }
-            TextButton(onClick = { confirm = true }) { Text("Unlink", color = DilarionRed) }
+            Icon(platformIcon(platform), null, tint = DilarionRed, modifier = Modifier.size(22.dp))
         }
+        Spacer(Modifier.width(16.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+            Text(prettyLastSeen(lastSeen), style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+        }
+        Icon(Icons.Default.ChevronRight, null, tint = TextSecondary, modifier = Modifier.size(20.dp))
     }
 }

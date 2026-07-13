@@ -23,10 +23,22 @@ export default function LinkDeviceScreen({ onLinked, onUsePassword }: Props) {
   const [phase, setPhase] = useState<Phase>('starting');
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
   const [error, setError] = useState<string>('');
+  const [attempt, setAttempt] = useState(0);   // bump to retry
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     let cancelled = false;
+    setPhase('starting');
+    setQrDataUrl('');
+    setError('');
+
+    // Never let the screen hang on a slow/unreachable server.
+    const startTimeout = setTimeout(() => {
+      if (!cancelled) {
+        setError('Could not reach the server. Check your connection and try again.');
+        setPhase('error');
+      }
+    }, 15000);
 
     (async () => {
       try {
@@ -42,6 +54,7 @@ export default function LinkDeviceScreen({ onLinked, onUsePassword }: Props) {
           color: { dark: '#000000', light: '#ffffff' },
         });
         if (cancelled) return;
+        clearTimeout(startTimeout);
         setQrDataUrl(url);
         setPhase('waiting');
 
@@ -68,7 +81,8 @@ export default function LinkDeviceScreen({ onLinked, onUsePassword }: Props) {
         }, 2000);
       } catch (e: any) {
         if (!cancelled) {
-          setError(e?.message || 'Could not start linking');
+          clearTimeout(startTimeout);
+          setError(e?.message || 'Could not generate a link code. Is the server updated?');
           setPhase('error');
         }
       }
@@ -76,9 +90,12 @@ export default function LinkDeviceScreen({ onLinked, onUsePassword }: Props) {
 
     return () => {
       cancelled = true;
+      clearTimeout(startTimeout);
       if (pollRef.current) clearInterval(pollRef.current);
     };
-  }, [onLinked]);
+  }, [onLinked, attempt]);
+
+  const showSpinner = phase === 'starting' || phase === 'approved';
 
   return (
     <div style={s.root}>
@@ -91,24 +108,51 @@ export default function LinkDeviceScreen({ onLinked, onUsePassword }: Props) {
         <div style={s.qrBox}>
           {phase === 'waiting' && qrDataUrl ? (
             <img src={qrDataUrl} alt="Link QR code" style={{ width: 260, height: 260, borderRadius: 8 }} />
-          ) : phase === 'starting' ? (
-            <span style={s.muted}>Generating code…</span>
-          ) : phase === 'approved' ? (
-            <span style={{ ...s.muted, color: '#25d366' }}>Linked! Opening…</span>
-          ) : phase === 'expired' ? (
-            <span style={{ ...s.muted, color: '#f59e0b' }}>Code expired</span>
           ) : (
-            <span style={{ ...s.muted, color: '#ef4444' }}>{error}</span>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14 }}>
+              {showSpinner && <Spinner />}
+              <span style={{
+                fontSize: '0.9rem',
+                textAlign: 'center',
+                padding: '0 16px',
+                color: phase === 'error' ? '#ef4444' : phase === 'expired' ? '#f59e0b' : phase === 'approved' ? '#25d366' : '#6b7280',
+              }}>
+                {phase === 'starting' ? 'Generating code…'
+                  : phase === 'approved' ? 'Linked! Opening…'
+                  : phase === 'expired' ? 'Code expired'
+                  : error}
+              </span>
+            </div>
           )}
         </div>
 
-        {phase === 'waiting' && <p style={s.hint}>Waiting for approval from your phone…</p>}
+        {phase === 'waiting' && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Spinner size={14} />
+            <p style={s.hint}>Waiting for approval from your phone…</p>
+          </div>
+        )}
         {(phase === 'expired' || phase === 'error') && (
-          <button style={s.btn} onClick={() => window.location.reload()}>Try again</button>
+          <button style={s.btn} onClick={() => setAttempt(a => a + 1)}>Try again</button>
         )}
         <button style={s.linkBtn} onClick={onUsePassword}>Sign in with username instead</button>
       </div>
     </div>
+  );
+}
+
+function Spinner({ size = 34 }: { size?: number }) {
+  return (
+    <div
+      style={{
+        width: size,
+        height: size,
+        border: `${Math.max(2, size / 12)}px solid rgba(0,0,0,0.12)`,
+        borderTopColor: 'var(--accent, #c0392b)',
+        borderRadius: '50%',
+        animation: 'spin 0.8s linear infinite',
+      }}
+    />
   );
 }
 

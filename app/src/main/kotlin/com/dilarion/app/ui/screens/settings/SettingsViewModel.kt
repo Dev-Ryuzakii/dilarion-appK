@@ -86,10 +86,12 @@ class SettingsViewModel @Inject constructor(
     fun logout(onDone: () -> Unit) {
         viewModelScope.launch {
             val token = sessionManager.sessionToken.first()
+            // Tell the server in the background, but never block logout on it — a slow
+            // or unreachable network must not leave the user stuck signed in.
             if (token != null) {
-                runCatching { apiService.logout("Bearer $token") }
+                launch { runCatching { apiService.logout("Bearer $token") } }
             }
-            presenceService.disconnect()
+            runCatching { presenceService.disconnect() }
             sessionManager.clearSession()
             onDone()
         }
