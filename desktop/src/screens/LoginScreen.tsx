@@ -3,10 +3,10 @@ import { login } from '../services/api';
 
 interface Props {
   onLogin: (token: string, username: string) => void;
-  onLinkDevice?: () => void;
+  onBack?: () => void;
 }
 
-export default function LoginScreen({ onLogin, onLinkDevice }: Props) {
+export default function LoginScreen({ onLogin, onBack }: Props) {
   const [username, setUsername]   = useState('');
   const [userToken, setUserToken] = useState('');
   const [showToken, setShowToken] = useState(false);
@@ -82,11 +82,11 @@ export default function LoginScreen({ onLogin, onLinkDevice }: Props) {
           </button>
         </form>
 
-        {onLinkDevice && (
+        {onBack && (
           <>
             <div style={s.divider}><span style={s.dividerText}>or</span></div>
-            <button type="button" style={s.linkBtn} onClick={onLinkDevice}>
-              Link with phone (scan QR)
+            <button type="button" style={s.linkBtn} onClick={onBack}>
+              Link with phone (scan QR) instead
             </button>
           </>
         )}

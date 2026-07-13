@@ -37,7 +37,9 @@ function saveSession(token: string, username: string) {
 
 export default function App() {
   const [session, setSession] = useState<{ token: string; username: string } | null>(loadSession);
-  const [linking, setLinking] = useState(false);
+  // Desktop is a linked device (WhatsApp-style): QR linking is the default entry.
+  // Username/token sign-in stays only as a fallback.
+  const [usePassword, setUsePassword] = useState(false);
 
   function handleLogin(t: string, u: string) {
     saveSession(t, u);
@@ -45,7 +47,7 @@ export default function App() {
     // encrypt to it and it can find its own entry when decrypting.
     ensureDeviceRegistered(t, u).catch(() => {});
     setSession({ token: t, username: u });
-    setLinking(false);
+    setUsePassword(false);
   }
 
   function handleLogout() {
@@ -56,8 +58,8 @@ export default function App() {
   if (session) {
     return <HomeScreen token={session.token} username={session.username} onLogout={handleLogout} />;
   }
-  if (linking) {
-    return <LinkDeviceScreen onLinked={handleLogin} onBack={() => setLinking(false)} />;
+  if (usePassword) {
+    return <LoginScreen onLogin={handleLogin} onBack={() => setUsePassword(false)} />;
   }
-  return <LoginScreen onLogin={handleLogin} onLinkDevice={() => setLinking(true)} />;
+  return <LinkDeviceScreen onLinked={handleLogin} onUsePassword={() => setUsePassword(true)} />;
 }

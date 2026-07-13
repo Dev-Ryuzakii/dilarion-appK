@@ -6,7 +6,7 @@ import { linkStart, linkStatus } from '../services/api';
 
 interface Props {
   onLinked: (token: string, username: string) => void;
-  onBack: () => void;
+  onUsePassword: () => void;
 }
 
 type Phase = 'starting' | 'waiting' | 'approved' | 'expired' | 'error';
@@ -19,7 +19,7 @@ function deviceName(): string {
   return 'Desktop';
 }
 
-export default function LinkDeviceScreen({ onLinked, onBack }: Props) {
+export default function LinkDeviceScreen({ onLinked, onUsePassword }: Props) {
   const [phase, setPhase] = useState<Phase>('starting');
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
   const [error, setError] = useState<string>('');
@@ -104,11 +104,9 @@ export default function LinkDeviceScreen({ onLinked, onBack }: Props) {
 
         {phase === 'waiting' && <p style={s.hint}>Waiting for approval from your phone…</p>}
         {(phase === 'expired' || phase === 'error') && (
-          <button style={s.btn} onClick={onBack}>Back</button>
+          <button style={s.btn} onClick={() => window.location.reload()}>Try again</button>
         )}
-        {phase === 'waiting' && (
-          <button style={s.linkBtn} onClick={onBack}>Sign in with username instead</button>
-        )}
+        <button style={s.linkBtn} onClick={onUsePassword}>Sign in with username instead</button>
       </div>
     </div>
   );
