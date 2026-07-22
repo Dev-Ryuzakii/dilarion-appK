@@ -171,10 +171,28 @@ data class WsMessage(
 
 // ─── Calls ────────────────────────────────────────────────────────────────────
 
+data class IceServerConfig(
+    val urls: List<String> = emptyList(),
+    val username: String? = null,
+    val credential: String? = null,
+)
+
+data class IceServersResponse(
+    @SerializedName("ice_servers") val iceServers: List<IceServerConfig> = emptyList(),
+    val ttl: Int = 0,
+)
+
 data class CallInitiateRequest(
     @SerializedName("recipient_username") val recipientUsername: String,
     @SerializedName("call_type") val callType: String,
     @SerializedName("offer_sdp") val offerSdp: String? = null,
+)
+
+data class CallStatusResponse(
+    @SerializedName("call_id") val callId: Int = 0,
+    val status: String = "",
+    @SerializedName("call_type") val callType: String? = null,
+    @SerializedName("answer_sdp") val answerSdp: String? = null,
 )
 
 data class CallActionRequest(

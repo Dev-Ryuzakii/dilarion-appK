@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { presenceService } from '../services/presence';
-import { initiateCall, performCallAction, sendCallIceCandidate, createConference, conferenceInvite, conferenceSignal, conferenceLeave, getUsers, Contact } from '../services/api';
+import { initiateCall, performCallAction, sendCallIceCandidate, setCallMediaState, createConference, conferenceInvite, conferenceSignal, conferenceLeave, getUsers, getIceServers, Contact } from '../services/api';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -19,9 +19,13 @@ interface Props {
   partner: string;
   callType: CallType;
   isIncoming: boolean;
+  /** Set when joining a conference we were invited to — no dialling, just join. */
+  conferenceIdProp?: number;
+  conferenceParticipants?: string[];
   callId?: number;       // set for incoming calls
   offerSdp?: string;     // set for incoming calls
-  masterToken?: string;  // required by backend to accept calls
+  /** No longer taken from stored state: answering prompts for it every time. */
+  masterToken?: string;
   onEnd: () => void;
   minimized?: boolean;
   onMinimize?: () => void;
@@ -41,19 +45,24 @@ function waitForIceGathering(pc: RTCPeerConnection, timeoutMs = 3500): Promise<v
   });
 }
 
-// ── ICE servers (STUN) ────────────────────────────────────────────────────────
+// ── ICE servers ───────────────────────────────────────────────────────────────
+//
+// Preferred source is GET /webrtc/ice-servers, which hands out TURN credentials
+// that expire. FALLBACK_ICE_SERVERS below is only used when that call fails —
+// its static credential is public (it ships in released builds), so treat it as
+// an availability net, not as security.
 
-const ICE_SERVERS: RTCIceServer[] = [
+const FALLBACK_ICE_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
   { urls: 'stun:stun2.l.google.com:19302' },
   { urls: 'stun:stun3.l.google.com:19302' },
-  // Own VPS TURN — by hostname (add DNS A record: turn.dilarion.eibstratoc.com → 41.242.54.66, grey cloud)
-  { urls: 'turn:turn.dilarion.eibstratoc.com:3478',              username: 'dilarion', credential: 'dilarion2026' },
-  { urls: 'turn:turn.dilarion.eibstratoc.com:3478?transport=tcp', username: 'dilarion', credential: 'dilarion2026' },
+  // Own VPS TURN — by hostname (add DNS A record: turndilarion.eibstratoc.com → 41.242.60.238, grey cloud)
+  { urls: 'turn:turndilarion.eibstratoc.com:3478',              username: 'dilarion', credential: 'dilarion2026' },
+  { urls: 'turn:turndilarion.eibstratoc.com:3478?transport=tcp', username: 'dilarion', credential: 'dilarion2026' },
   // Own VPS TURN — raw IP fallback (works before DNS is set)
-  { urls: 'turn:41.242.54.66:3478',              username: 'dilarion', credential: 'dilarion2026' },
-  { urls: 'turn:41.242.54.66:3478?transport=tcp', username: 'dilarion', credential: 'dilarion2026' },
+  { urls: 'turn:41.242.60.238:3478',              username: 'dilarion', credential: 'dilarion2026' },
+  { urls: 'turn:41.242.60.238:3478?transport=tcp', username: 'dilarion', credential: 'dilarion2026' },
   // Public fallbacks
   { urls: 'turn:a.relay.metered.ca:80',               username: 'openrelayproject', credential: 'openrelayproject' },
   { urls: 'turn:a.relay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
@@ -61,7 +70,87 @@ const ICE_SERVERS: RTCIceServer[] = [
   { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
 ];
 
+// Last ICE config fetched from the backend, reused for the lifetime of the process.
+let activeIceServers: RTCIceServer[] = FALLBACK_ICE_SERVERS;
+
+async function ensureIceServers(token: string): Promise<void> {
+  const fetched = await getIceServers(token);
+  // Append, never replace: a backend that only knows about our own TURN would
+  // otherwise strip the public relays below, leaving a call between two mobile
+  // networks with no relay at all — signalling succeeds and no audio flows.
+  if (fetched) activeIceServers = [...fetched, ...FALLBACK_ICE_SERVERS];
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+/**
+ * Answering asks for the master token every time, deliberately: it proves the
+ * owner is the one picking up, so it is never stored or pre-filled.
+ */
+function MasterTokenPrompt({ rejected, onCancel, onConfirm }: {
+  rejected: boolean;
+  onCancel: () => void;
+  onConfirm: (token: string) => void;
+}) {
+  const [value, setValue] = useState('');
+  return (
+    <div style={mt.backdrop} onClick={onCancel}>
+      <div style={mt.card} onClick={e => e.stopPropagation()}>
+        <h3 style={mt.title}>Enter master token</h3>
+        <p style={{ ...mt.hint, color: rejected ? '#ef4444' : '#9ca3af' }}>
+          {rejected
+            ? 'That token was rejected. The call is still ringing — try again.'
+            : 'Required to answer an encrypted call.'}
+        </p>
+        <input
+          style={mt.input}
+          type="password"
+          autoFocus
+          value={value}
+          onChange={e => setValue(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && value.trim()) onConfirm(value.trim()); }}
+          placeholder="Master token"
+        />
+        <div style={mt.row}>
+          <button style={mt.ghost} onClick={onCancel}>Cancel</button>
+          <button
+            style={{ ...mt.primary, opacity: value.trim() ? 1 : 0.5 }}
+            disabled={!value.trim()}
+            onClick={() => onConfirm(value.trim())}
+          >
+            Answer
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const mt: Record<string, React.CSSProperties> = {
+  backdrop: {
+    position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 1000,
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+  },
+  card: {
+    background: '#141414', border: '1px solid #2a2a2a', borderRadius: 16,
+    padding: '1.5rem', width: 320, display: 'flex', flexDirection: 'column', gap: 12,
+  },
+  title: { margin: 0, color: '#fff', fontSize: '1.05rem' },
+  hint: { margin: 0, fontSize: '0.8rem', lineHeight: 1.45 },
+  input: {
+    background: '#0c0c0c', border: '1px solid #2a2a2a', borderRadius: 10,
+    padding: '0.7rem 0.9rem', color: '#fff', fontSize: '0.9rem', outline: 'none',
+  },
+  row: { display: 'flex', gap: 8, justifyContent: 'flex-end' },
+  ghost: {
+    background: 'transparent', color: '#9ca3af', border: 'none',
+    padding: '0.6rem 0.9rem', cursor: 'pointer', fontSize: '0.85rem',
+  },
+  primary: {
+    background: '#25d366', color: '#062', border: 'none', borderRadius: 10,
+    padding: '0.6rem 1.1rem', fontWeight: 700, cursor: 'pointer', fontSize: '0.85rem',
+  },
+};
 
 function fmtDur(s: number) {
   const m = Math.floor(s / 60);
@@ -71,12 +160,17 @@ function fmtDur(s: number) {
 
 // ── CallModal ─────────────────────────────────────────────────────────────────
 
-export default function CallModal({ token, partner, callType, isIncoming, callId: incomingCallId, offerSdp: incomingOfferSdp, masterToken, onEnd, minimized = false, onMinimize, onMaximize }: Props) {
+export default function CallModal({ token, partner, callType, isIncoming, callId: incomingCallId, offerSdp: incomingOfferSdp, conferenceIdProp, conferenceParticipants, onEnd, minimized = false, onMinimize, onMaximize }: Props) {
   // calling = outgoing, waiting for callee to receive; ringing = callee's device is ringing; connecting = SDP negotiating
   const [state, setState] = useState<'calling' | 'ringing' | 'connecting' | 'connected' | 'ended'>(
     isIncoming ? 'ringing' : 'calling',
   );
   const [muted, setMuted] = useState(false);
+  // Mic state of the other participants. WebRTC carries no signal for this —
+  // a muted track is silence, indistinguishable from someone not talking — so
+  // each side publishes its own state.
+  const [peerMuted, setPeerMuted] = useState(false);
+  const [mutedPeers, setMutedPeers] = useState<Set<string>>(new Set());
   const [cameraOff, setCameraOff] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [duration, setDuration] = useState(0);
@@ -101,6 +195,10 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const remoteAudioRef = useRef<HTMLAudioElement>(null);
+  // The remote MediaStream, kept so it can be re-attached whenever the audio/
+  // video element remounts (state change, minimize, video<->audio). Without
+  // this the element mounts fresh with no srcObject and audio goes silent.
+  const remoteStreamRef = useRef<MediaStream | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const callIdRef = useRef<number | null>(incomingCallId ?? null);
   // Buffer outgoing ICE candidates before callId is set
@@ -108,11 +206,15 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
   // Buffer incoming ICE candidates before remote description is set
   const remoteIceBufRef = useRef<RTCIceCandidateInit[]>([]);
   const remoteDescSetRef = useRef(false);
+  // Answer kept so a rejected master token can be retried without rebuilding it.
+  const cachedAnswerRef = useRef<string | null>(null);
+  const [showTokenPrompt, setShowTokenPrompt] = useState(false);
+  const [tokenRejected, setTokenRejected] = useState(false);
 
   // ── WebRTC setup ─────────────────────────────────────────────────────────────
 
   const createPc = useCallback(() => {
-    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS, iceCandidatePoolSize: 10 });
+    const pc = new RTCPeerConnection({ iceServers: activeIceServers, iceCandidatePoolSize: 10 });
 
     pc.onicecandidate = ({ candidate }) => {
       if (!candidate) return;
@@ -127,6 +229,7 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
     pc.ontrack = (e) => {
       const stream = e.streams[0];
       if (!stream) return;
+      remoteStreamRef.current = stream;
       if (remoteVideoRef.current) remoteVideoRef.current.srcObject = stream;
       // Dedicated audio element ensures audio plays even when video element is hidden
       if (remoteAudioRef.current) {
@@ -190,6 +293,7 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
 
   // Caller: get media → create offer → wait for ICE gather → POST /calls/initiate
   const startCall = useCallback(async () => {
+    await ensureIceServers(token);
     const stream = await startLocalMedia();
     if (!stream) return;
     const pc = createPc();
@@ -212,33 +316,68 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
   }, [startLocalMedia, createPc, token, partner, callType]);
 
   // Callee: accept → get media → handle offer SDP → wait for ICE gather → POST /calls/action accept
-  const acceptCall = useCallback(async () => {
+  const acceptCall = useCallback(async (enteredToken: string) => {
     setState('connecting');
-    const stream = await startLocalMedia();
-    if (!stream) return;
-    const pc = createPc();
-    stream.getTracks().forEach(t => pc.addTrack(t, stream));
+    setTokenRejected(false);
 
-    let answerSdp: string | undefined;
-    if (incomingOfferSdp) {
-      await pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: incomingOfferSdp }));
-      remoteDescSetRef.current = true;
-      // Flush ICE candidates that arrived before we accepted
-      const queued = remoteIceBufRef.current.splice(0);
-      for (const c of queued) {
-        try { await pc.addIceCandidate(new RTCIceCandidate(c)); } catch {}
+    // Build the answer once. A rejected master token leaves the call ringing for
+    // a retry, and setRemoteDescription cannot run twice on the same connection.
+    let answerSdp = cachedAnswerRef.current ?? undefined;
+    if (!answerSdp) {
+      await ensureIceServers(token);
+      const stream = await startLocalMedia();
+      if (!stream) return;
+      const pc = createPc();
+      stream.getTracks().forEach(t => pc.addTrack(t, stream));
+
+      if (incomingOfferSdp) {
+        await pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: incomingOfferSdp }));
+        remoteDescSetRef.current = true;
+        // Flush ICE candidates that arrived before we accepted
+        const queued = remoteIceBufRef.current.splice(0);
+        for (const c of queued) {
+          try { await pc.addIceCandidate(new RTCIceCandidate(c)); } catch {}
+        }
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        // Wait for TURN relay candidates to be gathered before sending answer
+        await waitForIceGathering(pc);
+        answerSdp = pc.localDescription!.sdp;
+        cachedAnswerRef.current = answerSdp;
       }
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-      // Wait for TURN relay candidates to be gathered before sending answer
-      await waitForIceGathering(pc);
-      answerSdp = pc.localDescription!.sdp;
     }
 
-    if (callIdRef.current) {
-      await performCallAction(token, callIdRef.current, 'accept', answerSdp, masterToken).catch(() => {});
+    if (!callIdRef.current) return;
+    try {
+      await performCallAction(token, callIdRef.current, 'accept', answerSdp, enteredToken);
+    } catch (err: any) {
+      // Swallowing this left us "connected" while the caller kept ringing with
+      // no audio. A wrong token is retryable; anything else ends the call.
+      if (err?.status === 401) {
+        setTokenRejected(true);
+        setShowTokenPrompt(true);
+        setState('ringing');
+        return;
+      }
+      setError(err?.message || 'Could not accept the call');
+      setState('ended');
     }
-  }, [startLocalMedia, createPc, token, incomingOfferSdp, masterToken]);
+  }, [startLocalMedia, createPc, token, incomingOfferSdp]);
+
+  // Re-attach the remote stream after any render that may have remounted the
+  // audio/video elements — the fix for desktop calls going silent on state or
+  // minimize changes.
+  useEffect(() => {
+    const stream = remoteStreamRef.current;
+    if (!stream) return;
+    if (remoteAudioRef.current && remoteAudioRef.current.srcObject !== stream) {
+      remoteAudioRef.current.srcObject = stream;
+      remoteAudioRef.current.play().catch(() => {});
+    }
+    if (remoteVideoRef.current && remoteVideoRef.current.srcObject !== stream) {
+      remoteVideoRef.current.srcObject = stream;
+    }
+  });
 
   // Handle backend WebSocket signaling events
   useEffect(() => {
@@ -286,6 +425,20 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
         return;
       }
 
+      if (msg.type === 'call_media_state') {
+        if (Number(data.call_id) === callIdRef.current) {
+          setPeerMuted(Boolean(data.muted));
+          const who = data.username as string | undefined;
+          if (who) {
+            setMutedPeers(prev => {
+              const n = new Set(prev);
+              if (data.muted) n.add(who); else n.delete(who);
+              return n;
+            });
+          }
+        }
+      }
+
       // Legacy p2p fallback: call_end sent directly by other desktop client
       if (msg.type === 'call_end' && (msg.sender === partner || msg.from === partner)) {
         handleEnd();
@@ -293,14 +446,11 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
 
       // ── Conference signaling ────────────────────────────────────────────────
       if (msg.type === 'conference_invite') {
+        // Only note it. Joining happens after the invitee answers and enters
+        // their master token (HomeScreen); connecting here would attach the
+        // microphone to a call nobody agreed to.
         const confId: number = data.conference_id;
-        const existing: string[] = data.existing_participants || [];
-        setConferenceId(confId);
-        setConfParticipants(existing);
-        // Connect to each existing participant
-        for (const peer of existing) {
-          createConferencePeer(peer, confId);
-        }
+        if (conferenceIdProp === confId) setConfParticipants(data.existing_participants || []);
       }
 
       if (msg.type === 'conference_peer_connect') {
@@ -322,6 +472,14 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
         const signalType: string = data.signal_type;
         const signalData: any = data.data;
         const pc = confPeersRef.current.get(fromUser) || createConferencePeer(fromUser, confId);
+        if (signalType === 'media_state') {
+          setMutedPeers(prev => {
+            const n = new Set(prev);
+            if (signalData?.muted) n.add(fromUser); else n.delete(fromUser);
+            return n;
+          });
+          return;
+        }
         if (signalType === 'offer') {
           await pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: signalData.sdp }));
           const answer = await pc.createAnswer();
@@ -408,7 +566,7 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
 
   const createConferencePeer = useCallback((peerUsername: string, confId: number) => {
     if (confPeersRef.current.has(peerUsername)) return confPeersRef.current.get(peerUsername)!;
-    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+    const pc = new RTCPeerConnection({ iceServers: activeIceServers });
 
     pc.onicecandidate = ({ candidate }) => {
       if (!candidate) return;
@@ -472,6 +630,7 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
 
   function stopAllMedia() {
     if (localVideoRef.current) localVideoRef.current.srcObject = null;
+    remoteStreamRef.current = null;
     if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
     if (remoteAudioRef.current) { remoteAudioRef.current.pause(); remoteAudioRef.current.srcObject = null; }
     localStreamRef.current?.getTracks().forEach(t => t.stop());
@@ -490,7 +649,20 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
 
   // Start outgoing call on mount
   useEffect(() => {
-    if (!isIncoming) {
+    if (conferenceIdProp) {
+      // Joining an existing conference: there is nobody to dial. Open the mic and
+      // wait — the participants already on the call send us their offers.
+      (async () => {
+        setConferenceId(conferenceIdProp);
+        setConfParticipants(conferenceParticipants ?? []);
+        await ensureIceServers(token);
+        await startLocalMedia();
+        setState('connected');
+        if (!timerRef.current) {
+          timerRef.current = setInterval(() => setDuration(d => d + 1), 1000);
+        }
+      })();
+    } else if (!isIncoming) {
       startCall();
     }
     return () => {
@@ -513,8 +685,16 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
   }
 
   function toggleMute() {
-    localStreamRef.current?.getAudioTracks().forEach(t => { t.enabled = muted; });
-    setMuted(m => !m);
+    const next = !muted;
+    localStreamRef.current?.getAudioTracks().forEach(t => { t.enabled = !next; });
+    setMuted(next);
+    if (callIdRef.current) setCallMediaState(token, callIdRef.current, next);
+    const confId = conferenceId;
+    if (confId) {
+      confParticipants.forEach(peer => {
+        conferenceSignal(token, confId, peer, 'media_state', { muted: next }).catch(() => {});
+      });
+    }
   }
 
   function toggleCamera() {
@@ -635,7 +815,11 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
               {state === 'calling'    && 'Calling…'}
               {state === 'ringing'    && (isIncoming ? 'Incoming call…' : 'Ringing…')}
               {state === 'connecting' && 'Connecting…'}
-              {state === 'connected'  && (reconnecting ? 'Reconnecting…' : fmtDur(duration))}
+              {state === 'connected'  && (
+                reconnecting ? 'Reconnecting…'
+                : peerMuted ? `${partner} is muted · ${fmtDur(duration)}`
+                : fmtDur(duration)
+              )}
               {state === 'ended'      && 'Call ended'}
             </span>
             {state === 'connected' && !reconnecting && <SignalBars quality={netQuality} />}
@@ -647,7 +831,14 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
         {state === 'ringing' && isIncoming && (
           <div style={cs.controls}>
             <ControlBtn icon="decline" color="#ef4444" label="Decline" onClick={handleEnd} />
-            <ControlBtn icon="accept" color="#25d366" label="Accept" onClick={acceptCall} />
+            <ControlBtn icon="accept" color="#25d366" label="Accept" onClick={() => setShowTokenPrompt(true)} />
+            {showTokenPrompt && (
+              <MasterTokenPrompt
+                rejected={tokenRejected}
+                onCancel={() => { setShowTokenPrompt(false); setTokenRejected(false); }}
+                onConfirm={(t) => { setShowTokenPrompt(false); acceptCall(t); }}
+              />
+            )}
           </div>
         )}
 
@@ -661,12 +852,16 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
         {/* Conference participants list */}
         {confParticipants.length > 0 && (
           <div style={{ display: 'flex', gap: 6, padding: '8px 16px', flexWrap: 'wrap' }}>
-            {confParticipants.map(p => (
-              <div key={p} style={{ background: '#1f2937', borderRadius: 20, padding: '4px 10px', fontSize: '0.75rem', color: '#d1d5db', display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#22c55e', display: 'inline-block' }} />
-                {p}
-              </div>
-            ))}
+            {confParticipants.map(p => {
+              const isMuted = mutedPeers.has(p);
+              return (
+                <div key={p} style={{ background: '#1f2937', borderRadius: 20, padding: '4px 10px', fontSize: '0.75rem', color: isMuted ? '#9ca3af' : '#d1d5db', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: isMuted ? '#6b7280' : '#22c55e', display: 'inline-block' }} />
+                  {p}
+                  {isMuted && <span title="muted" style={{ fontSize: '0.7rem' }}>🔇</span>}
+                </div>
+              );
+            })}
           </div>
         )}
 

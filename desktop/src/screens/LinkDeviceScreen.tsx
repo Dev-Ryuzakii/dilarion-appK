@@ -6,7 +6,7 @@ import { linkStart, linkStatus } from '../services/api';
 
 interface Props {
   onLinked: (token: string, username: string) => void;
-  onUsePassword: () => void;
+  onUsePassword?: () => void;   // password fallback currently disabled
 }
 
 type Phase = 'starting' | 'waiting' | 'approved' | 'expired' | 'error';
@@ -135,7 +135,9 @@ export default function LinkDeviceScreen({ onLinked, onUsePassword }: Props) {
         {(phase === 'expired' || phase === 'error') && (
           <button style={s.btn} onClick={() => setAttempt(a => a + 1)}>Try again</button>
         )}
-        <button style={s.linkBtn} onClick={onUsePassword}>Sign in with username instead</button>
+        {onUsePassword && (
+          <button style={s.linkBtn} onClick={onUsePassword}>Sign in with username instead</button>
+        )}
       </div>
     </div>
   );

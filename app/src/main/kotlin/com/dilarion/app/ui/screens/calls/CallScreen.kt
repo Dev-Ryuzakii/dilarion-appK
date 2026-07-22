@@ -42,9 +42,9 @@ import org.webrtc.EglBase
 import org.webrtc.SurfaceViewRenderer
 import org.webrtc.VideoTrack
 
-private val CallBackground = Color(0xFF1A1A2E)
-private val EndCallRed = Color(0xFFE53935)
-private val AcceptGreen = Color(0xFF43A047)
+internal val CallBackground = Color(0xFF1A1A2E)
+internal val EndCallRed = Color(0xFFE53935)
+internal val AcceptGreen = Color(0xFF43A047)
 private val ControlButton = Color(0xFF2C2C54)
 
 // ── Outgoing call screen (navigated from chat) ──────────────────────────────
@@ -129,10 +129,20 @@ fun IncomingCallOverlay(
         }
     }
 
+    // A rejected token reopens the prompt instead of dropping the call.
+    LaunchedEffect(uiState.masterTokenRejected) {
+        if (uiState.masterTokenRejected) showMasterTokenDialog = true
+    }
+
     if (showMasterTokenDialog) {
         MasterTokenAcceptDialog(
-            onDismiss = { showMasterTokenDialog = false },
-            onConfirm = { token -> showMasterTokenDialog = false; viewModel.acceptCall(token) },
+            rejected = uiState.masterTokenRejected,
+            onDismiss = { showMasterTokenDialog = false; viewModel.clearMasterTokenRejected() },
+            onConfirm = { token ->
+                showMasterTokenDialog = false
+                viewModel.clearMasterTokenRejected()
+                viewModel.acceptCall(token)
+            },
         )
     }
 
@@ -180,7 +190,11 @@ fun IncomingCallOverlay(
                             horizontalArrangement = Arrangement.SpaceEvenly,
                         ) {
                             CallActionButton(Icons.Default.CallEnd, "Decline", EndCallRed) { viewModel.declineCall() }
-                            CallActionButton(Icons.Default.Call, "Accept", AcceptGreen) { showMasterTokenDialog = true }
+                            CallActionButton(Icons.Default.Call, "Accept", AcceptGreen) {
+                                // Always ask: the token is what proves the owner is
+                                // the one answering, so it is never stored or reused.
+                                showMasterTokenDialog = true
+                            }
                         }
                     }
                     CallState.CONNECTED -> {
@@ -238,6 +252,12 @@ private fun CallContent(
         else -> {
             // Voice call or no camera yet
             Box(modifier = Modifier.fillMaxSize().background(CallBackground)) {
+                if (uiState.state == CallState.CONNECTED) {
+                    TopRightCallActions(
+                        uiState, viewModel, showFlip = false, onMinimize = onMinimize,
+                        modifier = Modifier.align(Alignment.TopEnd).padding(top = 48.dp, end = 16.dp),
+                    )
+                }
                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxSize()) {
                     Spacer(Modifier.weight(1f))
                     val typeIcon = if (uiState.callType == CallType.VIDEO) Icons.Default.Videocam else Icons.Default.Call
@@ -262,10 +282,13 @@ private fun CallContent(
                         }
                     } else {
                         Text(
-                            when (uiState.state) {
-                                CallState.CALLING -> "Calling..."
-                                CallState.RINGING -> "Ringing..."
-                                CallState.ENDED   -> "Call ended"
+                            when {
+                                // WebRTC gives no mute signal, so this comes from
+                                // the other device telling us.
+                                uiState.peerMuted -> "${uiState.peerUsername} is muted"
+                                uiState.state == CallState.CALLING -> "Calling..."
+                                uiState.state == CallState.RINGING -> "Ringing..."
+                                uiState.state == CallState.ENDED   -> "Call ended"
                                 else -> ""
                             },
                             color = SurfaceWhite.copy(alpha = 0.7f), fontSize = 16.sp,
@@ -331,9 +354,15 @@ private fun VideoCallContent(
             }
         }
 
+        // Top-right vertical actions (below the self-view thumbnail)
+        TopRightCallActions(
+            uiState, viewModel, showFlip = true, onMinimize = onMinimize,
+            modifier = Modifier.align(Alignment.TopEnd).padding(top = 200.dp, end = 16.dp),
+        )
+
         // Controls bottom
         Box(modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 48.dp)) {
-            CallControls(uiState, viewModel, showFlip = true, onMinimize = onMinimize)
+            CallControls(uiState, viewModel, showFlip = false, onMinimize = null)
         }
     }
 }
@@ -413,15 +442,30 @@ private fun CallControls(uiState: CallUiState, viewModel: CallViewModel, showFli
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(4.dp),
                         ) {
-                            Box(Modifier.size(6.dp).clip(CircleShape).background(AcceptGreen))
-                            Text(p, color = SurfaceWhite, fontSize = 12.sp)
+                            val isMuted = p in conferenceState.mutedParticipants
+                            Box(
+                                Modifier.size(6.dp).clip(CircleShape)
+                                    .background(if (isMuted) SurfaceWhite.copy(alpha = 0.35f) else AcceptGreen)
+                            )
+                            Text(
+                                p,
+                                color = if (isMuted) SurfaceWhite.copy(alpha = 0.55f) else SurfaceWhite,
+                                fontSize = 12.sp,
+                            )
+                            if (isMuted) {
+                                Icon(
+                                    Icons.Default.MicOff, "muted",
+                                    tint = SurfaceWhite.copy(alpha = 0.55f),
+                                    modifier = Modifier.size(11.dp),
+                                )
+                            }
                         }
                     }
                 }
             }
         }
 
-        // Main control row
+        // Main control row — mute, speaker, end (WhatsApp-style, bottom of screen)
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
             horizontalArrangement = Arrangement.SpaceEvenly,
@@ -432,21 +476,43 @@ private fun CallControls(uiState: CallUiState, viewModel: CallViewModel, showFli
                 if (uiState.isMuted) DilarionRed else SurfaceWhite,
                 viewModel::toggleMute,
             )
-            if (showFlip) {
-                SmallControl(Icons.Default.FlipCameraAndroid, SurfaceWhite, viewModel::flipCamera)
-            }
-            // Add to call button
-            SmallControl(Icons.Default.PersonAdd, SurfaceWhite) { viewModel.fetchUsers(); showPickerDialog = true }
             CallActionButton(Icons.Default.CallEnd, "End", EndCallRed) { viewModel.endCall() }
             SmallControl(
                 if (uiState.isSpeaker) Icons.Default.VolumeUp else Icons.Default.VolumeOff,
                 if (uiState.isSpeaker) DilarionRed else SurfaceWhite,
                 viewModel::toggleSpeaker,
             )
-            // Minimize button — only when there's a minimizer callback
-            if (onMinimize != null) {
-                SmallControl(Icons.Default.CloseFullscreen, SurfaceWhite) { onMinimize(uiState.callId) }
-            }
+        }
+    }
+}
+
+/**
+ * WhatsApp-style vertical stack in the top-right corner: minimize, add person,
+ * and (on video) flip camera. Kept apart from the bottom row so the primary
+ * controls stay reachable at the bottom of the screen.
+ */
+@Composable
+private fun TopRightCallActions(
+    uiState: CallUiState,
+    viewModel: CallViewModel,
+    showFlip: Boolean,
+    onMinimize: ((callId: Int?) -> Unit)?,
+    modifier: Modifier = Modifier,
+) {
+    val users by viewModel.users.collectAsState()
+    var showPickerDialog by remember { mutableStateOf(false) }
+
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        if (onMinimize != null) {
+            SmallControl(Icons.Default.CloseFullscreen, SurfaceWhite) { onMinimize(uiState.callId) }
+        }
+        SmallControl(Icons.Default.PersonAdd, SurfaceWhite) { viewModel.fetchUsers(); showPickerDialog = true }
+        if (showFlip) {
+            SmallControl(Icons.Default.FlipCameraAndroid, SurfaceWhite, viewModel::flipCamera)
         }
     }
 
@@ -609,7 +675,11 @@ private fun CallTypeDialog(username: String, onVoice: () -> Unit, onVideo: () ->
 }
 
 @Composable
-private fun MasterTokenAcceptDialog(onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
+private fun MasterTokenAcceptDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit,
+    rejected: Boolean = false,
+) {
     var token by remember { mutableStateOf("") }
     var visible by remember { mutableStateOf(false) }
     AlertDialog(
@@ -618,7 +688,12 @@ private fun MasterTokenAcceptDialog(onDismiss: () -> Unit, onConfirm: (String) -
         title = { Text("Enter Master Token", textAlign = TextAlign.Center) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Required to accept encrypted calls.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                Text(
+                    if (rejected) "That token was rejected. The call is still ringing — try again."
+                    else "Required to accept encrypted calls.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (rejected) DilarionRed else Color.Gray,
+                )
                 OutlinedTextField(
                     value = token,
                     onValueChange = { token = it },
@@ -672,7 +747,7 @@ private fun PulsingAvatar(letter: String, isPulsing: Boolean) {
 }
 
 @Composable
-private fun CallActionButton(icon: ImageVector, label: String, color: Color, onClick: () -> Unit) {
+internal fun CallActionButton(icon: ImageVector, label: String, color: Color, onClick: () -> Unit) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         IconButton(
             onClick = onClick,

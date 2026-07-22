@@ -123,6 +123,12 @@ interface ApiService {
 
     // ─── Calls ─────────────────────────────────────────────────────────────────
 
+    /** Short-lived TURN credentials; falls back to built-in servers if this fails. */
+    @GET("webrtc/ice-servers")
+    suspend fun getIceServers(
+        @Header("Authorization") bearer: String,
+    ): Response<IceServersResponse>
+
     @POST("calls/initiate")
     suspend fun initiateCall(
         @Header("Authorization") bearer: String,
@@ -134,6 +140,21 @@ interface ApiService {
         @Header("Authorization") bearer: String,
         @Body request: CallActionRequest,
     ): Response<CallResponse>
+
+    /** Poll fallback for a caller whose WebSocket missed the accept push. */
+    @GET("calls/{callId}/status")
+    suspend fun getCallStatus(
+        @Header("Authorization") bearer: String,
+        @Path("callId") callId: Int,
+    ): Response<CallStatusResponse>
+
+    /** Tell the other side our mic state — a muted track is just silence on the wire. */
+    @POST("calls/{callId}/media-state")
+    suspend fun setCallMediaState(
+        @Header("Authorization") bearer: String,
+        @Path("callId") callId: Int,
+        @Body body: Map<String, @JvmSuppressWildcards Any>,
+    ): Response<com.google.gson.JsonObject>
 
     @POST("calls/ice_candidate")
     suspend fun sendIceCandidate(
@@ -157,6 +178,20 @@ interface ApiService {
         @Header("Authorization") bearer: String,
         @Path("id") conferenceId: Int,
         @Body body: Map<String, @JvmSuppressWildcards Any>,
+    ): Response<com.google.gson.JsonObject>
+
+    /** Join a conference you were rung for. Master token required, like any answer. */
+    @POST("calls/conference/{id}/accept")
+    suspend fun conferenceAccept(
+        @Header("Authorization") bearer: String,
+        @Path("id") conferenceId: Int,
+        @Body body: Map<String, @JvmSuppressWildcards Any>,
+    ): Response<com.google.gson.JsonObject>
+
+    @POST("calls/conference/{id}/decline")
+    suspend fun conferenceDecline(
+        @Header("Authorization") bearer: String,
+        @Path("id") conferenceId: Int,
     ): Response<com.google.gson.JsonObject>
 
     @POST("calls/conference/{id}/signal")

@@ -71,6 +71,21 @@ private val DECOY_PHRASES = listOf(
 
 private fun decoyFor(id: Int): String = DECOY_PHRASES[id.mod(DECOY_PHRASES.size)]
 
+/** Server decoy when present, otherwise a stable local phrase for this message. */
+private fun decoyTextFor(message: Message): String =
+    message.decoyContent?.takeIf { it.isNotBlank() } ?: decoyFor(message.id)
+
+/**
+ * True when [text] is raw ciphertext (base64 / hex blob) rather than readable text.
+ * Guards against ever painting an encrypted payload into a bubble when the message
+ * was not tagged content_type="encrypted" by the server.
+ */
+private fun looksLikeCiphertext(text: String?): Boolean {
+    if (text.isNullOrBlank() || text.length < 24) return false
+    if (text.any { it.isWhitespace() }) return false
+    return text.all { it.isLetterOrDigit() || it == '+' || it == '/' || it == '=' || it == '-' || it == '_' }
+}
+
 private fun isVoiceMedia(item: MediaItem): Boolean =
     item.contentType?.contains("voice", ignoreCase = true) == true ||
             item.mediaType.contains("voice", ignoreCase = true) ||
@@ -741,11 +756,15 @@ private fun MessageBubble(
     senderName: String? = null,
 ) {
     val isPrivateTagged = message.contentType == "private_tagged"
-    val isEncrypted = message.contentType == "encrypted"
+    // Older/other backends don't always tag content_type="encrypted"; treat the
+    // presence of an encrypted key or an unreadable payload as locked too.
+    val isEncrypted = message.contentType == "encrypted" ||
+            message.encryptedKey != null ||
+            message.iv != null
     val hasRecipient = !message.recipient.isNullOrBlank() && message.recipient != "group"
     val isForMe = hasRecipient && message.recipient == currentUsername
     val privatePurple = Color(0xFFA78BFA)
-    val showDecoy = isEncrypted && !isUnlocked
+    val showDecoy = (isEncrypted && !isUnlocked) || looksLikeCiphertext(message.content)
 
     val bubbleColor = when {
         isPrivateTagged -> Color(0xFF1A1020)
@@ -835,7 +854,7 @@ private fun MessageBubble(
                         }
                     } else if (showDecoy) {
                         Text(
-                            decoyFor(message.id),
+                            decoyTextFor(message),
                             color = TextPrimary.copy(alpha = 0.65f),
                             style = MaterialTheme.typography.bodyMedium,
                         )

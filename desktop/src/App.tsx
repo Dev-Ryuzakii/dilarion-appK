@@ -37,8 +37,7 @@ function saveSession(token: string, username: string) {
 
 export default function App() {
   const [session, setSession] = useState<{ token: string; username: string } | null>(loadSession);
-  // Desktop is a linked device (WhatsApp-style): QR linking is the default entry.
-  // Username/token sign-in stays only as a fallback.
+  // QR linking is the default entry, username/token sign-in is the fallback.
   const [usePassword, setUsePassword] = useState(false);
 
   function handleLogin(t: string, u: string) {

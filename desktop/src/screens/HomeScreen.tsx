@@ -15,6 +15,8 @@ import {
   Contact,
   Group,
   CallRecord,
+  conferenceAccept,
+  conferenceDecline,
 } from '../services/api';
 import { Keypair, loadKeypair, saveKeypair, clearKeypair, parseExportedKey } from '../services/keys';
 import ChatPanel from './ChatPanel';
@@ -988,9 +990,51 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
   const [settingsPage, setSettingsPage] = useState<'account' | 'appearance'>('account');
 
   // ── Call state ───────────────────────────────────────────────────────────────
-  const [activeCall, setActiveCall] = useState<{ partner: string; callType: CallType; isIncoming: boolean; callId?: number; offerSdp?: string } | null>(null);
+  const [activeCall, setActiveCall] = useState<{
+    partner: string;
+    callType: CallType;
+    isIncoming: boolean;
+    callId?: number;
+    offerSdp?: string;
+    conferenceId?: number;
+    conferenceParticipants?: string[];
+  } | null>(null);
   const [callMinimized, setCallMinimized] = useState(false);
   const [incomingCall, setIncomingCall] = useState<IncomingCall | null>(null);
+  // Someone adding us to a call already in progress. Rings and waits for the
+  // master token — an invite must not open our microphone on its own.
+  const [conferenceInvite, setConferenceInvite] = useState<
+    { conferenceId: number; invitedBy: string; participants: string[] } | null
+  >(null);
+  const [confTokenInput, setConfTokenInput] = useState('');
+  const [confTokenRejected, setConfTokenRejected] = useState(false);
+  const [confJoining, setConfJoining] = useState(false);
+
+  async function joinConferenceCall() {
+    if (!conferenceInvite || !confTokenInput.trim()) return;
+    setConfJoining(true);
+    try {
+      const { participants } = await conferenceAccept(
+        token, conferenceInvite.conferenceId, confTokenInput.trim(),
+      );
+      stopRinging();
+      // Media starts only now, after the owner authenticated and accepted.
+      setActiveCall({
+        partner: participants[0] ?? conferenceInvite.invitedBy,
+        callType: 'audio',
+        isIncoming: false,
+        conferenceId: conferenceInvite.conferenceId,
+        conferenceParticipants: participants,
+      });
+      setConferenceInvite(null);
+    } catch (err: any) {
+      // A wrong token is retryable; the call keeps ringing.
+      if (err?.status === 401) setConfTokenRejected(true);
+      else { stopRinging(); setConferenceInvite(null); }
+    } finally {
+      setConfJoining(false);
+    }
+  }
   const [callTokenInput, setCallTokenInput] = useState('');
   const [callTokenError, setCallTokenError] = useState<string | null>(null);
   const [callTokenLoading, setCallTokenLoading] = useState(false);
@@ -1078,6 +1122,17 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
         if (caller) {
           startRinging();
           setIncomingCall({ from: caller, callType, callId, offerSdp });
+        }
+      } else if (msg.type === 'conference_invite') {
+        const data = (msg as any).data || {};
+        const confId = data.conference_id as number;
+        const invitedBy = (data.invited_by as string) || '';
+        const participants = (data.existing_participants as string[]) || [];
+        if (confId) {
+          startRinging();
+          setConfTokenInput('');
+          setConfTokenRejected(false);
+          setConferenceInvite({ conferenceId: confId, invitedBy, participants });
         }
       } else if (msg.type === 'call_status_update') {
         const data = (msg as any).data || {};
@@ -1492,12 +1547,64 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
           isIncoming={activeCall.isIncoming}
           callId={activeCall.callId}
           offerSdp={activeCall.offerSdp}
+          conferenceIdProp={activeCall.conferenceId}
+          conferenceParticipants={activeCall.conferenceParticipants}
           masterToken={masterToken ?? undefined}
           onEnd={() => { setActiveCall(null); setCallMinimized(false); }}
           minimized={callMinimized}
           onMinimize={() => setCallMinimized(true)}
           onMaximize={() => setCallMinimized(false)}
         />
+      )}
+
+      {/* ── GROUP CALL INVITE ───────────────────────────────────────────── */}
+      {conferenceInvite && !activeCall && (
+        <div style={ci.backdrop}>
+          <div style={ci.card}>
+            <p style={ci.kicker}>Group call</p>
+            <h3 style={ci.title}>{conferenceInvite.invitedBy} is adding you</h3>
+            {conferenceInvite.participants.length > 0 && (
+              <p style={ci.people}>
+                Already on the call: {conferenceInvite.participants.join(', ')}
+              </p>
+            )}
+            <p style={{ ...ci.hint, color: confTokenRejected ? '#ef4444' : '#9ca3af' }}>
+              {confTokenRejected
+                ? 'That token was rejected. The call is still ringing — try again.'
+                : 'Enter your master token to join.'}
+            </p>
+            <input
+              style={ci.input}
+              type="password"
+              autoFocus
+              placeholder="Master token"
+              value={confTokenInput}
+              disabled={confJoining}
+              onChange={e => setConfTokenInput(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter' && confTokenInput.trim()) joinConferenceCall(); }}
+            />
+            <div style={ci.row}>
+              <button
+                style={ci.decline}
+                disabled={confJoining}
+                onClick={() => {
+                  stopRinging();
+                  conferenceDecline(token, conferenceInvite.conferenceId);
+                  setConferenceInvite(null);
+                }}
+              >
+                Decline
+              </button>
+              <button
+                style={{ ...ci.join, opacity: confTokenInput.trim() && !confJoining ? 1 : 0.5 }}
+                disabled={!confTokenInput.trim() || confJoining}
+                onClick={joinConferenceCall}
+              >
+                {confJoining ? 'Joining…' : 'Join'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* ── INCOMING CALL OVERLAY ────────────────────────────────────────── */}
@@ -1712,6 +1819,34 @@ function SearchIconSvg() {
 }
 
 // ── Styles ─────────────────────────────────────────────────────────────────────
+
+const ci: Record<string, React.CSSProperties> = {
+  backdrop: {
+    position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', zIndex: 950,
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+  },
+  card: {
+    background: '#141414', border: '1px solid #2a2a2a', borderRadius: 18,
+    padding: '1.75rem', width: 360, display: 'flex', flexDirection: 'column', gap: 10,
+  },
+  kicker: { margin: 0, fontSize: '0.75rem', letterSpacing: '0.08em', color: '#6b7280', textTransform: 'uppercase' },
+  title: { margin: 0, color: '#fff', fontSize: '1.15rem' },
+  people: { margin: 0, fontSize: '0.8rem', color: '#9ca3af' },
+  hint: { margin: '4px 0 0', fontSize: '0.78rem', lineHeight: 1.45 },
+  input: {
+    background: '#0c0c0c', border: '1px solid #2a2a2a', borderRadius: 10,
+    padding: '0.7rem 0.9rem', color: '#fff', fontSize: '0.9rem', outline: 'none',
+  },
+  row: { display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 4 },
+  decline: {
+    background: 'transparent', color: '#9ca3af', border: 'none',
+    padding: '0.6rem 0.9rem', cursor: 'pointer', fontSize: '0.85rem',
+  },
+  join: {
+    background: '#25d366', color: '#062', border: 'none', borderRadius: 10,
+    padding: '0.6rem 1.2rem', fontWeight: 700, cursor: 'pointer', fontSize: '0.85rem',
+  },
+};
 
 const hs: Record<string, React.CSSProperties> = {
   root: {

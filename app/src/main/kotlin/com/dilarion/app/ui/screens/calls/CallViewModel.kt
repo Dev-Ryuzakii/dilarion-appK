@@ -30,6 +30,8 @@ data class ConferenceUiState(
     val conferenceId: Int? = null,
     val participants: List<String> = emptyList(),
     val isActive: Boolean = false,
+    /** Usernames currently muted, so the UI can show who is not speaking. */
+    val mutedParticipants: Set<String> = emptySet(),
 )
 
 data class CallUiState(
@@ -42,6 +44,10 @@ data class CallUiState(
     val isSpeaker: Boolean = false,
     val networkQuality: Int = 4,  // 0=poor … 4=excellent
     val error: String? = null,
+    /** Server rejected the master token — ask again without dropping the call. */
+    val masterTokenRejected: Boolean = false,
+    /** Whether the person on the other end has muted their microphone. */
+    val peerMuted: Boolean = false,
 )
 
 @HiltViewModel
@@ -67,22 +73,34 @@ class CallViewModel @Inject constructor(
     val users: StateFlow<List<UserInfo>> = _users
 
     private var timerJob: kotlinx.coroutines.Job? = null
+    private var answerPollJob: kotlinx.coroutines.Job? = null
     private var wsObserverJob: kotlinx.coroutines.Job? = null
     private var pendingCandidates = mutableListOf<IceCandidate>()
     private var storedOfferSdp: String? = null
+    // Answer kept so a rejected master token can be retried without rebuilding it.
+    private var cachedAnswerSdp: String? = null
     // Buffer ICE candidates from remote until we set remote description (handleOffer)
     private var remoteDescSet = false
     private val pendingRemoteCandidates = mutableListOf<Triple<String, Int, String>>()
 
     fun startOutgoingCall(peerUsername: String, type: CallType) {
+        // Drop anything left over from a previous call before building a new one,
+        // otherwise the old PeerConnection keeps the mic/audio alive and the new
+        // offer is created on a stale connection.
+        webRtcManager.closeCall()
+        timerJob?.cancel()
         remoteDescSet = false
+        pendingCandidates.clear()
         pendingRemoteCandidates.clear()
+        storedOfferSdp = null
+        cachedAnswerSdp = null
         _uiState.value = CallUiState(state = CallState.CALLING, peerUsername = peerUsername, callType = type)
         observeWsEvents()
         viewModelScope.launch {
             val token = sessionManager.sessionToken.first() ?: return@launch
             runCatching {
                 webRtcManager.initialize()
+                refreshIceServers(token)
                 webRtcManager.startLocalStream(withVideo = type == CallType.VIDEO)
                 webRtcManager.createPeerConnection(onIce = { candidate ->
                     viewModelScope.launch { sendIceCandidate(peerUsername, candidate) }
@@ -98,18 +116,25 @@ class CallViewModel @Inject constructor(
                     _uiState.value = _uiState.value.copy(callId = callId)
                     rememberSession()
                     flushPendingCandidates(token, peerUsername, callId)
+                    pollForAnswer(token, callId)
                 } else {
+                    teardownMedia()
                     _uiState.value = _uiState.value.copy(error = "Failed to initiate call", state = CallState.ENDED)
                 }
             }.onFailure { e ->
+                teardownMedia()
                 _uiState.value = _uiState.value.copy(error = e.message, state = CallState.ENDED)
             }
         }
     }
 
     fun setIncoming(incoming: IncomingCallData) {
+        webRtcManager.closeCall()
+        timerJob?.cancel()
         remoteDescSet = false
+        pendingCandidates.clear()
         pendingRemoteCandidates.clear()
+        cachedAnswerSdp = null
         storedOfferSdp = incoming.offerSdp
         _uiState.value = CallUiState(
             state = CallState.INCOMING,
@@ -122,6 +147,7 @@ class CallViewModel @Inject constructor(
         viewModelScope.launch {
             runCatching {
                 webRtcManager.initialize()
+                sessionManager.sessionToken.first()?.let { refreshIceServers(it) }
                 webRtcManager.startLocalStream(withVideo = incoming.callType == "video")
                 webRtcManager.createPeerConnection(onIce = { candidate ->
                     viewModelScope.launch { sendIceCandidate(incoming.callerUsername, candidate) }
@@ -147,56 +173,195 @@ class CallViewModel @Inject constructor(
             val token = sessionManager.sessionToken.first() ?: return@launch
             runCatching {
                 val offerSdp = storedOfferSdp
-                val answerSdp = if (offerSdp != null) webRtcManager.handleOffer(offerSdp) else null
-                // Remote desc is now set — apply any ICE candidates that arrived before accept
-                remoteDescSet = true
-                pendingRemoteCandidates.forEach { (mid, idx, cand) ->
-                    webRtcManager.addIceCandidate(mid, idx, cand)
+                    ?: throw Exception("Call offer missing — ask them to call again")
+
+                // Build the answer once. A rejected master token leaves the call
+                // alive for a retry, and handleOffer() cannot run twice on the
+                // same peer connection — the second call fails on SDP state.
+                val answerSdp = cachedAnswerSdp ?: webRtcManager.handleOffer(offerSdp).also {
+                    cachedAnswerSdp = it
+                    remoteDescSet = true
+                    pendingRemoteCandidates.forEach { (mid, idx, cand) ->
+                        webRtcManager.addIceCandidate(mid, idx, cand)
+                    }
+                    pendingRemoteCandidates.clear()
                 }
-                pendingRemoteCandidates.clear()
-                apiService.callAction(
+
+                val resp = apiService.callAction(
                     "Bearer $token",
-                    CallActionRequest(callId, "accept", answerSdp = answerSdp, mastertoken = masterToken),
+                    CallActionRequest(
+                        callId, "accept",
+                        answerSdp = answerSdp,
+                        mastertoken = masterToken,
+                    ),
                 )
+                // Retrofit does not throw on 4xx/5xx. Without this check a rejected
+                // accept still flipped us to CONNECTED while the caller — never
+                // sent the answer — kept ringing.
+                if (resp.code() == 401) {
+                    // Wrong token is a typo, not a reason to hang up on someone:
+                    // keep the call ringing and let them try again.
+                    _uiState.value = _uiState.value.copy(masterTokenRejected = true)
+                    return@runCatching
+                }
+                if (!resp.isSuccessful) {
+                    throw Exception(
+                        when (resp.code()) {
+                            404 -> "Call no longer exists"
+                            else -> "Could not accept call (${resp.code()})"
+                        }
+                    )
+                }
                 flushPendingCandidates(token, peerUsername, callId)
-                _uiState.value = _uiState.value.copy(state = CallState.CONNECTED)
+                _uiState.value = _uiState.value.copy(
+                    state = CallState.CONNECTED,
+                    masterTokenRejected = false,
+                )
                 rememberSession()
                 startTimer()
             }.onFailure { e ->
-                _uiState.value = _uiState.value.copy(error = e.message)
+                // Unrecoverable — the caller was never told, so do not sit in a
+                // half-open state pretending to be connected.
+                teardownMedia()
+                _uiState.value = _uiState.value.copy(state = CallState.ENDED, error = e.message)
             }
         }
+    }
+
+    fun clearMasterTokenRejected() {
+        _uiState.value = _uiState.value.copy(masterTokenRejected = false)
     }
 
     fun declineCall() {
         NotificationHelper.stopRingtone()
-        val callId = _uiState.value.callId ?: run {
-            _uiState.value = _uiState.value.copy(state = CallState.ENDED)
-            return
-        }
+        val callId = _uiState.value.callId
+        // Tear the media down first — the connection must die even if the API call
+        // fails or the token read returns null.
+        teardownMedia()
+        _uiState.value = _uiState.value.copy(state = CallState.ENDED)
+        if (callId == null) return
         viewModelScope.launch {
             val token = sessionManager.sessionToken.first() ?: return@launch
             runCatching { apiService.callAction("Bearer $token", CallActionRequest(callId, "decline")) }
-            _uiState.value = _uiState.value.copy(state = CallState.ENDED)
         }
     }
 
     fun endCall() {
-        timerJob?.cancel()
+        NotificationHelper.stopRingtone()
         val callId = _uiState.value.callId
+        teardownMedia()
+        _uiState.value = _uiState.value.copy(state = CallState.ENDED)
+        if (callId == null) return
         viewModelScope.launch {
-            if (callId != null) {
-                val token = sessionManager.sessionToken.first() ?: return@launch
-                runCatching { apiService.callAction("Bearer $token", CallActionRequest(callId, "end")) }
-            }
-            _uiState.value = _uiState.value.copy(state = CallState.ENDED)
+            val token = sessionManager.sessionToken.first() ?: return@launch
+            runCatching { apiService.callAction("Bearer $token", CallActionRequest(callId, "end")) }
         }
+    }
+
+    /**
+     * Safety net for the caller: if the accept push never arrives over the
+     * WebSocket we would ring forever while the callee sits in a live call.
+     * Poll the call until it is answered, ended, or we give up.
+     */
+    private fun pollForAnswer(token: String, callId: Int) {
+        answerPollJob?.cancel()
+        answerPollJob = viewModelScope.launch {
+            repeat(60) {  // ~2 minutes, matching how long a phone realistically rings
+                kotlinx.coroutines.delay(2000)
+                val st = _uiState.value
+                if (st.callId != callId) return@launch
+                if (st.state != CallState.CALLING && st.state != CallState.RINGING) return@launch
+
+                val body = runCatching {
+                    apiService.getCallStatus("Bearer $token", callId).body()
+                }.getOrNull() ?: return@repeat
+
+                when (body.status) {
+                    "accept", "accepted" -> {
+                        val sdp = body.answerSdp ?: return@repeat
+                        if (remoteDescSet) return@launch  // the WS push already handled it
+                        webRtcManager.handleAnswer(sdp)
+                        remoteDescSet = true
+                        pendingRemoteCandidates.forEach { (mid, idx, cand) ->
+                            webRtcManager.addIceCandidate(mid, idx, cand)
+                        }
+                        pendingRemoteCandidates.clear()
+                        _uiState.value = _uiState.value.copy(state = CallState.CONNECTED)
+                        rememberSession()
+                        startTimer()
+                        return@launch
+                    }
+                    "decline", "declined", "end", "busy" -> {
+                        teardownMedia()
+                        _uiState.value = _uiState.value.copy(state = CallState.ENDED)
+                        return@launch
+                    }
+                    "ringing" -> _uiState.value = _uiState.value.copy(state = CallState.RINGING)
+                }
+            }
+        }
+    }
+
+    /**
+     * Pull short-lived TURN credentials from the backend before building the peer
+     * connection. Failures are ignored on purpose — WebRtcManager then keeps its
+     * built-in server list, so a backend hiccup degrades quality, not availability.
+     */
+    private suspend fun refreshIceServers(token: String) {
+        runCatching {
+            val resp = apiService.getIceServers("Bearer $token")
+            val servers = resp.body()?.iceServers.orEmpty()
+            if (servers.isNotEmpty()) {
+                webRtcManager.setIceServers(
+                    servers.map { Triple(it.urls, it.username, it.credential) }
+                )
+            }
+        }
+    }
+
+    /** Close the peer connection, stop capture/audio and drop all signaling buffers. */
+    private fun teardownMedia() {
+        timerJob?.cancel()
+        timerJob = null
+        answerPollJob?.cancel()
+        answerPollJob = null
+        webRtcManager.closeCall()
+        remoteDescSet = false
+        pendingCandidates.clear()
+        pendingRemoteCandidates.clear()
+        storedOfferSdp = null
+        cachedAnswerSdp = null
+        _conferenceState.value = ConferenceUiState()
     }
 
     fun toggleMute() {
         val muted = !_uiState.value.isMuted
         _uiState.value = _uiState.value.copy(isMuted = muted)
         webRtcManager.setMuted(muted)
+        broadcastMuteState(muted)
+    }
+
+    /**
+     * Publish our mic state. WebRTC carries no such signal — a muted track is
+     * just silence — so the other side has no way to know without being told.
+     */
+    private fun broadcastMuteState(muted: Boolean) {
+        val callId = _uiState.value.callId
+        val conf = _conferenceState.value
+        viewModelScope.launch {
+            val token = sessionManager.sessionToken.first() ?: return@launch
+            if (callId != null) {
+                runCatching {
+                    apiService.setCallMediaState("Bearer $token", callId, mapOf("muted" to muted))
+                }
+            }
+            val confId = conf.conferenceId
+            if (confId != null) {
+                conf.participants.forEach { peer ->
+                    sendConferenceSignal(token, confId, peer, "media_state", mapOf("muted" to muted))
+                }
+            }
+        }
     }
 
     fun toggleSpeaker() {
@@ -221,6 +386,9 @@ class CallViewModel @Inject constructor(
 
     fun resetToIdle() {
         timerJob?.cancel()
+        timerJob = null
+        answerPollJob?.cancel()
+        answerPollJob = null
         wsObserverJob?.cancel()
         wsObserverJob = null
         _uiState.value = CallUiState()
@@ -229,6 +397,7 @@ class CallViewModel @Inject constructor(
         pendingRemoteCandidates.clear()
         pendingCandidates.clear()
         storedOfferSdp = null
+        cachedAnswerSdp = null
     }
 
     private fun observeWsEvents() {
@@ -257,9 +426,26 @@ class CallViewModel @Inject constructor(
                             "calling" -> _uiState.value = _uiState.value.copy(state = CallState.RINGING)
                             "ringing" -> _uiState.value = _uiState.value.copy(state = CallState.RINGING)
                             "decline", "declined", "end", "busy" -> {
-                                timerJob?.cancel()
+                                // Remote hung up — kill our side of the media too,
+                                // otherwise both peers keep hearing each other.
+                                NotificationHelper.stopRingtone()
+                                teardownMedia()
                                 _uiState.value = _uiState.value.copy(state = CallState.ENDED)
                             }
+                        }
+                    }
+                    "call_media_state" -> {
+                        val callIdEvt = data.get("call_id")?.asInt ?: return@collect
+                        if (callIdEvt != _uiState.value.callId) return@collect
+                        val muted = data.get("muted")?.asBoolean ?: false
+                        val who = data.get("username")?.asString
+                        _uiState.value = _uiState.value.copy(peerMuted = muted)
+                        if (who != null) {
+                            val cur = _conferenceState.value
+                            _conferenceState.value = cur.copy(
+                                mutedParticipants = if (muted) cur.mutedParticipants + who
+                                else cur.mutedParticipants - who
+                            )
                         }
                     }
                     "ice_candidate" -> {
@@ -337,12 +523,39 @@ class CallViewModel @Inject constructor(
                         when (signalType) {
                             "offer" -> {
                                 val sdp = signalData.get("sdp")?.asString ?: return@collect
+                                // A newly joined invitee gets offers without ever
+                                // seeing conference_peer_connect, so the peer may
+                                // not exist yet — create it before answering.
+                                if (!webRtcManager.hasConferencePeer(fromUser)) {
+                                    webRtcManager.createConferencePeer(fromUser) { candidate ->
+                                        viewModelScope.launch {
+                                            sendConferenceSignal(token, confId, fromUser, "ice_candidate", mapOf(
+                                                "sdpMid" to candidate.sdpMid,
+                                                "sdpMLineIndex" to candidate.sdpMLineIndex,
+                                                "candidate" to candidate.sdp,
+                                            ))
+                                        }
+                                    }
+                                }
                                 val answer = webRtcManager.handleConferenceOffer(fromUser, sdp) ?: return@collect
                                 sendConferenceSignal(token, confId, fromUser, "answer", mapOf("sdp" to answer))
+                                _conferenceState.value = _conferenceState.value.copy(
+                                    conferenceId = confId,
+                                    participants = (_conferenceState.value.participants + fromUser).distinct(),
+                                    isActive = true,
+                                )
                             }
                             "answer" -> {
                                 val sdp = signalData.get("sdp")?.asString ?: return@collect
                                 webRtcManager.handleConferenceAnswer(fromUser, sdp)
+                            }
+                            "media_state" -> {
+                                val muted = signalData.get("muted")?.asBoolean ?: false
+                                val cur = _conferenceState.value
+                                _conferenceState.value = cur.copy(
+                                    mutedParticipants = if (muted) cur.mutedParticipants + fromUser
+                                    else cur.mutedParticipants - fromUser
+                                )
                             }
                             "ice_candidate" -> {
                                 val mid = signalData.get("sdpMid")?.asString ?: return@collect
@@ -366,6 +579,52 @@ class CallViewModel @Inject constructor(
                 }
             }
         }
+    }
+
+    /**
+     * Join a conference we were rung for. Media only starts here — the invitee
+     * has answered and authenticated, so their microphone joins the call at this
+     * point and not when the invite arrived.
+     *
+     * Returns null on success, or a message to show the user.
+     */
+    suspend fun joinConference(conferenceId: Int, masterToken: String): String? {
+        val token = sessionManager.sessionToken.first() ?: return "Not signed in"
+        return runCatching {
+            // Bring the microphone up and start listening for offers BEFORE
+            // accepting. /accept makes the existing participants offer to us at
+            // once; if our audio track does not exist yet the peer they build
+            // has no inbound track from us and they never hear us.
+            webRtcManager.initialize()
+            refreshIceServers(token)
+            webRtcManager.startLocalStream(withVideo = false)
+            observeWsEvents()
+
+            val resp = apiService.conferenceAccept(
+                "Bearer $token",
+                conferenceId,
+                mapOf("mastertoken" to masterToken),
+            )
+            if (resp.code() == 401) return "Master token rejected"
+            if (!resp.isSuccessful) return "Could not join the call (${resp.code()})"
+
+            val participants = resp.body()?.getAsJsonArray("participants")
+                ?.map { it.asString } ?: emptyList()
+
+            _uiState.value = CallUiState(
+                state = CallState.CONNECTED,
+                peerUsername = participants.firstOrNull() ?: "",
+                callType = CallType.VOICE,
+            )
+            _conferenceState.value = ConferenceUiState(
+                conferenceId = conferenceId,
+                participants = participants,
+                isActive = true,
+            )
+            rememberSession()
+            startTimer()
+            null
+        }.getOrElse { it.message ?: "Could not join the call" }
     }
 
     fun startConference(callId: Int) {
@@ -520,9 +779,21 @@ class CallViewModel @Inject constructor(
      * signaling/timer instead of prompting for a new call. Returns true if reattached.
      */
     fun reattachIfActive(): Boolean {
+        // The ViewModel is activity-scoped, so it survives a finished call. A left-over
+        // ENDED state must not be mistaken for a live call — reset it so the next call
+        // starts from the type dialog instead of an empty "?" call screen.
+        if (_uiState.value.state == CallState.ENDED) resetToIdle()
         if (_uiState.value.state != CallState.IDLE) return true  // this VM already owns the call
         val session = webRtcManager.activeSession.value
-        if (!webRtcManager.hasActiveCall() || session == null) return false
+        if (!webRtcManager.hasActiveCall() || session == null) {
+            // Stale snapshot with no live connection behind it.
+            if (session != null) webRtcManager.setActiveSession(null)
+            return false
+        }
+        if (session.partner.isBlank() || session.callId == 0) {
+            webRtcManager.closeCall()
+            return false
+        }
         _uiState.value = CallUiState(
             state = CallState.CONNECTED,
             peerUsername = session.partner,

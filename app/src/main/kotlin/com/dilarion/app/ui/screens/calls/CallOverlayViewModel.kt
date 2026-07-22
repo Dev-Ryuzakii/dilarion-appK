@@ -17,6 +17,13 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+/** A conference someone is trying to add us to, waiting to be answered. */
+data class ConferenceInviteData(
+    val conferenceId: Int,
+    val invitedBy: String,
+    val existingParticipants: List<String>,
+)
+
 data class MinimizedCallInfo(
     val callId: Int,
     val partner: String,
@@ -33,6 +40,9 @@ class CallOverlayViewModel @Inject constructor(
     private val _incomingCall = MutableStateFlow<IncomingCallData?>(null)
     val incomingCall: StateFlow<IncomingCallData?> = _incomingCall
 
+    private val _conferenceInvite = MutableStateFlow<ConferenceInviteData?>(null)
+    val conferenceInvite: StateFlow<ConferenceInviteData?> = _conferenceInvite
+
     private val _minimizedCall = MutableStateFlow<MinimizedCallInfo?>(null)
     val minimizedCall: StateFlow<MinimizedCallInfo?> = _minimizedCall
 
@@ -41,19 +51,41 @@ class CallOverlayViewModel @Inject constructor(
     init {
         viewModelScope.launch {
             presenceService.events.collect { event ->
-                if (event.type == "incoming_call") {
-                    val data = event.data ?: return@collect
-                    val callId = data.get("call_id")?.asInt ?: return@collect
-                    val caller = data.get("caller_username")?.asString ?: ""
-                    val callType = data.get("call_type")?.asString ?: "voice"
-                    val offerSdp = data.get("offer_sdp")?.asString
-                    _incomingCall.value = IncomingCallData(callId, caller, callType, offerSdp)
+                val data = event.data ?: return@collect
+                when (event.type) {
+                    "incoming_call" -> {
+                        val callId = data.get("call_id")?.asInt ?: return@collect
+                        val caller = data.get("caller_username")?.asString ?: ""
+                        val callType = data.get("call_type")?.asString ?: "voice"
+                        val offerSdp = data.get("offer_sdp")?.asString
+                        _incomingCall.value = IncomingCallData(callId, caller, callType, offerSdp)
+                    }
+                    // Being added to a live call rings like any other call: the
+                    // invitee has to answer before their microphone joins it.
+                    "conference_invite" -> {
+                        val confId = data.get("conference_id")?.asInt ?: return@collect
+                        val invitedBy = data.get("invited_by")?.asString ?: ""
+                        val existing = data.getAsJsonArray("existing_participants")
+                            ?.map { it.asString } ?: emptyList()
+                        _conferenceInvite.value = ConferenceInviteData(confId, invitedBy, existing)
+                    }
                 }
             }
         }
     }
 
     fun clear() { _incomingCall.value = null }
+
+    fun clearConferenceInvite() { _conferenceInvite.value = null }
+
+    fun declineConferenceInvite() {
+        val invite = _conferenceInvite.value ?: return
+        _conferenceInvite.value = null
+        viewModelScope.launch {
+            val token = sessionManager.sessionToken.first() ?: return@launch
+            runCatching { apiService.conferenceDecline("Bearer $token", invite.conferenceId) }
+        }
+    }
 
     fun setFromNotification(call: IncomingCallData) {
         _incomingCall.value = call

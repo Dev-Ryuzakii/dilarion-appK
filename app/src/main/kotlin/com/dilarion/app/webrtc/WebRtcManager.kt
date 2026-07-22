@@ -32,7 +32,9 @@ class WebRtcManager @Inject constructor(
     private var factory: PeerConnectionFactory? = null
     private var peerConnection: PeerConnection? = null
     private var localAudioTrack: AudioTrack? = null
+    private var localAudioSource: AudioSource? = null
     private var localVideoTrackInternal: VideoTrack? = null
+    private var localVideoSource: VideoSource? = null
     private var videoCapturer: CameraVideoCapturer? = null
     private var surfaceTextureHelper: SurfaceTextureHelper? = null
     private var audioFocusRequest: AudioFocusRequest? = null
@@ -61,8 +63,42 @@ class WebRtcManager @Inject constructor(
 
     // Conference: map peerUsername → PeerConnection for multi-party calls
     private val conferencePeers = mutableMapOf<String, PeerConnection>()
+    // ICE candidates that arrived before the peer existed or before its remote
+    // description was set. WebRTC rejects candidates added too early and the map
+    // lookup silently drops them when the peer is missing — either way the
+    // candidate set ends up incomplete, which is how a mesh call ends up with
+    // audio flowing one way and then not at all.
+    private val pendingConferenceCandidates = mutableMapOf<String, MutableList<IceCandidate>>()
+    private val conferenceRemoteDescSet = mutableSetOf<String>()
     private val _conferenceRemoteVideos = MutableStateFlow<Map<String, VideoTrack?>>(emptyMap())
     val conferenceRemoteVideos: StateFlow<Map<String, VideoTrack?>> = _conferenceRemoteVideos
+
+    // Server-issued, time-limited TURN credentials (see GET /webrtc/ice-servers).
+    // Null until a fetch succeeds; the built-in list below is the fallback so a
+    // backend outage never blocks calling.
+    @Volatile private var dynamicIceServers: List<PeerConnection.IceServer>? = null
+
+    /** Replace the ICE server list for subsequent peer connections. */
+    fun setIceServers(servers: List<Triple<List<String>, String?, String?>>) {
+        val mapped = servers.mapNotNull { (urls, user, cred) ->
+            if (urls.isEmpty()) return@mapNotNull null
+            PeerConnection.IceServer.builder(urls)
+                .apply {
+                    if (!user.isNullOrBlank()) setUsername(user)
+                    if (!cred.isNullOrBlank()) setPassword(cred)
+                }
+                .createIceServer()
+        }
+        // Append, never replace. A backend that only knows about our own TURN
+        // would otherwise strip the public relays compiled in below, leaving a
+        // call between two mobile networks with no relay at all — media dies
+        // while signalling still looks healthy.
+        dynamicIceServers = if (mapped.isEmpty()) null else mapped + iceServers
+        Log.i(TAG, "ICE servers from backend: ${mapped.size}, plus ${iceServers.size} built-in")
+    }
+
+    private fun activeIceServers(): List<PeerConnection.IceServer> =
+        dynamicIceServers ?: iceServers
 
     private val iceServers = listOf(
         PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
@@ -70,15 +106,15 @@ class WebRtcManager @Inject constructor(
         PeerConnection.IceServer.builder("stun:stun2.l.google.com:19302").createIceServer(),
         PeerConnection.IceServer.builder("stun:stun3.l.google.com:19302").createIceServer(),
         PeerConnection.IceServer.builder("stun:stun4.l.google.com:19302").createIceServer(),
-        // Own VPS TURN — by hostname (DNS: turn.dilarion.eibstratoc.com → 41.242.54.66, grey cloud)
-        PeerConnection.IceServer.builder("turn:turn.dilarion.eibstratoc.com:3478")
+        // Own VPS TURN — by hostname (DNS: turndilarion.eibstratoc.com → 41.242.60.238, grey cloud)
+        PeerConnection.IceServer.builder("turn:turndilarion.eibstratoc.com:3478")
             .setUsername("dilarion").setPassword("dilarion2026").createIceServer(),
-        PeerConnection.IceServer.builder("turn:turn.dilarion.eibstratoc.com:3478?transport=tcp")
+        PeerConnection.IceServer.builder("turn:turndilarion.eibstratoc.com:3478?transport=tcp")
             .setUsername("dilarion").setPassword("dilarion2026").createIceServer(),
         // Own VPS TURN — raw IP fallback (works before DNS is set)
-        PeerConnection.IceServer.builder("turn:41.242.54.66:3478")
+        PeerConnection.IceServer.builder("turn:41.242.60.238:3478")
             .setUsername("dilarion").setPassword("dilarion2026").createIceServer(),
-        PeerConnection.IceServer.builder("turn:41.242.54.66:3478?transport=tcp")
+        PeerConnection.IceServer.builder("turn:41.242.60.238:3478?transport=tcp")
             .setUsername("dilarion").setPassword("dilarion2026").createIceServer(),
         // Public fallbacks
         PeerConnection.IceServer.builder("turn:a.relay.metered.ca:80")
@@ -109,6 +145,8 @@ class WebRtcManager @Inject constructor(
 
     fun startLocalStream(withVideo: Boolean) {
         val f = factory ?: return
+        // A previous call's tracks would otherwise keep capturing alongside the new ones.
+        if (localAudioTrack != null || peerConnection != null) closeCall()
         callActive = true
 
         requestAudioFocus()
@@ -122,6 +160,7 @@ class WebRtcManager @Inject constructor(
             mandatory.add(MediaConstraints.KeyValuePair("googHighpassFilter", "true"))
         }
         val audioSource = f.createAudioSource(audioConstraints)
+        localAudioSource = audioSource
         localAudioTrack = f.createAudioTrack("ARDAMSa0", audioSource)
         localAudioTrack?.setEnabled(true)
         Log.i(TAG, "audio track created, enabled=true")
@@ -136,6 +175,7 @@ class WebRtcManager @Inject constructor(
                     videoCapturer = capturer
                     surfaceTextureHelper = SurfaceTextureHelper.create("CaptureThread", eglBase.eglBaseContext)
                     val videoSource = f.createVideoSource(false)
+                    localVideoSource = videoSource
                     capturer.initialize(surfaceTextureHelper, context, videoSource.capturerObserver)
                     capturer.startCapture(1280, 720, 30)
                     localVideoTrackInternal = f.createVideoTrack("ARDAMSv0", videoSource)
@@ -149,7 +189,7 @@ class WebRtcManager @Inject constructor(
 
     fun createPeerConnection(onIce: (IceCandidate) -> Unit) {
         val f = factory ?: return
-        val rtcConfig = PeerConnection.RTCConfiguration(iceServers).apply {
+        val rtcConfig = PeerConnection.RTCConfiguration(activeIceServers()).apply {
             sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
             continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
             bundlePolicy = PeerConnection.BundlePolicy.MAXBUNDLE
@@ -163,6 +203,7 @@ class WebRtcManager @Inject constructor(
                 Log.i(TAG, "iceConnectionState=$s")
                 if (s == PeerConnection.IceConnectionState.CONNECTED ||
                     s == PeerConnection.IceConnectionState.COMPLETED) {
+                    logSelectedCandidatePair()
                     applyAudioOutput(userSpeakerOn)
                     Log.i(TAG, "audio output re-applied on ICE connect, speaker=$userSpeakerOn")
                     // onAddTrack can fire before ICE is up; force-enable all remote receivers
@@ -311,6 +352,34 @@ class WebRtcManager @Inject constructor(
         }, SessionDescription(SessionDescription.Type.ANSWER, sdpStr))
     }
 
+    /**
+     * Log which candidate pair actually carries the media: "host" means a direct
+     * local path, "srflx" a STUN-discovered public address, "relay" a TURN server.
+     * Two peers on different mobile networks almost always need "relay" — if the
+     * pair never becomes relay there, the call connects but stays silent.
+     */
+    private fun logSelectedCandidatePair() {
+        peerConnection?.getStats { report ->
+            val stats = report.statsMap.values
+            val pair = stats.firstOrNull {
+                it.type == "candidate-pair" && it.members["state"] == "succeeded" &&
+                        (it.members["nominated"] as? Boolean == true)
+            } ?: stats.firstOrNull { it.type == "candidate-pair" && it.members["state"] == "succeeded" }
+            if (pair == null) {
+                Log.w(TAG, "no succeeded candidate pair yet")
+                return@getStats
+            }
+            fun typeOf(id: Any?): String {
+                val c = stats.firstOrNull { it.id == id } ?: return "?"
+                return c.members["candidateType"]?.toString() ?: "?"
+            }
+            val local = typeOf(pair.members["localCandidateId"])
+            val remote = typeOf(pair.members["remoteCandidateId"])
+            Log.i(TAG, "SELECTED PAIR local=$local remote=$remote " +
+                    "bytesSent=${pair.members["bytesSent"]} bytesReceived=${pair.members["bytesReceived"]}")
+        }
+    }
+
     fun getNetworkQuality(onResult: (Int) -> Unit) {
         peerConnection?.getStats { report ->
             var loss = 0.0
@@ -356,7 +425,7 @@ class WebRtcManager @Inject constructor(
 
     fun createConferencePeer(peerUsername: String, onIce: (IceCandidate) -> Unit): PeerConnection? {
         val f = factory ?: return null
-        val rtcConfig = PeerConnection.RTCConfiguration(iceServers).apply {
+        val rtcConfig = PeerConnection.RTCConfiguration(activeIceServers()).apply {
             sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
             continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
             bundlePolicy = PeerConnection.BundlePolicy.MAXBUNDLE
@@ -367,6 +436,7 @@ class WebRtcManager @Inject constructor(
             override fun onIceConnectionChange(s: PeerConnection.IceConnectionState?) {
                 if (s == PeerConnection.IceConnectionState.CONNECTED ||
                     s == PeerConnection.IceConnectionState.COMPLETED) {
+                    logSelectedCandidatePair()
                     applyAudioOutput(userSpeakerOn)
                     conferencePeers[peerUsername]?.receivers?.forEach { receiver ->
                         val audioTrack = receiver.track() as? AudioTrack
@@ -399,8 +469,16 @@ class WebRtcManager @Inject constructor(
             }
         }) ?: return null
 
-        // Add local tracks to this conference peer connection
-        localAudioTrack?.let { pc.addTrack(it, listOf("ARDAMS")) }
+        // Add local tracks to this conference peer connection. If the mic is not
+        // up yet this peer would be receive-only and nobody would hear us — log
+        // loudly so that shows up rather than becoming silent one-way audio.
+        if (localAudioTrack == null) {
+            Log.e(TAG, "conference peer $peerUsername created with NO local audio track")
+        }
+        localAudioTrack?.let {
+            pc.addTrack(it, listOf("ARDAMS"))
+            Log.i(TAG, "local audio added to conference peer $peerUsername")
+        }
         localVideoTrackInternal?.let { pc.addTrack(it, listOf("ARDAMS")) }
         conferencePeers[peerUsername] = pc
         Log.i(TAG, "conference peer created for $peerUsername")
@@ -437,6 +515,7 @@ class WebRtcManager @Inject constructor(
             pc.setRemoteDescription(object : SdpObserver {
                 override fun onCreateSuccess(p: SessionDescription?) {}
                 override fun onSetSuccess() {
+                    flushConferenceCandidates(peerUsername)
                     val constraints = MediaConstraints().apply {
                         mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"))
                         mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo", "true"))
@@ -465,18 +544,44 @@ class WebRtcManager @Inject constructor(
     fun handleConferenceAnswer(peerUsername: String, sdpStr: String) {
         conferencePeers[peerUsername]?.setRemoteDescription(object : SdpObserver {
             override fun onCreateSuccess(p: SessionDescription?) {}
-            override fun onSetSuccess() { Log.i(TAG, "conference answer set for $peerUsername") }
+            override fun onSetSuccess() {
+                Log.i(TAG, "conference answer set for $peerUsername")
+                flushConferenceCandidates(peerUsername)
+            }
             override fun onCreateFailure(p: String?) {}
             override fun onSetFailure(e: String?) { Log.e(TAG, "conference answer failed for $peerUsername: $e") }
         }, SessionDescription(SessionDescription.Type.ANSWER, sdpStr))
     }
 
     fun addConferenceIceCandidate(peerUsername: String, sdpMid: String, sdpMLineIndex: Int, candidateStr: String) {
-        conferencePeers[peerUsername]?.addIceCandidate(IceCandidate(sdpMid, sdpMLineIndex, candidateStr))
+        val candidate = IceCandidate(sdpMid, sdpMLineIndex, candidateStr)
+        val pc = conferencePeers[peerUsername]
+        if (pc == null || peerUsername !in conferenceRemoteDescSet) {
+            pendingConferenceCandidates.getOrPut(peerUsername) { mutableListOf() }.add(candidate)
+            Log.d(TAG, "buffered ICE candidate for $peerUsername (peer not ready)")
+            return
+        }
+        pc.addIceCandidate(candidate)
     }
 
+    /** Apply candidates that arrived before this peer could accept them. */
+    private fun flushConferenceCandidates(peerUsername: String) {
+        conferenceRemoteDescSet.add(peerUsername)
+        val pc = conferencePeers[peerUsername] ?: return
+        val queued = pendingConferenceCandidates.remove(peerUsername) ?: return
+        queued.forEach { pc.addIceCandidate(it) }
+        Log.i(TAG, "flushed ${queued.size} buffered ICE candidates for $peerUsername")
+    }
+
+    fun hasConferencePeer(peerUsername: String): Boolean = conferencePeers.containsKey(peerUsername)
+
     fun removeConferencePeer(peerUsername: String) {
-        conferencePeers.remove(peerUsername)?.dispose()
+        pendingConferenceCandidates.remove(peerUsername)
+        conferenceRemoteDescSet.remove(peerUsername)
+        conferencePeers.remove(peerUsername)?.let { pc ->
+            runCatching { pc.close() }
+            runCatching { pc.dispose() }
+        }
         _conferenceRemoteVideos.value = _conferenceRemoteVideos.value - peerUsername
         Log.i(TAG, "conference peer removed: $peerUsername")
     }
@@ -485,21 +590,37 @@ class WebRtcManager @Inject constructor(
         conferencePeers.keys.toList().forEach { removeConferencePeer(it) }
     }
 
+    @Synchronized
     fun closeCall() {
         closeConference()
         callActive = false
         _activeSession.value = null
-        try { videoCapturer?.stopCapture() } catch (_: Exception) {}
-        videoCapturer?.dispose()
-        videoCapturer = null
-        surfaceTextureHelper?.dispose()
-        surfaceTextureHelper = null
-        localVideoTrackInternal?.dispose()
-        localVideoTrackInternal = null
-        localAudioTrack?.dispose()
-        localAudioTrack = null
-        peerConnection?.dispose()
+
+        // Close before dispose: dispose() alone can leave the transport running,
+        // which is why audio kept flowing after both sides pressed End.
+        peerConnection?.let { pc ->
+            pc.senders.forEach { s -> runCatching { pc.removeTrack(s) } }
+            pc.receivers.forEach { r -> runCatching { r.track()?.setEnabled(false) } }
+            runCatching { pc.close() }
+            runCatching { pc.dispose() }
+        }
         peerConnection = null
+
+        try { videoCapturer?.stopCapture() } catch (_: Exception) {}
+        runCatching { videoCapturer?.dispose() }
+        videoCapturer = null
+        runCatching { surfaceTextureHelper?.dispose() }
+        surfaceTextureHelper = null
+        localVideoTrackInternal?.setEnabled(false)
+        runCatching { localVideoTrackInternal?.dispose() }
+        localVideoTrackInternal = null
+        runCatching { localVideoSource?.dispose() }
+        localVideoSource = null
+        localAudioTrack?.setEnabled(false)
+        runCatching { localAudioTrack?.dispose() }
+        localAudioTrack = null
+        runCatching { localAudioSource?.dispose() }
+        localAudioSource = null
         _localVideo.value = null
         _remoteVideo.value = null
         val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager

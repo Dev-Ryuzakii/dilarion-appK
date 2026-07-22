@@ -20,6 +20,7 @@ import com.dilarion.app.ui.screens.calls.CallOverlayViewModel
 import com.dilarion.app.ui.screens.calls.CallScreen
 import com.dilarion.app.ui.screens.calls.FloatingCallBar
 import com.dilarion.app.ui.screens.calls.IncomingCallOverlay
+import com.dilarion.app.ui.screens.calls.IncomingConferenceOverlay
 import com.dilarion.app.ui.screens.chat.ChatScreen
 import com.dilarion.app.ui.screens.home.HomeScreen
 import com.dilarion.app.ui.screens.home.HomeViewModel
@@ -34,6 +35,7 @@ fun AppNavigation(pendingIncomingCall: IncomingCallData? = null) {
     val navController = rememberNavController()
     val overlayVm: CallOverlayViewModel = hiltViewModel()
     val incomingCall by overlayVm.incomingCall.collectAsState()
+    val conferenceInvite by overlayVm.conferenceInvite.collectAsState()
     val minimizedCall by overlayVm.minimizedCall.collectAsState()
 
     // Inject call from notification intent into overlay VM
@@ -46,6 +48,15 @@ fun AppNavigation(pendingIncomingCall: IncomingCallData? = null) {
         IncomingCallOverlay(
             incoming = call,
             onDismiss = { overlayVm.clear() },
+        )
+        return
+    }
+
+    // Being added to a call in progress rings over whatever screen is showing.
+    conferenceInvite?.let { invite ->
+        IncomingConferenceOverlay(
+            invite = invite,
+            onDismiss = { overlayVm.declineConferenceInvite() },
         )
         return
     }

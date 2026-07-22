@@ -93,6 +93,27 @@ export async function registerDevice(token: string, publicKey: string, platform:
 }
 
 // All active device public keys for a user — sender wraps the AES key per device.
+// ── Calls ──────────────────────────────────────────────────────────────────────
+
+/**
+ * ICE servers with short-lived TURN credentials. Returns null on any failure so
+ * the caller falls back to its built-in list instead of failing the call.
+ */
+export async function getIceServers(token: string): Promise<RTCIceServer[] | null> {
+  try {
+    const res = await fetch(`${BASE}/webrtc/ice-servers`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return null;
+    const body = await res.json();
+    const servers = body?.ice_servers;
+    if (!Array.isArray(servers) || servers.length === 0) return null;
+    return servers as RTCIceServer[];
+  } catch {
+    return null;
+  }
+}
+
 export async function getUserDevices(token: string, username: string): Promise<DeviceKey[]> {
   const res = await fetch(`${BASE}/users/${encodeURIComponent(username)}/devices`, {
     headers: { Authorization: `Bearer ${token}` },
@@ -488,7 +509,26 @@ export async function performCallAction(
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ call_id: callId, action, answer_sdp: answerSdp, mastertoken: masterToken }),
   });
-  if (!res.ok) throw new Error(`Call action ${action} failed`);
+  if (!res.ok) {
+    // Callers need the code: 401 on accept means a bad master token, which is
+    // retryable and must not end the call.
+    const err: Error & { status?: number } = new Error(`Call action ${action} failed`);
+    err.status = res.status;
+    throw err;
+  }
+}
+
+/** Tell the other side our mic state — a muted track is just silence on the wire. */
+export async function setCallMediaState(
+  token: string,
+  callId: number,
+  muted: boolean,
+): Promise<void> {
+  await fetch(`${BASE}/calls/${callId}/media-state`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ muted }),
+  }).catch(() => {});
 }
 
 export async function sendCallIceCandidate(
@@ -521,6 +561,35 @@ export async function conferenceInvite(token: string, conferenceId: number, user
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ username }),
   });
+}
+
+/** Join a conference you were rung for. Master token required, like any answer. */
+export async function conferenceAccept(
+  token: string,
+  conferenceId: number,
+  masterToken: string,
+): Promise<{ participants: string[] }> {
+  const res = await fetch(`${BASE}/calls/conference/${conferenceId}/accept`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ mastertoken: masterToken }),
+  });
+  if (!res.ok) {
+    const err: Error & { status?: number } = new Error(
+      res.status === 401 ? 'Master token rejected' : `Could not join the call (${res.status})`,
+    );
+    err.status = res.status;
+    throw err;
+  }
+  const body = await res.json();
+  return { participants: body.participants ?? [] };
+}
+
+export async function conferenceDecline(token: string, conferenceId: number): Promise<void> {
+  await fetch(`${BASE}/calls/conference/${conferenceId}/decline`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  }).catch(() => {});
 }
 
 export async function conferenceSignal(
