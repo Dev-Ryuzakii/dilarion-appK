@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { presenceService } from '../services/presence';
-import { initiateCall, performCallAction, sendCallIceCandidate, setCallMediaState, createConference, conferenceInvite, conferenceSignal, conferenceLeave, getUsers, getIceServers, Contact } from '../services/api';
+import { initiateCall, performCallAction, sendCallIceCandidate, setCallMediaState, getCallStatus, createConference, conferenceInvite, conferenceSignal, conferenceLeave, getUsers, getIceServers, Contact } from '../services/api';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -206,6 +206,7 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
   // Buffer incoming ICE candidates before remote description is set
   const remoteIceBufRef = useRef<RTCIceCandidateInit[]>([]);
   const remoteDescSetRef = useRef(false);
+  const answerPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // Answer kept so a rejected master token can be retried without rebuilding it.
   const cachedAnswerRef = useRef<string | null>(null);
   const [showTokenPrompt, setShowTokenPrompt] = useState(false);
@@ -291,6 +292,43 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
     }
   }, [callType]);
 
+  // Apply the callee's answer, whether it arrives over WS or via the poll
+  // fallback. Guarded so it only runs once.
+  const applyAnswer = useCallback(async (sdp: string) => {
+    const pc = pcRef.current;
+    if (!pc || remoteDescSetRef.current) return;
+    try {
+      await pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp }));
+      remoteDescSetRef.current = true;
+      const queued = remoteIceBufRef.current.splice(0);
+      for (const c of queued) {
+        try { await pc.addIceCandidate(new RTCIceCandidate(c)); } catch {}
+      }
+    } catch {}
+  }, []);
+
+  // Poll for the answer in case the WebSocket push was missed (reconnect churn).
+  const startAnswerPoll = useCallback((callId: number) => {
+    if (answerPollRef.current) clearInterval(answerPollRef.current);
+    let ticks = 0;
+    answerPollRef.current = setInterval(async () => {
+      ticks += 1;
+      if (remoteDescSetRef.current || ticks > 60) {   // stop once answered or ~2min
+        if (answerPollRef.current) { clearInterval(answerPollRef.current); answerPollRef.current = null; }
+        return;
+      }
+      const st = await getCallStatus(token, callId);
+      if (!st) return;
+      if (st.answer_sdp) {
+        await applyAnswer(st.answer_sdp);
+        setState(s => (s === 'calling' || s === 'ringing' ? 'connecting' : s));
+      } else if (['declined', 'decline', 'end', 'busy'].includes(st.status)) {
+        if (answerPollRef.current) { clearInterval(answerPollRef.current); answerPollRef.current = null; }
+        handleEnd();
+      }
+    }, 2000);
+  }, [token, applyAnswer]);
+
   // Caller: get media → create offer → wait for ICE gather → POST /calls/initiate
   const startCall = useCallback(async () => {
     await ensureIceServers(token);
@@ -310,6 +348,7 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
       // Flush any late-arriving candidates
       const buffered = iceBufRef.current.splice(0);
       buffered.forEach(c => sendCallIceCandidate(token, call_id, partner, c).catch(() => {}));
+      startAnswerPoll(call_id);
     } catch (err: any) {
       setError(err?.message || 'Could not start call');
     }
@@ -394,19 +433,7 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
           setState(s => (s === 'calling' || s === 'ringing' ? 'ringing' : s));
         } else if (data.status === 'accept' || data.status === 'accepted') {
           setState('connecting');
-          if (data.answer_sdp && pcRef.current) {
-            try {
-              await pcRef.current.setRemoteDescription(
-                new RTCSessionDescription({ type: 'answer', sdp: data.answer_sdp }),
-              );
-              remoteDescSetRef.current = true;
-              // Flush any ICE candidates that arrived before remote desc was set
-              const queued = remoteIceBufRef.current.splice(0);
-              for (const c of queued) {
-                try { await pcRef.current.addIceCandidate(new RTCIceCandidate(c)); } catch {}
-              }
-            } catch {}
-          }
+          if (data.answer_sdp) await applyAnswer(data.answer_sdp);
         } else if (['declined', 'decline', 'end', 'busy'].includes(data.status)) {
           handleEnd();
         }
@@ -630,6 +657,7 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
 
   function stopAllMedia() {
     if (localVideoRef.current) localVideoRef.current.srcObject = null;
+    if (answerPollRef.current) { clearInterval(answerPollRef.current); answerPollRef.current = null; }
     remoteStreamRef.current = null;
     if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
     if (remoteAudioRef.current) { remoteAudioRef.current.pause(); remoteAudioRef.current.srcObject = null; }

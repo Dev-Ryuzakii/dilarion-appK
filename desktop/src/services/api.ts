@@ -497,6 +497,26 @@ export async function initiateCall(
   return res.json();
 }
 
+/**
+ * Poll a call's status. Fallback for the caller when the WebSocket missed the
+ * accept push — returns the answer SDP the backend held so the call can still
+ * connect instead of ringing forever.
+ */
+export async function getCallStatus(
+  token: string,
+  callId: number,
+): Promise<{ status: string; answer_sdp?: string } | null> {
+  try {
+    const res = await fetch(`${BASE}/calls/${callId}/status`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
 export async function performCallAction(
   token: string,
   callId: number,
