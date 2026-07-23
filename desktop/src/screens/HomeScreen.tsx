@@ -1429,8 +1429,10 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
             myUsername={username}
             partner={selectedChat}
             partnerOnline={partnerContact?.is_active ?? false}
-            masterToken={masterToken}
-            onMasterTokenSaved={setMasterToken}
+            // Never hold the master token for decryption: each locked message
+            // prompts for it and discards it after use.
+            masterToken={null}
+            onMasterTokenSaved={() => {}}
             onCall={handleCall}
           />
         );
@@ -1453,8 +1455,9 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
               token={token}
               myUsername={username}
               group={group}
-              masterToken={masterToken}
-              onMasterTokenSaved={setMasterToken}
+              // Ask for the token per message; never retain it.
+              masterToken={null}
+              onMasterTokenSaved={() => {}}
             />
           );
         }
