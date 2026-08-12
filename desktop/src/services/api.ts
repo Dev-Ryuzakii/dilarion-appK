@@ -809,6 +809,53 @@ export async function denyFromWaitingRoom(token: string, conferenceId: number, u
   if (!res.ok) throw new Error(`Failed to deny (${res.status})`);
 }
 
+// ── In-meeting chat ────────────────────────────────────────────────────────────
+// Scoped to a conference_id instead of a group/DM. Reuses the same encrypted_
+// content/decoy_content/encrypted_key/iv model as DMs and group chat.
+
+export interface ConferenceChatMessage {
+  id: number;
+  sender: string;
+  content: string;
+  content_type: string;
+  timestamp: string;
+  decoy_content?: string;
+  encrypted_key?: string | null;
+  iv?: string | null;
+}
+
+export async function getConferenceMessages(token: string, conferenceId: number): Promise<ConferenceChatMessage[]> {
+  const res = await fetch(`${BASE}/messages/conference/${conferenceId}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error('Failed to fetch conference messages');
+  const body = await res.json();
+  return body.messages ?? body;
+}
+
+export async function sendConferenceMessage(
+  token: string,
+  conferenceId: number,
+  message: string,
+  opts: { encryptedKey: string; iv: string; decoyContent: string },
+): Promise<void> {
+  const res = await fetch(`${BASE}/messages/conference/send`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      conference_id: conferenceId,
+      message,
+      encrypted_key: opts.encryptedKey,
+      iv: opts.iv,
+      decoy_content: opts.decoyContent,
+    }),
+  });
+  if (!res.ok) throw new Error('Failed to send conference message');
+}
+
 // ── Whiteboard ───────────────────────────────────────────────────────────────
 // Ephemeral for v1 — strokes relay live via WS, nothing is persisted server-
 // side, so a fresh open starts with a blank board. Exactly one of

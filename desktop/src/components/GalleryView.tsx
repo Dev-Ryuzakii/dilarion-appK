@@ -6,6 +6,7 @@ import {
 } from '../services/api';
 import { presenceService, WsMessage } from '../services/presence';
 import WhiteboardModal from './WhiteboardModal';
+import MeetingChatPanel from './MeetingChatPanel';
 
 // Group video via self-hosted LiveKit — the SFU room every group call (2+
 // people) now renders through, replacing the old mesh-WebRTC conference path
@@ -31,6 +32,9 @@ export default function GalleryView({
   initialMicOn = true,
   initialCamOn = true,
   displayName,
+  myUsername,
+  masterToken,
+  onMasterTokenSaved,
 }: {
   token: string;
   conferenceId: number;
@@ -38,6 +42,9 @@ export default function GalleryView({
   initialMicOn?: boolean;
   initialCamOn?: boolean;
   displayName?: string;
+  myUsername: string;
+  masterToken: string | null;
+  onMasterTokenSaved: (t: string) => void;
 }) {
   const roomRef = useRef<Room | null>(null);
   const [tiles, setTiles] = useState<Record<string, Tile>>({});
@@ -49,6 +56,7 @@ export default function GalleryView({
 
   const [showParticipants, setShowParticipants] = useState(false);
   const [showWhiteboard, setShowWhiteboard] = useState(false);
+  const [showChat, setShowChat] = useState(false);
   const [allUsers, setAllUsers] = useState<Contact[]>([]);
   const [addSearch, setAddSearch] = useState('');
   const [inviting, setInviting] = useState<string | null>(null);
@@ -270,6 +278,11 @@ export default function GalleryView({
             )}
           </button>
           <button
+            onClick={() => setShowChat(true)}
+            title="Chat"
+            style={{ background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: 8, color: '#fff', width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+          ><ChatIcon /></button>
+          <button
             onClick={() => setShowWhiteboard(true)}
             title="Whiteboard"
             style={{ background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: 8, color: '#fff', width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
@@ -357,6 +370,18 @@ export default function GalleryView({
 
       {showWhiteboard && (
         <WhiteboardModal token={token} target={{ conferenceId }} onClose={() => setShowWhiteboard(false)} />
+      )}
+
+      {showChat && (
+        <MeetingChatPanel
+          token={token}
+          conferenceId={conferenceId}
+          myUsername={myUsername}
+          participantUsernames={tileList.filter(t => !t.isLocal).map(t => t.identity)}
+          masterToken={masterToken}
+          onMasterTokenSaved={onMasterTokenSaved}
+          onClose={() => setShowChat(false)}
+        />
       )}
 
       {showParticipants && (
@@ -585,6 +610,13 @@ function WhiteboardIcon() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+    </svg>
+  );
+}
+function ChatIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
     </svg>
   );
 }

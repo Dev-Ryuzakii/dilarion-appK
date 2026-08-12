@@ -1900,6 +1900,9 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
           initialMicOn={activeGalleryCall.initialMicOn}
           initialCamOn={activeGalleryCall.initialCamOn}
           displayName={activeGalleryCall.displayName}
+          myUsername={username}
+          masterToken={masterToken}
+          onMasterTokenSaved={setMasterToken}
           onClose={() => setActiveGalleryCall(null)}
         />
       )}
