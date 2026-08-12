@@ -16,7 +16,6 @@ import { loadKeypair } from '../services/keys';
 import { presenceService, WsMessage } from '../services/presence';
 import { LockIcon, MicIcon as MicIconSvg, PaperclipIcon as PaperclipIconSvg } from '../components/Icons';
 import MediaBubble, { DocumentBubble } from '../components/MediaBubble';
-import WhiteboardModal from '../components/WhiteboardModal';
 import MeetingCard, { JoinMeetingHandler } from '../components/MeetingCard';
 
 interface Props {
@@ -560,7 +559,6 @@ export default function ChatPanel({ token, myUsername, partner, partnerOnline, m
   const [recSeconds, setRecSeconds] = useState(0);
   const [partnerTyping, setPartnerTyping] = useState(false);
   const [pendingDocFile, setPendingDocFile] = useState<File | null>(null);
-  const [showWhiteboard, setShowWhiteboard] = useState(false);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -812,11 +810,6 @@ export default function ChatPanel({ token, myUsername, partner, partnerOnline, m
         </div>
         {/* Call buttons */}
         <div style={{ display: 'flex', gap: 6 }}>
-          <button onClick={() => setShowWhiteboard(true)} style={cs.callBtn} title="Whiteboard">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 19l7-7 3 3-7 7-3-3z" /><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z" /><path d="M2 2l7.586 7.586" /><circle cx="11" cy="11" r="2" />
-            </svg>
-          </button>
           <button onClick={() => onCall(partner, 'audio')} style={cs.callBtn} title="Voice call">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 1h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.64a16 16 0 0 0 6 6l.95-.95a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/>
@@ -829,10 +822,6 @@ export default function ChatPanel({ token, myUsername, partner, partnerOnline, m
           </button>
         </div>
       </div>
-
-      {showWhiteboard && (
-        <WhiteboardModal token={token} target={{ username: partner }} onClose={() => setShowWhiteboard(false)} />
-      )}
 
       {/* Messages area */}
       <div style={cs.messagesArea}>

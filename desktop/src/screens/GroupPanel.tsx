@@ -18,7 +18,6 @@ import { loadKeypair } from '../services/keys';
 import { presenceService, WsMessage } from '../services/presence';
 import { LockIcon, PaperclipIcon as PaperclipIconSvg } from '../components/Icons';
 import MediaBubble, { DocumentBubble } from '../components/MediaBubble';
-import WhiteboardModal from '../components/WhiteboardModal';
 import MeetingCard, { JoinMeetingHandler } from '../components/MeetingCard';
 
 interface Props {
@@ -395,7 +394,6 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [pendingDocFile, setPendingDocFile] = useState<File | null>(null);
-  const [showWhiteboard, setShowWhiteboard] = useState(false);
   const [taggedUser, setTaggedUser] = useState<string | null>(null);
   const [members, setMembers] = useState<GroupMember[]>([]);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
@@ -565,16 +563,7 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
             <div style={gs.groupMeta}>{group.member_count} members</div>
           </div>
         </div>
-        <button onClick={() => setShowWhiteboard(true)} style={gs.iconBtn} title="Whiteboard">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M12 19l7-7 3 3-7 7-3-3z" /><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z" /><path d="M2 2l7.586 7.586" /><circle cx="11" cy="11" r="2" />
-          </svg>
-        </button>
       </div>
-
-      {showWhiteboard && (
-        <WhiteboardModal token={token} target={{ groupId: group.id }} onClose={() => setShowWhiteboard(false)} />
-      )}
 
       {/* Messages */}
       <div style={gs.messagesArea}>

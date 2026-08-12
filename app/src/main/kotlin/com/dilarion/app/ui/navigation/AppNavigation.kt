@@ -151,7 +151,6 @@ fun AppNavigation(pendingIncomingCall: IncomingCallData? = null) {
                 groupName = null,
                 onBack = { navController.popBackStack() },
                 onCall = { u -> navController.navigate(Screen.Call.route(u)) },
-                onWhiteboard = { navController.navigate(Screen.Whiteboard.route(username = username)) },
             )
         }
 
@@ -170,7 +169,6 @@ fun AppNavigation(pendingIncomingCall: IncomingCallData? = null) {
                 groupId = groupId,
                 groupName = groupName,
                 onBack = { navController.popBackStack() },
-                onWhiteboard = { navController.navigate(Screen.Whiteboard.route(groupId = groupId)) },
             )
         }
 

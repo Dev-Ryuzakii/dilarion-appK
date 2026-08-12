@@ -126,7 +126,6 @@ fun ChatScreen(
     groupName: String?,
     onBack: () -> Unit,
     onCall: ((String) -> Unit)? = null,
-    onWhiteboard: (() -> Unit)? = null,
     viewModel: ChatViewModel = hiltViewModel(),
 ) {
     val context = LocalContext.current
@@ -236,11 +235,6 @@ fun ChatScreen(
                     }
                 },
                 actions = {
-                    if (onWhiteboard != null) {
-                        IconButton(onClick = onWhiteboard) {
-                            Icon(Icons.Default.Draw, "Whiteboard", tint = SurfaceWhite)
-                        }
-                    }
                     if (groupId == null && onCall != null) {
                         IconButton(onClick = { onCall(username) }) {
                             Icon(Icons.Default.Call, "Call", tint = SurfaceWhite)
