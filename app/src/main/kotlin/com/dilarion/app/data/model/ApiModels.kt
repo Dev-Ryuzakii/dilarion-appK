@@ -105,6 +105,20 @@ data class SendGroupMessageRequest(
     @SerializedName("decoy_content") val decoyContent: String? = null,
 )
 
+data class ConferenceMessagesResponse(
+    val messages: List<Message>,
+    val count: Int = 0,
+)
+
+// Send in-meeting chat: POST /messages/conference/send → {conference_id, message}
+data class SendConferenceMessageRequest(
+    @SerializedName("conference_id") val conferenceId: Int,
+    val message: String,
+    @SerializedName("encrypted_key") val encryptedKey: String? = null,
+    val iv: String? = null,
+    @SerializedName("decoy_content") val decoyContent: String? = null,
+)
+
 data class GroupMember(
     @SerializedName("user_id") val userId: Int,
     val username: String,

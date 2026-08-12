@@ -79,6 +79,18 @@ interface ApiService {
         @Path("groupId") groupId: Int,
     ): Response<GroupMessagesResponse>
 
+    @POST("messages/conference/send")
+    suspend fun sendConferenceMessage(
+        @Header("Authorization") bearer: String,
+        @Body request: com.dilarion.app.data.model.SendConferenceMessageRequest,
+    ): Response<com.google.gson.JsonObject>
+
+    @GET("messages/conference/{conferenceId}")
+    suspend fun getConferenceMessages(
+        @Header("Authorization") bearer: String,
+        @Path("conferenceId") conferenceId: Int,
+    ): Response<com.dilarion.app.data.model.ConferenceMessagesResponse>
+
     @PUT("messages/{id}/read")
     suspend fun markRead(
         @Header("Authorization") bearer: String,

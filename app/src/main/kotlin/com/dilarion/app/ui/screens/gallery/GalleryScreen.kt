@@ -8,6 +8,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Draw
 import androidx.compose.material.icons.filled.Mic
@@ -52,8 +53,17 @@ fun GalleryScreen(
     viewModel: GalleryViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsState()
+    var showChat by remember { mutableStateOf(false) }
 
     LaunchedEffect(conferenceId) { viewModel.connect(conferenceId, initialMicOn, initialCamOn, displayName) }
+
+    if (showChat) {
+        MeetingChatSheet(
+            conferenceId = conferenceId,
+            participantUsernames = state.tiles.filter { !it.isLocal }.map { it.identity },
+            onDismiss = { showChat = false },
+        )
+    }
 
     Scaffold(
         containerColor = Color(0xFF0B0B10),
@@ -70,6 +80,9 @@ fun GalleryScreen(
                         if (state.waiting.isNotEmpty()) Badge { Text("${state.waiting.size}") }
                     }) {
                         TextButton(onClick = { viewModel.openParticipants() }) { Text("Participants", color = SurfaceWhite) }
+                    }
+                    IconButton(onClick = { showChat = true }) {
+                        Icon(Icons.Default.Chat, "Chat", tint = SurfaceWhite)
                     }
                     IconButton(onClick = { onOpenWhiteboard(conferenceId) }) {
                         Icon(Icons.Default.Draw, "Whiteboard", tint = SurfaceWhite)
