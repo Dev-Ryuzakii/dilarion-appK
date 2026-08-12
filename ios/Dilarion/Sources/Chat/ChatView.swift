@@ -26,6 +26,7 @@ struct ChatView: View {
     @State private var unlockError: String? = nil
     @State private var selectedPhotoItem: PhotosPickerItem? = nil
     @State private var viewerImage: ViewerImage? = nil
+    @State private var showWhiteboard = false
 
     private var displayName: String { groupId != nil ? (groupName ?? "Group") : username }
 
@@ -164,6 +165,10 @@ struct ChatView: View {
                             .foregroundColor(.white)
                     }
                 }
+                Button { showWhiteboard = true } label: {
+                    Image(systemName: "scribble")
+                        .foregroundColor(.white)
+                }
                 Button { showUnlockDialog = !vm.state.isUnlocked } label: {
                     Image(systemName: vm.state.isUnlocked ? "lock.open" : "lock")
                         .foregroundColor(.white)
@@ -172,6 +177,9 @@ struct ChatView: View {
         }
         .toolbarBackground(Color.dilarionRed, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
+        .sheet(isPresented: $showWhiteboard) {
+            WhiteboardView(username: groupId == nil ? username : nil, groupId: groupId)
+        }
         .alert("Error", isPresented: Binding(
             get: { vm.state.error != nil },
             set: { if !$0 { vm.clearError() } }

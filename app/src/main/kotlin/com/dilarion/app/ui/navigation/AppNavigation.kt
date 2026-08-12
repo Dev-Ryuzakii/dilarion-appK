@@ -26,6 +26,12 @@ import com.dilarion.app.ui.screens.home.HomeScreen
 import com.dilarion.app.ui.screens.home.HomeViewModel
 import com.dilarion.app.ui.screens.mastertoken.MasterTokenSetupScreen
 import com.dilarion.app.ui.screens.newchat.NewChatScreen
+import com.dilarion.app.ui.screens.newmeeting.NewMeetingScreen
+import com.dilarion.app.ui.screens.meetings.MeetingsScreen
+import com.dilarion.app.ui.screens.gallery.GalleryScreen
+import com.dilarion.app.ui.screens.lobby.LobbyScreen
+import com.dilarion.app.ui.screens.lobby.WaitingForHostScreen
+import com.dilarion.app.ui.screens.whiteboard.WhiteboardScreen
 import com.dilarion.app.ui.screens.settings.SettingsScreen
 import com.dilarion.app.ui.screens.devices.LinkedDevicesScreen
 import com.dilarion.app.ui.screens.splash.SplashScreen
@@ -57,6 +63,10 @@ fun AppNavigation(pendingIncomingCall: IncomingCallData? = null) {
         IncomingConferenceOverlay(
             invite = invite,
             onDismiss = { overlayVm.declineConferenceInvite() },
+            onJoined = { confId ->
+                overlayVm.clearConferenceInvite()
+                navController.navigate(Screen.Gallery.route(confId))
+            },
         )
         return
     }
@@ -113,6 +123,12 @@ fun AppNavigation(pendingIncomingCall: IncomingCallData? = null) {
                 onNewChat = {
                     navController.navigate(Screen.OnlineUsers.route)
                 },
+                onNewMeeting = {
+                    navController.navigate(Screen.NewMeeting.route)
+                },
+                onMeetings = {
+                    navController.navigate(Screen.Meetings.route)
+                },
                 onSettings = {
                     navController.navigate(Screen.Settings.route)
                 },
@@ -135,6 +151,7 @@ fun AppNavigation(pendingIncomingCall: IncomingCallData? = null) {
                 groupName = null,
                 onBack = { navController.popBackStack() },
                 onCall = { u -> navController.navigate(Screen.Call.route(u)) },
+                onWhiteboard = { navController.navigate(Screen.Whiteboard.route(username = username)) },
             )
         }
 
@@ -153,6 +170,7 @@ fun AppNavigation(pendingIncomingCall: IncomingCallData? = null) {
                 groupId = groupId,
                 groupName = groupName,
                 onBack = { navController.popBackStack() },
+                onWhiteboard = { navController.navigate(Screen.Whiteboard.route(groupId = groupId)) },
             )
         }
 
@@ -185,6 +203,127 @@ fun AppNavigation(pendingIncomingCall: IncomingCallData? = null) {
                         popUpTo(Screen.OnlineUsers.route) { inclusive = true }
                     }
                 },
+            )
+        }
+
+        composable(Screen.NewMeeting.route) {
+            NewMeetingScreen(
+                onBack = { navController.popBackStack() },
+                onMeetingStarted = { conferenceId ->
+                    navController.navigate(Screen.Lobby.route(mode = "instant", conferenceId = conferenceId)) {
+                        popUpTo(Screen.NewMeeting.route) { inclusive = true }
+                    }
+                },
+            )
+        }
+
+        composable(Screen.Meetings.route) {
+            MeetingsScreen(
+                onBack = { navController.popBackStack() },
+                onJoined = { joinCode, title ->
+                    navController.navigate(Screen.Lobby.route(mode = "join", joinCode = joinCode, title = title)) {
+                        popUpTo(Screen.Meetings.route) { inclusive = true }
+                    }
+                },
+            )
+        }
+
+        composable(
+            route = Screen.Lobby.route,
+            arguments = listOf(
+                navArgument("mode") { type = NavType.StringType },
+                navArgument("joinCode") { type = NavType.StringType; defaultValue = "" },
+                navArgument("title") { type = NavType.StringType; defaultValue = "" },
+                navArgument("conferenceId") { type = NavType.IntType; defaultValue = -1 },
+            ),
+        ) { backStack ->
+            val mode = backStack.arguments?.getString("mode") ?: "instant"
+            val joinCode = backStack.arguments?.getString("joinCode")?.takeIf { it.isNotEmpty() }
+            val title = backStack.arguments?.getString("title")
+                ?.let { java.net.URLDecoder.decode(it, "UTF-8") }?.takeIf { it.isNotEmpty() }
+            val conferenceId = backStack.arguments?.getInt("conferenceId")?.takeIf { it >= 0 }
+            LobbyScreen(
+                mode = mode,
+                joinCode = joinCode,
+                conferenceId = conferenceId,
+                title = title ?: if (mode == "instant") "Start Meeting" else "Join Meeting",
+                onBack = { navController.popBackStack() },
+                onGalleryReady = { confId, micOn, camOn, name ->
+                    navController.navigate(Screen.Gallery.route(confId, micOn, camOn, name)) {
+                        popUpTo(Screen.Lobby.route) { inclusive = true }
+                    }
+                },
+                onWaiting = { confId, micOn, camOn, name ->
+                    navController.navigate(Screen.Waiting.route(confId, micOn, camOn, name)) {
+                        popUpTo(Screen.Lobby.route) { inclusive = true }
+                    }
+                },
+            )
+        }
+
+        composable(
+            route = Screen.Waiting.route,
+            arguments = listOf(
+                navArgument("conferenceId") { type = NavType.IntType },
+                navArgument("micOn") { type = NavType.BoolType; defaultValue = true },
+                navArgument("camOn") { type = NavType.BoolType; defaultValue = true },
+                navArgument("displayName") { type = NavType.StringType; defaultValue = "" },
+            ),
+        ) { backStack ->
+            val conferenceId = backStack.arguments?.getInt("conferenceId") ?: return@composable
+            val micOn = backStack.arguments?.getBoolean("micOn") ?: true
+            val camOn = backStack.arguments?.getBoolean("camOn") ?: true
+            val displayName = backStack.arguments?.getString("displayName")
+                ?.let { java.net.URLDecoder.decode(it, "UTF-8") }?.takeIf { it.isNotEmpty() }
+            WaitingForHostScreen(
+                conferenceId = conferenceId,
+                onAdmitted = {
+                    navController.navigate(Screen.Gallery.route(conferenceId, micOn, camOn, displayName)) {
+                        popUpTo(Screen.Waiting.route) { inclusive = true }
+                    }
+                },
+                onDenied = { navController.popBackStack(Screen.Home.route, inclusive = false) },
+                onCancel = { navController.popBackStack(Screen.Home.route, inclusive = false) },
+            )
+        }
+
+        composable(
+            route = Screen.Gallery.route,
+            arguments = listOf(
+                navArgument("conferenceId") { type = NavType.IntType },
+                navArgument("micOn") { type = NavType.BoolType; defaultValue = true },
+                navArgument("camOn") { type = NavType.BoolType; defaultValue = true },
+                navArgument("displayName") { type = NavType.StringType; defaultValue = "" },
+            ),
+        ) { backStack ->
+            val conferenceId = backStack.arguments?.getInt("conferenceId") ?: return@composable
+            GalleryScreen(
+                conferenceId = conferenceId,
+                initialMicOn = backStack.arguments?.getBoolean("micOn") ?: true,
+                initialCamOn = backStack.arguments?.getBoolean("camOn") ?: true,
+                displayName = backStack.arguments?.getString("displayName")
+                    ?.let { java.net.URLDecoder.decode(it, "UTF-8") }?.takeIf { it.isNotEmpty() },
+                onClose = { navController.popBackStack() },
+                onOpenWhiteboard = { confId -> navController.navigate(Screen.Whiteboard.route(conferenceId = confId)) },
+            )
+        }
+
+        composable(
+            route = Screen.Whiteboard.route,
+            arguments = listOf(
+                navArgument("username") { type = NavType.StringType; defaultValue = "" },
+                navArgument("groupId") { type = NavType.IntType; defaultValue = -1 },
+                navArgument("conferenceId") { type = NavType.IntType; defaultValue = -1 },
+            ),
+        ) { backStack ->
+            val username = backStack.arguments?.getString("username")?.takeIf { it.isNotEmpty() }
+            val groupIdArg = backStack.arguments?.getInt("groupId")?.takeIf { it >= 0 }
+            val conferenceIdArg = backStack.arguments?.getInt("conferenceId")?.takeIf { it >= 0 }
+            WhiteboardScreen(
+                username = username,
+                groupId = groupIdArg,
+                conferenceId = conferenceIdArg,
+                onBack = { navController.popBackStack() },
             )
         }
 

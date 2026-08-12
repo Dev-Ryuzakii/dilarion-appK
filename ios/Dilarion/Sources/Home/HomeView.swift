@@ -17,6 +17,8 @@ struct HomeView: View {
     @State private var selectedTab: HomeTab = .chats
     @State private var showLogoutDialog = false
     @State private var showNewChat = false
+    @State private var showNewMeeting = false
+    @State private var showMeetings = false
     @State private var navigateTo: String? = nil
     @State private var navigateToGroup: Group? = nil
 
@@ -73,6 +75,14 @@ struct HomeView: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     HStack(spacing: 4) {
+                        Button { showMeetings = true } label: {
+                            Image(systemName: "calendar")
+                                .foregroundColor(.white)
+                        }
+                        Button { showNewMeeting = true } label: {
+                            Image(systemName: "video")
+                                .foregroundColor(.white)
+                        }
                         NavigationLink(destination: SettingsViewFull(onLogout: onLogout)) {
                             Image(systemName: "gearshape")
                                 .foregroundColor(.white)
@@ -108,6 +118,18 @@ struct HomeView: View {
             NewChatSheet(onSelect: { peer in
                 showNewChat = false
                 navigateTo = peer
+            })
+        }
+        .sheet(isPresented: $showNewMeeting) {
+            NewMeetingSheet(onStart: { invitees in
+                showNewMeeting = false
+                CallViewModel.shared.startStandaloneConference(invitees: invitees)
+            })
+        }
+        .sheet(isPresented: $showMeetings) {
+            MeetingsSheet(onJoin: { joinCode in
+                showMeetings = false
+                CallViewModel.shared.joinScheduledMeeting(joinCode: joinCode)
             })
         }
         .confirmationDialog("Log out", isPresented: $showLogoutDialog, titleVisibility: .visible) {
@@ -518,7 +540,238 @@ struct NewChatSheet: View {
     }
 }
 
+/// Multi-select picker that starts a standalone conference (no prior 1:1 call)
+/// and invites everyone picked. Mirrors NewChatSheet, swapping tap-to-open for
+/// checkmarks and a bottom "Start Meeting" bar.
+struct NewMeetingSheet: View {
+    let onStart: ([String]) -> Void
+    @Environment(\.dismiss) var dismiss
+    @State private var users: [UserProfile] = []
+    @State private var search = ""
+    @State private var selected: Set<String> = []
 
+    var filtered: [UserProfile] {
+        search.isEmpty ? users : users.filter { $0.username.localizedCaseInsensitiveContains(search) }
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                List(filtered) { user in
+                    Button {
+                        if selected.contains(user.username) { selected.remove(user.username) }
+                        else { selected.insert(user.username) }
+                    } label: {
+                        HStack(spacing: 12) {
+                            Circle()
+                                .fill(avatarColor(for: user.username))
+                                .frame(width: 42, height: 42)
+                                .overlay(
+                                    Text(String(user.username.prefix(1)).uppercased())
+                                        .font(.system(size: 16, weight: .bold))
+                                        .foregroundColor(.white)
+                                )
+                            Text(user.username)
+                                .foregroundColor(.textPrimary)
+                            Spacer()
+                            Image(systemName: selected.contains(user.username) ? "checkmark.circle.fill" : "circle")
+                                .foregroundColor(selected.contains(user.username) ? .dilarionRed : .gray)
+                        }
+                    }
+                    .listRowBackground(Color.surfaceWhite)
+                }
+                .listStyle(.plain)
+                .searchable(text: $search, prompt: "Search people to invite")
+
+                if !selected.isEmpty {
+                    Button {
+                        onStart(Array(selected))
+                    } label: {
+                        HStack {
+                            Image(systemName: "video.fill")
+                            Text("Start Meeting (\(selected.count))")
+                        }
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color.dilarionRed)
+                    }
+                }
+            }
+            .navigationTitle("New Meeting")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Cancel") { dismiss() }
+                        .foregroundColor(.dilarionRed)
+                }
+            }
+            .task {
+                users = (try? await APIClient.shared.get("/users")) ?? []
+            }
+        }
+    }
+}
+
+/// Upcoming-meetings list + a schedule form. Joining hooks into the SAME
+/// CallViewModel.shared instant meetings already use — see
+/// CallViewModel.joinScheduledMeeting, which mirrors startStandaloneConference
+/// exactly, just sourced from a join response instead of a fresh create.
+struct MeetingsSheet: View {
+    let onJoin: (String) -> Void
+    @Environment(\.dismiss) var dismiss
+    @State private var meetings: [MeetingSummary] = []
+    @State private var loading = true
+    @State private var errorText: String? = nil
+    @State private var showForm = false
+
+    var body: some View {
+        NavigationStack {
+            SwiftUI.Group {
+                if showForm {
+                    ScheduleMeetingForm(onScheduled: {
+                        showForm = false
+                        Task { meetings = (try? await APIClient.shared.getUpcomingMeetings()) ?? [] }
+                    })
+                } else {
+                    VStack(spacing: 0) {
+                        if loading {
+                            Spacer()
+                            ProgressView()
+                            Spacer()
+                        } else if meetings.isEmpty {
+                            Spacer()
+                            Text("No upcoming meetings").foregroundColor(.textSecondary)
+                            Spacer()
+                        } else {
+                            List(meetings) { meeting in
+                                HStack(spacing: 12) {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(meeting.title ?? "Untitled meeting")
+                                            .foregroundColor(.textPrimary)
+                                        Text("\(formatMeetingTime(meeting.scheduled_at)) · \(meeting.creator_username)")
+                                            .font(.caption)
+                                            .foregroundColor(.textSecondary)
+                                    }
+                                    Spacer()
+                                    Button("Join") {
+                                        onJoin(meeting.join_code)
+                                    }
+                                    .buttonStyle(.borderedProminent)
+                                    .tint(.dilarionRed)
+                                }
+                                .listRowBackground(Color.surfaceWhite)
+                            }
+                            .listStyle(.plain)
+                        }
+                        if let errorText { Text(errorText).foregroundColor(.red).font(.caption).padding(.bottom, 4) }
+                        Button {
+                            showForm = true
+                        } label: {
+                            Text("+ Schedule a meeting")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(.white)
+                                .frame(maxWidth: .infinity)
+                                .padding()
+                                .background(Color.dilarionRed)
+                        }
+                    }
+                }
+            }
+            .navigationTitle(showForm ? "Schedule Meeting" : "Meetings")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button(showForm ? "Back" : "Close") {
+                        if showForm { showForm = false } else { dismiss() }
+                    }
+                    .foregroundColor(.dilarionRed)
+                }
+            }
+            .task {
+                loading = true
+                do {
+                    meetings = try await APIClient.shared.getUpcomingMeetings()
+                } catch {
+                    errorText = error.localizedDescription
+                }
+                loading = false
+            }
+        }
+    }
+}
+
+private struct ScheduleMeetingForm: View {
+    let onScheduled: () -> Void
+    @State private var title = ""
+    @State private var when = Date().addingTimeInterval(3600)
+    @State private var users: [UserProfile] = []
+    @State private var selected: Set<String> = []
+    @State private var scheduling = false
+    @State private var errorText: String? = nil
+
+    var body: some View {
+        Form {
+            Section {
+                TextField("Title (optional)", text: $title)
+                DatePicker("When", selection: $when, displayedComponents: [.date, .hourAndMinute])
+            }
+            Section("Invite") {
+                ForEach(users) { user in
+                    Button {
+                        if selected.contains(user.username) { selected.remove(user.username) }
+                        else { selected.insert(user.username) }
+                    } label: {
+                        HStack {
+                            Text(user.username).foregroundColor(.textPrimary)
+                            Spacer()
+                            if selected.contains(user.username) {
+                                Image(systemName: "checkmark.circle.fill").foregroundColor(.dilarionRed)
+                            } else {
+                                Image(systemName: "circle").foregroundColor(.gray)
+                            }
+                        }
+                    }
+                }
+            }
+            if let errorText {
+                Text(errorText).foregroundColor(.red).font(.caption)
+            }
+            Button {
+                Task {
+                    scheduling = true
+                    do {
+                        _ = try await APIClient.shared.createMeeting(
+                            title: title.isEmpty ? nil : title,
+                            scheduledAt: when,
+                            inviteeUsernames: Array(selected)
+                        )
+                        onScheduled()
+                    } catch {
+                        errorText = error.localizedDescription
+                    }
+                    scheduling = false
+                }
+            } label: {
+                if scheduling { ProgressView() } else { Text("Schedule") }
+            }
+            .disabled(scheduling)
+        }
+        .task {
+            users = (try? await APIClient.shared.get("/users")) ?? []
+        }
+    }
+}
+
+private func formatMeetingTime(_ iso: String) -> String {
+    let formatter = ISO8601DateFormatter()
+    guard let date = formatter.date(from: iso) else { return iso }
+    let out = DateFormatter()
+    out.dateStyle = .medium
+    out.timeStyle = .short
+    return out.string(from: date)
+}
 
 // MARK: — Helpers
 private func formatRelativeTime(_ iso: String) -> String {

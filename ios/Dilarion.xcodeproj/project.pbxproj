@@ -7,7 +7,10 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		02D686FB54E633F10E7382B7 /* WhiteboardAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4145AC0D4E849D983982A7D3 /* WhiteboardAPI.swift */; };
+		034D702131908429630C15DB /* WhiteboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0849BAED0C17934D572BF61B /* WhiteboardView.swift */; };
 		047C4EE27F7D412DD65AC699 /* ChatViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4EF3C6F3B25D150E5B6BD06 /* ChatViewModel.swift */; };
+		150CC365011F7AA163D3E52C /* ConferenceAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89295DB03ED33C705992DB55 /* ConferenceAPI.swift */; };
 		15A72698CF97985D343E5265 /* CallViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7295799F7AB80F621DF9E444 /* CallViewModel.swift */; };
 		33A0D845FA05CD0C1B4F0F8C /* EncryptionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5DE2CA43EE44058373ED57B /* EncryptionManager.swift */; };
 		3F9545025B9ACC67FF3F0F70 /* beep.mp3 in Resources */ = {isa = PBXBuildFile; fileRef = 23098E3EDBEEB1C39683230C /* beep.mp3 */; };
@@ -24,6 +27,8 @@
 		8857C821325EBFEADD11F313 /* WebRTC in Frameworks */ = {isa = PBXBuildFile; productRef = 62E1A614BACD62F98062CF9F /* WebRTC */; };
 		8F86E4BC4539851F0E2981F1 /* CallScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = F13C99AF91A793BAEC9DA987 /* CallScreen.swift */; };
 		931F2F731950CC76D91F1E06 /* NotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3E6CAC3323D535F2D22305F /* NotificationManager.swift */; };
+		9370ADDBE3A0B8B6B1D47D2F /* LinkedDevicesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A6D895A7B492504A85C8DEC /* LinkedDevicesView.swift */; };
+		9EAC73EB5A6CD9209CA8DC0D /* MeetingAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54829094FB0F5835B2865935 /* MeetingAPI.swift */; };
 		9FE39F6B85BC711690D95DF3 /* DilarionApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3824C745BAB34FEBB7D4A08B /* DilarionApp.swift */; };
 		A4CD86F2BD09390F9D432F92 /* WebSocketManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 215B380F2C09D5D6215D5DCE /* WebSocketManager.swift */; };
 		B0416DBBB0C44AE8C220854B /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2E3657829CBDDFCEA90910D /* Theme.swift */; };
@@ -37,19 +42,26 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		02454B71086337EFCBBBD6FF /* Config-Production.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = "Config-Production.xcconfig"; sourceTree = "<group>"; };
+		0849BAED0C17934D572BF61B /* WhiteboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhiteboardView.swift; sourceTree = "<group>"; };
+		0A6D895A7B492504A85C8DEC /* LinkedDevicesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinkedDevicesView.swift; sourceTree = "<group>"; };
 		13E3F38AA5469EF72821AEC5 /* AuthViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthViewModel.swift; sourceTree = "<group>"; };
 		215B380F2C09D5D6215D5DCE /* WebSocketManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSocketManager.swift; sourceTree = "<group>"; };
 		23098E3EDBEEB1C39683230C /* beep.mp3 */ = {isa = PBXFileReference; lastKnownFileType = audio.mp3; path = beep.mp3; sourceTree = "<group>"; };
 		2832BB0E973E571D8E467A47 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
-		304F6209D3ECDDDD1A9E2A41 /* Dilarion.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Dilarion.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		304F6209D3ECDDDD1A9E2A41 /* Dilarion.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Dilarion.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		340CCD2248A0564E43E43977 /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
 		3824C745BAB34FEBB7D4A08B /* DilarionApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DilarionApp.swift; sourceTree = "<group>"; };
-		3EB74BD63EE693409B3CB49A /* beep.caf */ = {isa = PBXFileReference; lastKnownFileType = file; path = beep.caf; sourceTree = "<group>"; };
+		3EB74BD63EE693409B3CB49A /* beep.caf */ = {isa = PBXFileReference; path = beep.caf; sourceTree = "<group>"; };
+		4145AC0D4E849D983982A7D3 /* WhiteboardAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhiteboardAPI.swift; sourceTree = "<group>"; };
+		47BE1437F53853AA884DBF70 /* Config-Staging.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = "Config-Staging.xcconfig"; sourceTree = "<group>"; };
 		4A2626A65920FDADD5A81619 /* HomeViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeViewModel.swift; sourceTree = "<group>"; };
+		54829094FB0F5835B2865935 /* MeetingAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingAPI.swift; sourceTree = "<group>"; };
 		6FDCC041288794B3F437A71F /* AudioManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioManager.swift; sourceTree = "<group>"; };
 		7295799F7AB80F621DF9E444 /* CallViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallViewModel.swift; sourceTree = "<group>"; };
 		7E972FEAD28A47DC9E47890B /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		807CBFCC58DE73E310051FD7 /* AuthView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthView.swift; sourceTree = "<group>"; };
+		89295DB03ED33C705992DB55 /* ConferenceAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConferenceAPI.swift; sourceTree = "<group>"; };
 		8B9DAABC50F76440C76C3B8F /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
 		A2A46771B6D96AFD7CDD634F /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
 		A4EF3C6F3B25D150E5B6BD06 /* ChatViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatViewModel.swift; sourceTree = "<group>"; };
@@ -57,7 +69,7 @@
 		C1B067D91F7D120277D38CBD /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		C2E3657829CBDDFCEA90910D /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		C67D021C3819CDEA9D273B2F /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
-		D0D3459E08EF91D89FB97473 /* ringingtone.caf */ = {isa = PBXFileReference; lastKnownFileType = file; path = ringingtone.caf; sourceTree = "<group>"; };
+		D0D3459E08EF91D89FB97473 /* ringingtone.caf */ = {isa = PBXFileReference; path = ringingtone.caf; sourceTree = "<group>"; };
 		D3E6CAC3323D535F2D22305F /* NotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationManager.swift; sourceTree = "<group>"; };
 		D5DE2CA43EE44058373ED57B /* EncryptionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EncryptionManager.swift; sourceTree = "<group>"; };
 		DFF41C81CB95EA9D4B2D1C63 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
@@ -81,6 +93,7 @@
 		084D29C6C2A147AFA415DBC2 /* Settings */ = {
 			isa = PBXGroup;
 			children = (
+				0A6D895A7B492504A85C8DEC /* LinkedDevicesView.swift */,
 				C1B067D91F7D120277D38CBD /* SettingsView.swift */,
 			);
 			path = Settings;
@@ -153,6 +166,7 @@
 				6FDCC041288794B3F437A71F /* AudioManager.swift */,
 				340CCD2248A0564E43E43977 /* ChatView.swift */,
 				A4EF3C6F3B25D150E5B6BD06 /* ChatViewModel.swift */,
+				0849BAED0C17934D572BF61B /* WhiteboardView.swift */,
 			);
 			path = Chat;
 			sourceTree = "<group>";
@@ -178,9 +192,22 @@
 			isa = PBXGroup;
 			children = (
 				8B9DAABC50F76440C76C3B8F /* APIClient.swift */,
+				89295DB03ED33C705992DB55 /* ConferenceAPI.swift */,
+				54829094FB0F5835B2865935 /* MeetingAPI.swift */,
 				215B380F2C09D5D6215D5DCE /* WebSocketManager.swift */,
+				4145AC0D4E849D983982A7D3 /* WhiteboardAPI.swift */,
 			);
 			path = Networking;
+			sourceTree = "<group>";
+		};
+		9F158E8BBB273FB956CF500B /* ios */ = {
+			isa = PBXGroup;
+			children = (
+				02454B71086337EFCBBBD6FF /* Config-Production.xcconfig */,
+				47BE1437F53853AA884DBF70 /* Config-Staging.xcconfig */,
+			);
+			name = ios;
+			path = .;
 			sourceTree = "<group>";
 		};
 		B190A66AED813EFC9D023CCE /* Home */ = {
@@ -195,6 +222,7 @@
 		BEC44676DE254B6204EF3EB9 = {
 			isa = PBXGroup;
 			children = (
+				9F158E8BBB273FB956CF500B /* ios */,
 				8836F07A1CDB54C684671D7E /* Resources */,
 				9188616C4E18B5C521F8371F /* Sources */,
 				D5AC11F5D66A1497C548D790 /* Products */,
@@ -240,6 +268,8 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+				};
 			};
 			buildConfigurationList = FE979BA282955E651E241AE6 /* Build configuration list for PBXProject "Dilarion" */;
 			developmentRegion = en;
@@ -292,11 +322,14 @@
 				15A72698CF97985D343E5265 /* CallViewModel.swift in Sources */,
 				EFD973B0BE21CD33557CA83A /* ChatView.swift in Sources */,
 				047C4EE27F7D412DD65AC699 /* ChatViewModel.swift in Sources */,
+				150CC365011F7AA163D3E52C /* ConferenceAPI.swift in Sources */,
 				9FE39F6B85BC711690D95DF3 /* DilarionApp.swift in Sources */,
 				33A0D845FA05CD0C1B4F0F8C /* EncryptionManager.swift in Sources */,
 				E3F4BBD674A4A776F67BAEE1 /* HomeView.swift in Sources */,
 				813776A23BA7123AFBD8A7D7 /* HomeViewModel.swift in Sources */,
 				B420BD44B7BDCE7B3385609D /* KeychainHelper.swift in Sources */,
+				9370ADDBE3A0B8B6B1D47D2F /* LinkedDevicesView.swift in Sources */,
+				9EAC73EB5A6CD9209CA8DC0D /* MeetingAPI.swift in Sources */,
 				599DAF03A64D856D05689C69 /* Models.swift in Sources */,
 				931F2F731950CC76D91F1E06 /* NotificationManager.swift in Sources */,
 				5DE4D52E646A565B7DF23882 /* SettingsView.swift in Sources */,
@@ -304,6 +337,8 @@
 				B0416DBBB0C44AE8C220854B /* Theme.swift in Sources */,
 				C10C85D79DC93563CD63385D /* WebRTCManager.swift in Sources */,
 				A4CD86F2BD09390F9D432F92 /* WebSocketManager.swift in Sources */,
+				02D686FB54E633F10E7382B7 /* WhiteboardAPI.swift in Sources */,
+				034D702131908429630C15DB /* WhiteboardView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -312,10 +347,10 @@
 /* Begin XCBuildConfiguration section */
 		2F182CBF8B1575C6D3DAF9A3 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 02454B71086337EFCBBBD6FF /* Config-Production.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				DEVELOPMENT_TEAM = QVN538RPPT;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Dilarion/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
@@ -331,10 +366,10 @@
 		};
 		45677A851B6FF9B3119EA685 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 02454B71086337EFCBBBD6FF /* Config-Production.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				DEVELOPMENT_TEAM = QVN538RPPT;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Dilarion/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
@@ -347,6 +382,25 @@
 				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Release;
+		};
+		6876ED3A22320642EB54FC2B /* Staging */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 47BE1437F53853AA884DBF70 /* Config-Staging.xcconfig */;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Dilarion/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.dilarion.Dilarion;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Staging;
 		};
 		7B19DB88334186100585E143 /* Release */ = {
 			isa = XCBuildConfiguration;
@@ -465,6 +519,61 @@
 			};
 			name = Debug;
 		};
+		D339351C5CA556CF3C89B244 /* Staging */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Staging;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -473,6 +582,7 @@
 			buildConfigurations = (
 				2F182CBF8B1575C6D3DAF9A3 /* Debug */,
 				45677A851B6FF9B3119EA685 /* Release */,
+				6876ED3A22320642EB54FC2B /* Staging */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;
@@ -482,6 +592,7 @@
 			buildConfigurations = (
 				C47C7C1D3D110C8E3AA1B969 /* Debug */,
 				7B19DB88334186100585E143 /* Release */,
+				D339351C5CA556CF3C89B244 /* Staging */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

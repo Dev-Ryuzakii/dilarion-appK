@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 
-const WS_BASE = 'wss://apidilarion.eibstratoc.com/ws';
+const WS_BASE = (import.meta.env.VITE_WS_BASE as string | undefined) || 'wss://apidilarion.eibstratoc.com/ws';
 
 export type WsMessage = {
   type: string;

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { downloadMedia } from '../services/api';
+import { downloadMedia, downloadDecoyFile, confirmMasterToken } from '../services/api';
 import { CameraIcon, MicIcon as MicIconSvg, PaperclipIcon as PaperclipIconSvg, SpinnerIcon } from './Icons';
 
 // Best-effort classification from the server's content_type, used only for the
@@ -101,6 +101,12 @@ function MediaLightbox({ src, kind, onClose }: { src: string; kind: MediaKind; o
             controls
             autoPlay
             style={{ maxWidth: '90vw', maxHeight: '82vh', borderRadius: 8, background: '#000' }}
+          />
+        ) : kind === 'file' ? (
+          <iframe
+            src={src}
+            title="document"
+            style={{ width: '80vw', height: '82vh', border: 'none', borderRadius: 8, background: '#fff' }}
           />
         ) : (
           <img
@@ -275,5 +281,209 @@ export default function MediaBubble({ token, mediaId, contentType, onRemove }: {
       {loading ? <SpinnerIcon size={22} /> : iconEl}
       <span>{loading ? 'Loading...' : label}</span>
     </button>
+  );
+}
+
+// ── DocumentBubble ─────────────────────────────────────────────────────────────
+
+// data: URL, kept only in memory for as long as the viewer is open — nothing
+// here ever touches disk, matching how images/video are already handled above.
+function toDataUrl(bytes: Uint8Array, mime: string): string {
+  let b64 = '';
+  for (let i = 0; i < bytes.length; i++) b64 += String.fromCharCode(bytes[i]);
+  return `data:${mime};base64,${btoa(b64)}`;
+}
+
+type DocStage = 'idle' | 'loading' | 'decoy' | 'revealing' | 'revealed';
+
+/**
+ * A document attachment that opens the decoy on the first tap — no gate, same
+ * as anyone else opening it would see — and only offers the real file behind a
+ * double-tap + master token, mirroring EncryptedBubble's reveal for text. The
+ * pre-tap and decoy states must look identical to a plain attachment; nothing
+ * in the UI may hint that a decoy exists until the real content is unlocked.
+ */
+export function DocumentBubble({
+  token,
+  mediaId,
+  masterToken,
+  onMasterTokenSaved,
+  onRemove,
+}: {
+  token: string;
+  mediaId: string;
+  masterToken: string | null;
+  onMasterTokenSaved: (t: string) => void;
+  onRemove?: () => void;
+}) {
+  const [stage, setStage] = useState<DocStage>('idle');
+  const [error, setError] = useState<string | null>(null);
+  const [tokenInputVisible, setTokenInputVisible] = useState(false);
+  const [tokenValue, setTokenValue] = useState('');
+  const [viewerUrl, setViewerUrl] = useState<string | null>(null);
+  const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => { if (clickTimerRef.current) clearTimeout(clickTimerRef.current); };
+  }, []);
+
+  function closeViewer() {
+    // Drop it from memory on close — reopening re-fetches rather than keeping
+    // decoded bytes sitting around. For the real file this also means it can't
+    // be viewed again without the server round-trip, which will 410 anyway
+    // since the server already deleted it after this one read.
+    const wasRevealed = stage === 'revealed';
+    setViewerUrl(null);
+    // Only remove the message once the user has actually seen the real file and
+    // dismissed it — calling this from reveal() itself would unmount the bubble
+    // (and its just-opened viewer) before anything ever painted.
+    if (wasRevealed) onRemove?.();
+  }
+
+  // Also used to reopen the decoy after the viewer's been closed once — nothing
+  // stays cached client-side, so that's a plain re-fetch, not a special case.
+  async function loadDecoy() {
+    setError(null);
+    try {
+      const blob = await downloadDecoyFile(token, mediaId);
+      const buf = new Uint8Array(await blob.arrayBuffer());
+      setViewerUrl(toDataUrl(buf, 'application/pdf'));
+      setStage('decoy');
+    } catch {
+      setError('Failed to load');
+      setStage('idle');
+    }
+  }
+
+  async function reveal(mToken: string) {
+    setStage('revealing');
+    setError(null);
+    try {
+      const valid = masterToken === mToken ? true : await confirmMasterToken(token, mToken);
+      if (!valid) {
+        setError('Invalid master token');
+        setStage('decoy');
+        return;
+      }
+      onMasterTokenSaved(mToken);
+      const blob = await downloadMedia(token, mediaId);
+      const buf = new Uint8Array(await blob.arrayBuffer());
+      const { mime } = sniffMedia(buf);
+      setViewerUrl(toDataUrl(buf, mime));
+      setStage('revealed');
+      setTokenInputVisible(false);
+      setTokenValue('');
+      // Message removal happens on viewer close (closeViewer), not here — see
+      // its comment for why.
+    } catch (err: any) {
+      // 410/404: the real file is already gone server-side (viewed elsewhere,
+      // or expired). The decoy is unaffected — fall back to it, not an error.
+      if (err?.status === 410 || err?.status === 404) {
+        setStage('decoy');
+      } else {
+        setError('Failed to reveal');
+        setStage('decoy');
+      }
+    }
+  }
+
+  function handleClick() {
+    // Delayed so a double-click's leading click doesn't race loadDecoy() against
+    // the reveal that the trailing dblclick is about to trigger. If a second
+    // click arrives in time, handleDoubleClick cancels this before it runs.
+    if (clickTimerRef.current) return;
+    clickTimerRef.current = setTimeout(() => {
+      clickTimerRef.current = null;
+      if (stage === 'idle') loadDecoy();
+      else if (stage === 'decoy' && !viewerUrl) loadDecoy();
+    }, 280);
+  }
+
+  function handleDoubleClick() {
+    if (clickTimerRef.current) {
+      clearTimeout(clickTimerRef.current);
+      clickTimerRef.current = null;
+    }
+    if (stage !== 'decoy') return;
+    if (masterToken) {
+      reveal(masterToken);
+    } else {
+      setTokenInputVisible(v => !v);
+    }
+  }
+
+  async function handleSubmitToken() {
+    const trimmed = tokenValue.trim();
+    if (!trimmed) return;
+    await reveal(trimmed);
+  }
+
+  const loading = stage === 'loading' || stage === 'revealing';
+  // A generic-looking filename, not an action hint — reads like any other
+  // attachment bubble instead of announcing that tapping does something special.
+  const label = stage === 'loading' ? 'Loading...' : stage === 'revealing' ? 'Verifying...' : 'Document.pdf';
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <button
+        onClick={handleClick}
+        onDoubleClick={handleDoubleClick}
+        disabled={loading}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          background: 'var(--bg-card)',
+          border: '1px solid var(--border-color)',
+          borderRadius: 10,
+          padding: '12px 16px',
+          cursor: loading ? 'wait' : 'pointer',
+          color: 'var(--text-muted)',
+          fontSize: '0.85rem',
+          opacity: loading ? 0.7 : 1,
+        }}
+      >
+        {loading ? <SpinnerIcon size={22} /> : <PaperclipIconSvg size={22} color="#9ca3af" />}
+        <span>{label}</span>
+      </button>
+
+      {tokenInputVisible && !masterToken && (
+        <div style={{ display: 'flex', gap: 6 }}>
+          <input
+            type="password"
+            placeholder="Master token"
+            value={tokenValue}
+            onChange={e => setTokenValue(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') handleSubmitToken(); }}
+            style={{
+              flex: 1,
+              background: 'var(--input-field-bg)',
+              border: '1px solid var(--border-color)',
+              borderRadius: 8,
+              color: 'var(--text-primary)',
+              fontSize: '0.8rem',
+              padding: '6px 10px',
+            }}
+            autoFocus
+          />
+          <button
+            style={{
+              background: 'var(--accent)',
+              color: '#fff',
+              fontSize: '0.75rem',
+              borderRadius: 8,
+              padding: '6px 12px',
+              cursor: 'pointer',
+              border: 'none',
+            }}
+            onClick={handleSubmitToken}
+          >
+            OK
+          </button>
+        </div>
+      )}
+      {error && <span style={{ fontSize: '0.72rem', color: '#ef4444' }}>{error}</span>}
+      {viewerUrl && <MediaLightbox src={viewerUrl} kind="file" onClose={closeViewer} />}
+    </div>
   );
 }

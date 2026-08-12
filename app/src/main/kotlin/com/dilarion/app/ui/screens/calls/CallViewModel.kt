@@ -627,6 +627,112 @@ class CallViewModel @Inject constructor(
         }.getOrElse { it.message ?: "Could not join the call" }
     }
 
+    /**
+     * Accept a group-call invite that will render via GalleryScreen (LiveKit),
+     * not this ViewModel's mesh path — no webrtcManager/observeWsEvents here,
+     * just the REST accept call so the caller can navigate straight to Gallery.
+     */
+    suspend fun acceptConferenceForGallery(conferenceId: Int, masterToken: String): String? {
+        val token = sessionManager.sessionToken.first() ?: return "Not signed in"
+        return runCatching {
+            val resp = apiService.conferenceAccept(
+                "Bearer $token",
+                conferenceId,
+                mapOf("mastertoken" to masterToken),
+            )
+            if (resp.code() == 401) return "Master token rejected"
+            if (!resp.isSuccessful) return "Could not join the call (${resp.code()})"
+            null
+        }.getOrElse { it.message ?: "Could not join the call" }
+    }
+
+    /**
+     * Starts a fresh meeting with no prior 1:1 call — call_id is omitted, which
+     * the backend already treats as "standalone conference" (payload.get returns
+     * None either way). Mirrors joinConference's media-before-signaling ordering:
+     * mic must be up before invitees accept, or the peer connections built on
+     * their side have no inbound track from us.
+     */
+    fun startStandaloneConference(invitees: List<String>) {
+        if (invitees.isEmpty()) return
+        viewModelScope.launch {
+            val token = sessionManager.sessionToken.first() ?: return@launch
+            runCatching {
+                webRtcManager.initialize()
+                refreshIceServers(token)
+                webRtcManager.startLocalStream(withVideo = false)
+                observeWsEvents()
+
+                val resp = apiService.createConference("Bearer $token", emptyMap())
+                val confId = resp.body()?.get("conference_id")?.asInt
+                    ?: throw IllegalStateException("Failed to start meeting")
+
+                _uiState.value = CallUiState(
+                    state = CallState.CONNECTED,
+                    peerUsername = invitees.first(),
+                    callType = CallType.VOICE,
+                )
+                _conferenceState.value = ConferenceUiState(
+                    conferenceId = confId,
+                    participants = invitees,
+                    isActive = true,
+                )
+                rememberSession()
+                startTimer()
+
+                invitees.forEach { username ->
+                    apiService.conferenceInvite("Bearer $token", confId, mapOf("username" to username))
+                }
+            }.onFailure { e ->
+                _uiState.value = _uiState.value.copy(
+                    error = e.message ?: "Could not start meeting",
+                    state = CallState.ENDED,
+                )
+            }
+        }
+    }
+
+    /**
+     * Joins a scheduled meeting by code. join_by_code returns {conference_id,
+     * participants} in the exact shape createConference+invite does, so this
+     * mirrors startStandaloneConference's media-before-signaling ordering —
+     * the only difference is the conference already exists (or gets created on
+     * our behalf as the first joiner) instead of being created fresh here.
+     */
+    fun joinScheduledMeeting(joinCode: String, onError: (String) -> Unit = {}) {
+        viewModelScope.launch {
+            val token = sessionManager.sessionToken.first() ?: return@launch
+            runCatching {
+                webRtcManager.initialize()
+                refreshIceServers(token)
+                webRtcManager.startLocalStream(withVideo = false)
+                observeWsEvents()
+
+                val resp = apiService.joinMeetingByCode(
+                    "Bearer $token",
+                    com.dilarion.app.data.model.MeetingJoinRequest(joinCode = joinCode)
+                )
+                if (!resp.isSuccessful) throw IllegalStateException("Could not join the meeting (${resp.code()})")
+                val body = resp.body() ?: throw IllegalStateException("Could not join the meeting")
+
+                _uiState.value = CallUiState(
+                    state = CallState.CONNECTED,
+                    peerUsername = body.participants.firstOrNull() ?: "",
+                    callType = CallType.VOICE,
+                )
+                _conferenceState.value = ConferenceUiState(
+                    conferenceId = body.conferenceId,
+                    participants = body.participants,
+                    isActive = true,
+                )
+                rememberSession()
+                startTimer()
+            }.onFailure { e ->
+                onError(e.message ?: "Could not join the meeting")
+            }
+        }
+    }
+
     fun startConference(callId: Int) {
         viewModelScope.launch {
             val token = sessionManager.sessionToken.first() ?: return@launch

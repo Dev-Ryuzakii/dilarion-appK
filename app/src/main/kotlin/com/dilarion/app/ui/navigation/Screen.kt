@@ -17,6 +17,24 @@ sealed class Screen(val route: String) {
     }
     object Settings      : Screen("settings")
     object OnlineUsers   : Screen("online_users")
+    object NewMeeting    : Screen("new_meeting")
+    object Meetings      : Screen("meetings")
+    object Whiteboard    : Screen("whiteboard?username={username}&groupId={groupId}&conferenceId={conferenceId}") {
+        fun route(username: String? = null, groupId: Int? = null, conferenceId: Int? = null) =
+            "whiteboard?username=${username ?: ""}&groupId=${groupId ?: -1}&conferenceId=${conferenceId ?: -1}"
+    }
+    object Gallery       : Screen("gallery/{conferenceId}?micOn={micOn}&camOn={camOn}&displayName={displayName}") {
+        fun route(conferenceId: Int, micOn: Boolean = true, camOn: Boolean = true, displayName: String? = null) =
+            "gallery/$conferenceId?micOn=$micOn&camOn=$camOn&displayName=${(displayName ?: "").encodeToUrl()}"
+    }
+    object Lobby : Screen("lobby?mode={mode}&joinCode={joinCode}&title={title}&conferenceId={conferenceId}") {
+        fun route(mode: String, joinCode: String? = null, title: String? = null, conferenceId: Int? = null) =
+            "lobby?mode=$mode&joinCode=${joinCode ?: ""}&title=${(title ?: "").encodeToUrl()}&conferenceId=${conferenceId ?: -1}"
+    }
+    object Waiting : Screen("waiting/{conferenceId}?micOn={micOn}&camOn={camOn}&displayName={displayName}") {
+        fun route(conferenceId: Int, micOn: Boolean = true, camOn: Boolean = true, displayName: String? = null) =
+            "waiting/$conferenceId?micOn=$micOn&camOn=$camOn&displayName=${(displayName ?: "").encodeToUrl()}"
+    }
     object MasterToken   : Screen("master_token")
     object LinkedDevices : Screen("linked_devices")
 }

@@ -45,7 +45,11 @@ class APIClient {
     static let turnUser = "dilarion"
     static let turnPass = "dilarion2026"
 
-    private let baseURL = "https://apidilarion.eibstratoc.com"
+    // Set via API_BASE_URL in Config-Production.xcconfig / Config-Staging.xcconfig,
+    // injected into Info.plist at build time. Falls back to production so a
+    // misconfigured build never silently talks to nothing.
+    private let baseURL = (Bundle.main.object(forInfoDictionaryKey: "APIBaseURL") as? String)
+        .flatMap { $0.isEmpty ? nil : $0 } ?? "https://apidilarion.eibstratoc.com"
     private var token: String? {
         KeychainHelper.shared.read(key: "session_token")
     }

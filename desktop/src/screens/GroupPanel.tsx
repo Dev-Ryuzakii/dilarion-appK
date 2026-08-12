@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import {
   ChatMessage,
+  DecoyKind,
   Group,
   GroupMember,
   getGroupMessages,
@@ -9,13 +10,16 @@ import {
   getUserDevices,
   decryptChatMessage,
   confirmMasterToken,
+  uploadGroupMedia,
 } from '../services/api';
 import { encryptMessage } from '../services/crypto';
 import { generateDecoy } from '../services/decoy';
 import { loadKeypair } from '../services/keys';
 import { presenceService, WsMessage } from '../services/presence';
-import { LockIcon } from '../components/Icons';
-import MediaBubble from '../components/MediaBubble';
+import { LockIcon, PaperclipIcon as PaperclipIconSvg } from '../components/Icons';
+import MediaBubble, { DocumentBubble } from '../components/MediaBubble';
+import WhiteboardModal from '../components/WhiteboardModal';
+import MeetingCard, { JoinMeetingHandler } from '../components/MeetingCard';
 
 interface Props {
   token: string;
@@ -23,12 +27,16 @@ interface Props {
   group: Group;
   masterToken: string | null;
   onMasterTokenSaved: (t: string) => void;
+  onJoinMeeting: JoinMeetingHandler;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 function isEncrypted(ct: string | null | undefined): boolean {
   return ct === 'encrypted';
+}
+function isMeeting(ct: string | null | undefined): boolean {
+  return ct === 'meeting';
 }
 
 // Legacy rows written by the old server fallback. These strings must never reach
@@ -50,6 +58,16 @@ function isImage(ct: string | null | undefined): boolean {
 function isMedia(ct: string | null | undefined): boolean {
   return !!(ct?.startsWith('media/') || ct?.startsWith('application/'));
 }
+function isDocument(ct: string | null | undefined): boolean {
+  return isMedia(ct) && !isImage(ct) && !isVoice(ct);
+}
+
+const DECOY_KIND_LABELS: [DecoyKind, string][] = [
+  ['invoice', 'Invoice'],
+  ['delivery', 'Delivery note'],
+  ['minutes', 'Meeting minutes'],
+  ['memo', 'Memo'],
+];
 
 function initials(name: string): string {
   return name
@@ -262,9 +280,10 @@ interface GroupMsgBubbleProps {
   masterToken: string | null;
   onDecrypt: (masterToken: string, messageId: number) => Promise<string>;
   onMasterTokenSaved: (t: string) => void;
+  onJoinMeeting: JoinMeetingHandler;
 }
 
-function GroupMsgBubble({ msg, isMine, myUsername, token, masterToken, onDecrypt, onMasterTokenSaved }: GroupMsgBubbleProps) {
+function GroupMsgBubble({ msg, isMine, myUsername, token, masterToken, onDecrypt, onMasterTokenSaved, onJoinMeeting }: GroupMsgBubbleProps) {
   const ct = msg.content_type;
   const mediaId = msg.content;
   const isPrivateTagged = ct === 'private_tagged';
@@ -272,7 +291,9 @@ function GroupMsgBubble({ msg, isMine, myUsername, token, masterToken, onDecrypt
   const isForMe = hasRecipient && msg.recipient === myUsername;
 
   let body: React.ReactNode;
-  if (isPrivateTagged) {
+  if (isMeeting(ct)) {
+    body = <MeetingCard content={msg.content} senderUsername={msg.sender} onJoin={onJoinMeeting} />;
+  } else if (isPrivateTagged) {
     body = <PrivateTagBubble recipient={msg.recipient || '?'} />;
   } else if (isEncrypted(ct)) {
     body = (
@@ -282,6 +303,15 @@ function GroupMsgBubble({ msg, isMine, myUsername, token, masterToken, onDecrypt
         decoyContent={msg.decoy_content || ''}
         masterToken={masterToken}
         onDecrypt={onDecrypt}
+        onMasterTokenSaved={onMasterTokenSaved}
+      />
+    );
+  } else if (isDocument(ct)) {
+    body = (
+      <DocumentBubble
+        token={token}
+        mediaId={mediaId}
+        masterToken={masterToken}
         onMasterTokenSaved={onMasterTokenSaved}
       />
     );
@@ -358,17 +388,20 @@ function MessageSkeleton() {
 
 // ── GroupPanel ─────────────────────────────────────────────────────────────────
 
-export default function GroupPanel({ token, myUsername, group, masterToken, onMasterTokenSaved }: Props) {
+export default function GroupPanel({ token, myUsername, group, masterToken, onMasterTokenSaved, onJoinMeeting }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
+  const [pendingDocFile, setPendingDocFile] = useState<File | null>(null);
+  const [showWhiteboard, setShowWhiteboard] = useState(false);
   const [taggedUser, setTaggedUser] = useState<string | null>(null);
   const [members, setMembers] = useState<GroupMember[]>([]);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const loadMessages = useCallback(async () => {
     try {
@@ -458,6 +491,38 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
     }
   }
 
+  // ── File attach ──────────────────────────────────────────────────────────────
+
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+    const ct = file.type || 'application/octet-stream';
+    if (isDocument(ct)) {
+      setPendingDocFile(file);
+      return;
+    }
+    try {
+      await uploadGroupMedia(token, group.id, file, ct, file.name);
+      await loadMessages();
+    } catch (err: any) {
+      setSendError(err?.message || 'Failed to send file');
+    }
+  }
+
+  async function sendPendingDoc(kind?: DecoyKind) {
+    const file = pendingDocFile;
+    if (!file) return;
+    setPendingDocFile(null);
+    const ct = file.type || 'application/octet-stream';
+    try {
+      await uploadGroupMedia(token, group.id, file, ct, file.name, kind);
+      await loadMessages();
+    } catch (err: any) {
+      setSendError(err?.message || 'Failed to send file');
+    }
+  }
+
   function handleTextChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
     const val = e.target.value;
     setText(val);
@@ -492,7 +557,7 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
   return (
     <div style={gs.root}>
       {/* Header */}
-      <div style={gs.header}>
+      <div style={{ ...gs.header, justifyContent: 'space-between' }}>
         <div style={gs.headerLeft}>
           <div style={{ ...gs.avatar, background: avatarBg }}>{initials(group.name)}</div>
           <div>
@@ -500,7 +565,16 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
             <div style={gs.groupMeta}>{group.member_count} members</div>
           </div>
         </div>
+        <button onClick={() => setShowWhiteboard(true)} style={gs.iconBtn} title="Whiteboard">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 19l7-7 3 3-7 7-3-3z" /><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z" /><path d="M2 2l7.586 7.586" /><circle cx="11" cy="11" r="2" />
+          </svg>
+        </button>
       </div>
+
+      {showWhiteboard && (
+        <WhiteboardModal token={token} target={{ groupId: group.id }} onClose={() => setShowWhiteboard(false)} />
+      )}
 
       {/* Messages */}
       <div style={gs.messagesArea}>
@@ -533,6 +607,7 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
                 masterToken={masterToken}
                 onDecrypt={handleDecrypt}
                 onMasterTokenSaved={onMasterTokenSaved}
+                onJoinMeeting={onJoinMeeting}
               />
             );
             return acc;
@@ -598,6 +673,41 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
         </div>
       )}
 
+      {pendingDocFile && (
+        <div style={{
+          padding: '10px 16px',
+          background: 'var(--bg-card)',
+          borderTop: '1px solid var(--border-color)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 8,
+        }}>
+          <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+            Decoy for "{pendingDocFile.name}":
+          </span>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {DECOY_KIND_LABELS.map(([kind, label]) => (
+              <button
+                key={kind}
+                onClick={() => sendPendingDoc(kind)}
+                style={gs.decoyKindBtn}
+              >
+                {label}
+              </button>
+            ))}
+            <button onClick={() => sendPendingDoc()} style={gs.decoyKindBtn}>
+              Random
+            </button>
+            <button
+              onClick={() => setPendingDocFile(null)}
+              style={{ ...gs.decoyKindBtn, color: '#ef4444', border: '1px solid rgba(239,68,68,0.4)' }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Input bar */}
       <div style={{ ...gs.inputBar, flexDirection: 'column', gap: 6, alignItems: 'stretch' }}>
         {taggedUser && (
@@ -613,6 +723,20 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
           </div>
         )}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*,video/*,application/pdf"
+            style={{ display: 'none' }}
+            onChange={handleFileChange}
+          />
+          <button
+            style={gs.iconBtn}
+            onClick={() => fileInputRef.current?.click()}
+            title="Attach file"
+          >
+            <PaperclipIconSvg size={18} color="#6b7280" />
+          </button>
           <textarea
             ref={inputRef}
             style={gs.textInput}
@@ -769,6 +893,28 @@ const gs: Record<string, React.CSSProperties> = {
     flexShrink: 0,
     transition: 'background 0.15s',
     border: 'none',
+    cursor: 'pointer',
+  },
+  iconBtn: {
+    background: 'transparent',
+    color: '#6b7280',
+    padding: 8,
+    borderRadius: '50%',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    transition: 'color 0.15s',
+    border: 'none',
+    cursor: 'pointer',
+  },
+  decoyKindBtn: {
+    background: 'var(--input-field-bg)',
+    border: '1px solid var(--border-color)',
+    borderRadius: 8,
+    color: 'var(--text-primary)',
+    fontSize: '0.78rem',
+    padding: '6px 12px',
     cursor: 'pointer',
   },
 };

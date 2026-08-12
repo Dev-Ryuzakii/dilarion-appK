@@ -1,6 +1,9 @@
 import { decryptMessage as decryptMessageLocal, resolveEncryptedKey } from './crypto';
 
-const BASE = 'https://apidilarion.eibstratoc.com';
+// VITE_API_BASE comes from .env.production / .env.test (see package.json build:test).
+// Falls back to production so a plain `npm run build` with no mode flag never
+// silently points at the test backend.
+const BASE = import.meta.env.VITE_API_BASE || 'https://apidilarion.eibstratoc.com';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -229,6 +232,9 @@ export async function sendText(
   if (!res.ok) throw new Error('Failed to send message');
 }
 
+// Must match DECOY_KINDS in the backend.
+export type DecoyKind = 'invoice' | 'delivery' | 'minutes' | 'memo';
+
 // ── Upload media ───────────────────────────────────────────────────────────────
 
 export async function uploadMedia(
@@ -237,12 +243,36 @@ export async function uploadMedia(
   file: File | Blob,
   contentType: string,
   filename: string,
+  decoyKind?: DecoyKind,
 ): Promise<{ media_id: string }> {
   const form = new FormData();
   form.append('username', recipient);
   form.append('file', file, filename);
   form.append('content_type', contentType);
+  if (decoyKind) form.append('decoy_kind', decoyKind);
   const res = await fetch(`${BASE}/media/upload_raw`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  });
+  if (!res.ok) throw new Error('Failed to upload media');
+  return res.json();
+}
+
+export async function uploadGroupMedia(
+  token: string,
+  groupId: number,
+  file: File | Blob,
+  contentType: string,
+  filename: string,
+  decoyKind?: DecoyKind,
+): Promise<{ media_id: string }> {
+  const form = new FormData();
+  form.append('group_id', String(groupId));
+  form.append('file', file, filename);
+  form.append('content_type', contentType);
+  if (decoyKind) form.append('decoy_kind', decoyKind);
+  const res = await fetch(`${BASE}/media/upload_raw_group`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
     body: form,
@@ -260,6 +290,16 @@ export async function downloadMedia(token: string, mediaId: string): Promise<Blo
   if (res.status === 410) throw Object.assign(new Error('Media was already viewed and deleted'), { status: 410 });
   if (res.status === 404) throw Object.assign(new Error('Media not found'), { status: 404 });
   if (!res.ok) throw Object.assign(new Error('Failed to download media'), { status: res.status });
+  return res.blob();
+}
+
+// Stand-in document shown before a master-token reveal. Reusable, cached
+// server-side, and never deletes the real file — safe to fetch repeatedly.
+export async function downloadDecoyFile(token: string, mediaId: string): Promise<Blob> {
+  const res = await fetch(`${BASE}/media/decoy-file/${encodeURIComponent(mediaId)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw Object.assign(new Error('Failed to load decoy'), { status: res.status });
   return res.blob();
 }
 
@@ -566,12 +606,18 @@ export async function sendCallIceCandidate(
 
 // ── Conference ────────────────────────────────────────────────────────────────
 
-export async function createConference(token: string, callId: number): Promise<{ conference_id: number }> {
+/**
+ * Creates a conference. `callId` upgrades an existing 1:1 call into one;
+ * omit it to start a fresh standalone meeting (the backend's call_id is
+ * optional — `payload.get("call_id")` — so this needs no new endpoint).
+ */
+export async function createConference(token: string, callId?: number): Promise<{ conference_id: number }> {
   const res = await fetch(`${BASE}/calls/conference/create`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ call_id: callId }),
+    body: JSON.stringify({ call_id: callId ?? null }),
   });
+  if (!res.ok) throw new Error(`Failed to create conference (${res.status})`);
   return res.json();
 }
 
@@ -628,6 +674,171 @@ export async function conferenceLeave(token: string, conferenceId: number): Prom
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
   });
+}
+
+/** LiveKit room-access token for group video (gallery view). Room maps 1:1 onto the conference. */
+export interface LiveKitTokenResponse {
+  url: string;
+  token: string;
+  room: string;
+}
+
+export async function getLiveKitToken(token: string, conferenceId: number, displayName?: string): Promise<LiveKitTokenResponse> {
+  const qs = displayName?.trim() ? `?display_name=${encodeURIComponent(displayName.trim())}` : '';
+  const res = await fetch(`${BASE}/calls/conference/${conferenceId}/livekit-token${qs}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    const err: Error & { status?: number } = new Error(
+      res.status === 503 ? 'Group video is not set up on this server yet' : `Failed to get video token (${res.status})`,
+    );
+    err.status = res.status;
+    throw err;
+  }
+  return res.json();
+}
+
+// ── Scheduled meetings ───────────────────────────────────────────────────────
+// A meeting is inert until someone joins — join_by_code hands back a
+// conference_id + participants shaped exactly like an instant meeting's
+// create+invite, so the client join path is identical either way.
+
+export interface MeetingSummary {
+  id: number;
+  title: string | null;
+  scheduled_at: string;
+  duration_minutes: number;
+  status: 'upcoming' | 'live' | 'ended' | 'cancelled';
+  join_code: string;
+  creator_username: string;
+  group_id: number | null;
+  waiting_room_enabled?: boolean;
+}
+
+export async function createMeeting(
+  token: string,
+  opts: {
+    title?: string;
+    scheduledAt: string; // ISO 8601
+    durationMinutes?: number;
+    groupId?: number;
+    inviteeUsernames?: string[];
+    recurrence?: string;
+    waitingRoomEnabled?: boolean;
+  },
+): Promise<{ meeting_id: number; join_code: string; scheduled_at: string }> {
+  const res = await fetch(`${BASE}/meetings/create`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      title: opts.title ?? null,
+      scheduled_at: opts.scheduledAt,
+      duration_minutes: opts.durationMinutes ?? 60,
+      group_id: opts.groupId ?? null,
+      invitee_usernames: opts.inviteeUsernames ?? null,
+      recurrence: opts.recurrence ?? null,
+      waiting_room_enabled: opts.waitingRoomEnabled ?? false,
+    }),
+  });
+  if (!res.ok) throw new Error(`Failed to schedule meeting (${res.status})`);
+  return res.json();
+}
+
+export async function getUpcomingMeetings(token: string): Promise<MeetingSummary[]> {
+  const res = await fetch(`${BASE}/meetings/upcoming`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error(`Failed to load meetings (${res.status})`);
+  const body = await res.json();
+  return body.meetings ?? [];
+}
+
+export async function joinMeetingByCode(
+  token: string,
+  joinCode: string,
+): Promise<{ conference_id: number; status: 'admitted' | 'waiting'; participants: string[] }> {
+  const res = await fetch(`${BASE}/meetings/join_by_code`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ join_code: joinCode }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || `Failed to join meeting (${res.status})`);
+  }
+  return res.json();
+}
+
+export async function cancelMeeting(token: string, meetingId: number): Promise<void> {
+  const res = await fetch(`${BASE}/meetings/${meetingId}/cancel`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error(`Failed to cancel meeting (${res.status})`);
+}
+
+// ── Waiting room ────────────────────────────────────────────────────────────
+
+export interface WaitingParticipant {
+  user_id: number;
+  username: string;
+}
+
+export async function getWaitingRoom(token: string, conferenceId: number): Promise<WaitingParticipant[]> {
+  const res = await fetch(`${BASE}/calls/conference/${conferenceId}/waiting-room`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error(`Failed to load waiting room (${res.status})`);
+  const body = await res.json();
+  return body.waiting ?? [];
+}
+
+export async function admitFromWaitingRoom(token: string, conferenceId: number, userId: number): Promise<void> {
+  const res = await fetch(`${BASE}/calls/conference/${conferenceId}/waiting-room/${userId}/admit`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error(`Failed to admit (${res.status})`);
+}
+
+export async function denyFromWaitingRoom(token: string, conferenceId: number, userId: number): Promise<void> {
+  const res = await fetch(`${BASE}/calls/conference/${conferenceId}/waiting-room/${userId}/deny`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error(`Failed to deny (${res.status})`);
+}
+
+// ── Whiteboard ───────────────────────────────────────────────────────────────
+// Ephemeral for v1 — strokes relay live via WS, nothing is persisted server-
+// side, so a fresh open starts with a blank board. Exactly one of
+// username/groupId identifies the target.
+
+export interface WhiteboardTarget {
+  username?: string;
+  groupId?: number;
+}
+
+export interface WhiteboardStroke {
+  x0: number; y0: number; x1: number; y1: number; // normalized 0..1, canvas-size independent
+  color: string;
+  width: number;
+}
+
+export async function sendWhiteboardStroke(token: string, target: WhiteboardTarget, stroke: WhiteboardStroke): Promise<void> {
+  await fetch(`${BASE}/whiteboard/stroke`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ username: target.username ?? null, group_id: target.groupId ?? null, stroke }),
+  }).catch(() => {});
+}
+
+export async function sendWhiteboardClear(token: string, target: WhiteboardTarget): Promise<void> {
+  await fetch(`${BASE}/whiteboard/clear`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ username: target.username ?? null, group_id: target.groupId ?? null }),
+  }).catch(() => {});
 }
 
 // ── Master token ───────────────────────────────────────────────────────────────

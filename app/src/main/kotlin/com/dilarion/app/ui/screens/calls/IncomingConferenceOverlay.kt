@@ -30,6 +30,7 @@ import kotlinx.coroutines.launch
 fun IncomingConferenceOverlay(
     invite: ConferenceInviteData,
     onDismiss: () -> Unit,
+    onJoined: (Int) -> Unit,
 ) {
     val viewModel: CallViewModel = hiltViewModel(LocalContext.current as ComponentActivity)
 
@@ -53,11 +54,11 @@ fun IncomingConferenceOverlay(
                 showTokenDialog = false
                 joining = true
                 scope.launch {
-                    val failure = viewModel.joinConference(invite.conferenceId, entered)
+                    val failure = viewModel.acceptConferenceForGallery(invite.conferenceId, entered)
                     joining = false
                     if (failure == null) {
                         NotificationHelper.stopRingtone()
-                        onDismiss()
+                        onJoined(invite.conferenceId)
                     } else if (failure == "Master token rejected") {
                         // Keep ringing so a typo can be corrected.
                         rejected = true

@@ -17,11 +17,22 @@ import {
   CallRecord,
   conferenceAccept,
   conferenceDecline,
+  createConference,
+  conferenceInvite as apiConferenceInvite,
+  createMeeting,
+  getUpcomingMeetings,
+  joinMeetingByCode,
+  cancelMeeting,
+  MeetingSummary,
 } from '../services/api';
 import { Keypair, loadKeypair, saveKeypair, clearKeypair, parseExportedKey } from '../services/keys';
 import ChatPanel from './ChatPanel';
 import GroupPanel from './GroupPanel';
 import CallModal, { CallType, IncomingCall } from './CallModal';
+import GalleryView from '../components/GalleryView';
+import MeetingLobby from '../components/MeetingLobby';
+import WaitingForHostScreen from '../components/WaitingForHostScreen';
+import { fmtRange } from '../components/MeetingCard';
 import {
   PhoneIncomingIcon,
   PhoneOutgoingIcon,
@@ -36,7 +47,7 @@ interface Props {
   onLogout: () => void;
 }
 
-type Tab = 'chats' | 'groups' | 'calls' | 'settings';
+type Tab = 'chats' | 'groups' | 'meetings' | 'calls' | 'settings';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -117,6 +128,14 @@ function GroupTabIcon({ active }: { active: boolean }) {
       <circle cx="9" cy="7" r="4" />
       <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
       <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+    </svg>
+  );
+}
+
+function MeetingsTabIcon({ active }: { active: boolean }) {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={active ? 'var(--accent)' : '#4b5563'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M23 7l-7 5 7 5V7z" /><rect x="1" y="5" width="15" height="14" rx="2" />
     </svg>
   );
 }
@@ -999,6 +1018,14 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
     conferenceId?: number;
     conferenceParticipants?: string[];
   } | null>(null);
+  // LiveKit gallery-view group call — separate from the mesh-based activeCall above.
+  const [activeGalleryCall, setActiveGalleryCall] = useState<{ conferenceId: number; initialMicOn?: boolean; initialCamOn?: boolean; displayName?: string } | null>(null);
+  // Device-setup lobby shown before actually connecting to a group call.
+  const [meetingLobby, setMeetingLobby] = useState<
+    { kind: 'instant' } | { kind: 'join'; joinCode: string; title: string | null } | null
+  >(null);
+  const [waitingRoomState, setWaitingRoomState] = useState<{ conferenceId: number; initialMicOn?: boolean; initialCamOn?: boolean; displayName?: string } | null>(null);
+  const [chatJoinError, setChatJoinError] = useState<string | null>(null);
   const [callMinimized, setCallMinimized] = useState(false);
   const [incomingCall, setIncomingCall] = useState<IncomingCall | null>(null);
   // Someone adding us to a call already in progress. Rings and waits for the
@@ -1014,18 +1041,14 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
     if (!conferenceInvite || !confTokenInput.trim()) return;
     setConfJoining(true);
     try {
-      const { participants } = await conferenceAccept(
+      await conferenceAccept(
         token, conferenceInvite.conferenceId, confTokenInput.trim(),
       );
       stopRinging();
       // Media starts only now, after the owner authenticated and accepted.
-      setActiveCall({
-        partner: participants[0] ?? conferenceInvite.invitedBy,
-        callType: 'audio',
-        isIncoming: false,
-        conferenceId: conferenceInvite.conferenceId,
-        conferenceParticipants: participants,
-      });
+      // Renders via GalleryView (LiveKit), same as starting a group call —
+      // group calls no longer use the mesh CallModal conference path.
+      setActiveGalleryCall({ conferenceId: conferenceInvite.conferenceId });
       setConferenceInvite(null);
     } catch (err: any) {
       // A wrong token is retryable; the call keeps ringing.
@@ -1044,6 +1067,26 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
   const [allUsers, setAllUsers] = useState<Contact[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [userSearch, setUserSearch] = useState('');
+
+  // ── New meeting (instant, standalone conference) ───────────────────────────
+  const [showNewMeeting, setShowNewMeeting] = useState(false);
+  const [meetingSearch, setMeetingSearch] = useState('');
+  const [meetingSelected, setMeetingSelected] = useState<Set<string>>(new Set());
+  const [creatingMeeting, setCreatingMeeting] = useState(false);
+  const [meetingError, setMeetingError] = useState<string | null>(null);
+
+  // ── Scheduled meetings ───────────────────────────────────────────────────────
+  const [showMeetings, setShowMeetings] = useState(false);
+  const [upcomingMeetings, setUpcomingMeetings] = useState<MeetingSummary[]>([]);
+  const [loadingMeetings, setLoadingMeetings] = useState(false);
+  const [showScheduleForm, setShowScheduleForm] = useState(false);
+  const [scheduleTitle, setScheduleTitle] = useState('');
+  const [scheduleWhen, setScheduleWhen] = useState('');
+  const [scheduleEndWhen, setScheduleEndWhen] = useState('');
+  const [scheduleWaitingRoom, setScheduleWaitingRoom] = useState(false);
+  const [scheduleSelected, setScheduleSelected] = useState<Set<string>>(new Set());
+  const [scheduling, setScheduling] = useState(false);
+  const [meetingsError, setMeetingsError] = useState<string | null>(null);
 
   // ── Badge count — update dock/taskbar icon when unread changes ─────────────────
   useEffect(() => {
@@ -1194,6 +1237,9 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
     if (tab !== 'chats') setSelectedChat(null);
     if (tab !== 'groups') setSelectedGroup(null);
     if (tab !== 'calls') setSelectedCallId(null);
+    if (tab === 'meetings' && upcomingMeetings.length === 0 && !loadingMeetings) {
+      loadUpcomingMeetings();
+    }
     setSearch('');
   }
 
@@ -1234,6 +1280,169 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
     // Do NOT add to contacts here — they appear only after a message is exchanged
   }
 
+  async function openNewMeeting() {
+    setShowNewMeeting(true);
+    setMeetingSelected(new Set());
+    setMeetingError(null);
+    setLoadingUsers(true);
+    try {
+      const users = await getUsers(token);
+      setAllUsers(users.filter(u => u.username !== username));
+    } catch {}
+    finally { setLoadingUsers(false); }
+  }
+
+  function toggleMeetingUser(u: string) {
+    setMeetingSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(u)) next.delete(u); else next.add(u);
+      return next;
+    });
+  }
+
+  // Standalone conference (no prior 1:1 call — call_id omitted), then invite
+  // everyone selected. Renders via GalleryView (LiveKit SFU), not the old
+  // mesh-WebRTC CallModal conference path — mesh's O(n^2) cost capped group
+  // calls at 4 people; LiveKit doesn't have that ceiling. Reuses the same
+  // conference create+invite bookkeeping so invites/notifications still ride
+  // the existing conference_invite WS flow — LiveKit is only the media
+  // transport, not a second parallel "room" concept.
+  function startGalleryMeeting() {
+    if (meetingSelected.size === 0) return;
+    setShowNewMeeting(false);
+    setMeetingLobby({ kind: 'instant' });
+  }
+
+  // Actually stands up the conference — runs once the lobby's device setup is
+  // confirmed, not on the "Start Meeting" click (that just opens the lobby).
+  async function confirmInstantMeeting(opts: { micOn: boolean; camOn: boolean; displayName: string }) {
+    const invitees = Array.from(meetingSelected);
+    if (invitees.length === 0 || creatingMeeting) return;
+    setCreatingMeeting(true);
+    setChatJoinError(null);
+    try {
+      const { conference_id } = await createConference(token);
+      await Promise.all(invitees.map(u => apiConferenceInvite(token, conference_id, u)));
+      setMeetingSelected(new Set());
+      setMeetingSearch('');
+      setMeetingLobby(null);
+      setActiveGalleryCall({ conferenceId: conference_id, initialMicOn: opts.micOn, initialCamOn: opts.camOn, displayName: opts.displayName });
+    } catch (err: any) {
+      setChatJoinError(err?.message || 'Failed to start group video');
+      setMeetingLobby(null);
+    } finally {
+      setCreatingMeeting(false);
+    }
+  }
+
+  // ── Scheduled meetings ───────────────────────────────────────────────────────
+
+  async function loadUpcomingMeetings() {
+    setMeetingsError(null);
+    setLoadingMeetings(true);
+    try {
+      const list = await getUpcomingMeetings(token);
+      setUpcomingMeetings(list);
+    } catch (err: any) {
+      setMeetingsError(err?.message || 'Failed to load meetings');
+    } finally {
+      setLoadingMeetings(false);
+    }
+  }
+
+  async function openMeetings() {
+    setShowMeetings(true);
+    await loadUpcomingMeetings();
+  }
+
+  function toggleScheduleUser(u: string) {
+    setScheduleSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(u)) next.delete(u); else next.add(u);
+      return next;
+    });
+  }
+
+  async function submitSchedule() {
+    if (!scheduleWhen || scheduling) return;
+    const startMs = new Date(scheduleWhen).getTime();
+    const endMs = scheduleEndWhen ? new Date(scheduleEndWhen).getTime() : startMs + 60 * 60000;
+    const durationMinutes = Math.max(5, Math.round((endMs - startMs) / 60000));
+    setScheduling(true);
+    setMeetingsError(null);
+    try {
+      await createMeeting(token, {
+        title: scheduleTitle.trim() || undefined,
+        scheduledAt: new Date(scheduleWhen).toISOString(),
+        durationMinutes,
+        inviteeUsernames: Array.from(scheduleSelected),
+        waitingRoomEnabled: scheduleWaitingRoom,
+      });
+      setShowScheduleForm(false);
+      setScheduleTitle('');
+      setScheduleWhen('');
+      setScheduleEndWhen('');
+      setScheduleWaitingRoom(false);
+      setScheduleSelected(new Set());
+      const list = await getUpcomingMeetings(token);
+      setUpcomingMeetings(list);
+    } catch (err: any) {
+      setMeetingsError(err?.message || 'Failed to schedule meeting');
+    } finally {
+      setScheduling(false);
+    }
+  }
+
+  function joinScheduledMeeting(meeting: MeetingSummary) {
+    setShowMeetings(false);
+    setMeetingLobby({ kind: 'join', joinCode: meeting.join_code, title: meeting.title });
+  }
+
+  // Runs once the lobby's device setup is confirmed. join_by_code hands back
+  // either {status:"admitted", conference_id, participants} — renders via
+  // GalleryView (LiveKit) like every other group call — or {status:"waiting"}
+  // when the host has a waiting room on, which shows WaitingForHostScreen
+  // until the host admits/denies (WS conference_admitted/denied).
+  async function confirmScheduledJoin(joinCode: string, opts: { micOn: boolean; camOn: boolean; displayName: string }) {
+    setChatJoinError(null);
+    try {
+      const { conference_id, status } = await joinMeetingByCode(token, joinCode);
+      setMeetingLobby(null);
+      if (status === 'waiting') {
+        setWaitingRoomState({ conferenceId: conference_id, initialMicOn: opts.micOn, initialCamOn: opts.camOn, displayName: opts.displayName });
+      } else {
+        setActiveGalleryCall({ conferenceId: conference_id, initialMicOn: opts.micOn, initialCamOn: opts.camOn, displayName: opts.displayName });
+      }
+    } catch (err: any) {
+      setChatJoinError(err?.message || 'Failed to join meeting');
+      setMeetingLobby(null);
+    }
+  }
+
+  async function cancelScheduledMeeting(meetingId: number) {
+    try {
+      await cancelMeeting(token, meetingId);
+      setUpcomingMeetings(prev => prev.filter(m => m.id !== meetingId));
+    } catch (err: any) {
+      setMeetingsError(err?.message || 'Failed to cancel meeting');
+    }
+  }
+
+  // Join tapped from a meeting card inside a chat/group thread. Instant
+  // meetings still need the master-token accept gate (opening a mic without
+  // consent is not okay) — reuse the same conferenceInvite overlay that
+  // handles that. Scheduled meetings join directly, matching joinScheduledMeeting.
+  function handleJoinMeetingFromChat(
+    m: { kind: 'instant'; conferenceId: number; invitedBy: string } | { kind: 'scheduled'; joinCode: string },
+  ) {
+    setChatJoinError(null);
+    if (m.kind === 'instant') {
+      setConferenceInvite({ conferenceId: m.conferenceId, invitedBy: m.invitedBy, participants: [] });
+      return;
+    }
+    setMeetingLobby({ kind: 'join', joinCode: m.joinCode, title: null });
+  }
+
   const filteredContacts = contacts.filter(c =>
     c.username.toLowerCase().includes(search.toLowerCase()),
   );
@@ -1248,6 +1457,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
     const titles: Record<Tab, string> = {
       chats: 'Chats',
       groups: 'Groups',
+      meetings: 'Meetings',
       calls: 'Calls',
       settings: 'Settings',
     };
@@ -1261,26 +1471,28 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
             boxShadow: connected ? '0 0 5px #25d366' : 'none',
           }} />
           {activeTab === 'chats' && (
-            <button
-              onClick={openNewChat}
-              title="New chat"
-              style={{
-                background: 'var(--accent)',
-                border: 'none',
-                borderRadius: '50%',
-                width: 28,
-                height: 28,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                cursor: 'pointer',
-                flexShrink: 0,
-              }}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round">
-                <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-              </svg>
-            </button>
+            <>
+              <button
+                onClick={openNewChat}
+                title="New chat"
+                style={{
+                  background: 'var(--accent)',
+                  border: 'none',
+                  borderRadius: '50%',
+                  width: 28,
+                  height: 28,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  flexShrink: 0,
+                }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round">
+                  <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+                </svg>
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -1399,6 +1611,62 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
       );
     }
 
+    if (activeTab === 'meetings') {
+      return (
+        <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <button style={hs.listItem} onClick={openNewMeeting}>
+            <div style={{ ...hs.groupAvatar, background: 'var(--accent)' }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M23 7l-7 5 7 5V7z" /><rect x="1" y="5" width="15" height="14" rx="2" />
+              </svg>
+            </div>
+            <div style={hs.itemInfo}>
+              <span style={hs.itemName}>Start Instant Meeting</span>
+              <span style={{ fontSize: '0.72rem', color: '#6b7280' }}>Group video — invite anyone, add more later</span>
+            </div>
+          </button>
+          <button style={hs.listItem} onClick={openMeetings}>
+            <div style={{ ...hs.groupAvatar, background: 'var(--accent)' }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="4" width="18" height="18" rx="2" />
+                <line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" />
+              </svg>
+            </div>
+            <div style={hs.itemInfo}>
+              <span style={hs.itemName}>Scheduled Meetings</span>
+              <span style={{ fontSize: '0.72rem', color: '#6b7280' }}>Upcoming, join by code, or schedule a new one</span>
+            </div>
+          </button>
+
+          {upcomingMeetings.length > 0 && (
+            <>
+              <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.03em', margin: '8px 4px 0' }}>
+                Up next
+              </span>
+              {upcomingMeetings.slice(0, 3).map(m => (
+                <button key={m.id} style={hs.listItem} onClick={() => joinScheduledMeeting(m)}>
+                  <div style={{
+                    width: 36, height: 36, borderRadius: 9, flexShrink: 0,
+                    background: 'var(--input-field-bg)', border: '1px solid var(--border-color)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: '0.68rem', fontWeight: 800, color: 'var(--accent)', lineHeight: 1.1, textAlign: 'center',
+                  }}>
+                    {new Date(m.scheduled_at).toLocaleDateString(undefined, { month: 'short' })}
+                    <br />
+                    {new Date(m.scheduled_at).getDate()}
+                  </div>
+                  <div style={hs.itemInfo}>
+                    <span style={hs.itemName}>{m.title || 'Untitled meeting'}</span>
+                    <span style={{ fontSize: '0.72rem', color: '#6b7280' }}>{fmtRange(m.scheduled_at, m.duration_minutes)}</span>
+                  </div>
+                </button>
+              ))}
+            </>
+          )}
+        </div>
+      );
+    }
+
     if (activeTab === 'calls') {
       return (
         <CallsList
@@ -1434,6 +1702,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
             masterToken={null}
             onMasterTokenSaved={() => {}}
             onCall={handleCall}
+            onJoinMeeting={handleJoinMeetingFromChat}
           />
         );
       }
@@ -1458,6 +1727,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
               // Ask for the token per message; never retain it.
               masterToken={null}
               onMasterTokenSaved={() => {}}
+              onJoinMeeting={handleJoinMeetingFromChat}
             />
           );
         }
@@ -1470,6 +1740,22 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
             <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
             <path d="M16 3.13a4 4 0 0 1 0 7.75" />
           </svg>
+        </WelcomePlaceholder>
+      );
+    }
+
+    if (activeTab === 'meetings') {
+      return (
+        <WelcomePlaceholder title="Meetings" subtitle="Start an instant group call, or open Scheduled Meetings to join by code or plan ahead.">
+          <button
+            onClick={openNewMeeting}
+            style={{
+              background: 'var(--accent)', color: '#fff', border: 'none',
+              borderRadius: 10, padding: '10px 20px', fontSize: '0.85rem', fontWeight: 700, cursor: 'pointer',
+            }}
+          >
+            Start Instant Meeting
+          </button>
         </WelcomePlaceholder>
       );
     }
@@ -1518,6 +1804,13 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
           <GroupTabIcon active={activeTab === 'groups'} />
         </button>
         <button
+          style={{ ...hs.tabBtn, ...(activeTab === 'meetings' ? hs.tabBtnActive : {}) }}
+          onClick={() => switchTab('meetings')}
+          title="Meetings"
+        >
+          <MeetingsTabIcon active={activeTab === 'meetings'} />
+        </button>
+        <button
           style={{ ...hs.tabBtn, ...(activeTab === 'calls' ? hs.tabBtnActive : {}) }}
           onClick={() => switchTab('calls')}
           title="Calls"
@@ -1546,6 +1839,71 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
         {renderMainContent()}
       </main>
 
+      {chatJoinError && (
+        <div
+          style={{
+            position: 'fixed', bottom: 20, right: 20, zIndex: 950,
+            background: '#ef4444', color: '#fff', borderRadius: 10,
+            padding: '10px 16px', fontSize: '0.82rem', boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
+            display: 'flex', alignItems: 'center', gap: 10,
+          }}
+        >
+          {chatJoinError}
+          <button
+            onClick={() => setChatJoinError(null)}
+            style={{ background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', fontSize: '0.9rem' }}
+          >✕</button>
+        </div>
+      )}
+
+      {/* ── MEETING LOBBY (device setup before joining) ─────────────────────── */}
+      {meetingLobby && (
+        <MeetingLobby
+          title={meetingLobby.kind === 'instant' ? 'Start Meeting' : (meetingLobby.title || 'Join Meeting')}
+          subtitle={meetingLobby.kind === 'join' ? 'Set up your camera and mic before joining' : undefined}
+          defaultName={username}
+          onCancel={() => setMeetingLobby(null)}
+          onJoin={opts =>
+            meetingLobby.kind === 'instant'
+              ? confirmInstantMeeting(opts)
+              : confirmScheduledJoin(meetingLobby.joinCode, opts)
+          }
+        />
+      )}
+
+      {/* ── WAITING FOR HOST ─────────────────────────────────────────────── */}
+      {waitingRoomState && (
+        <WaitingForHostScreen
+          conferenceId={waitingRoomState.conferenceId}
+          onAdmitted={() => {
+            setActiveGalleryCall({
+              conferenceId: waitingRoomState.conferenceId,
+              initialMicOn: waitingRoomState.initialMicOn,
+              initialCamOn: waitingRoomState.initialCamOn,
+              displayName: waitingRoomState.displayName,
+            });
+            setWaitingRoomState(null);
+          }}
+          onDenied={() => {
+            setWaitingRoomState(null);
+            setChatJoinError('The host denied your request to join');
+          }}
+          onCancel={() => setWaitingRoomState(null)}
+        />
+      )}
+
+      {/* ── GROUP VIDEO (LiveKit gallery view) ─────────────────────────────── */}
+      {activeGalleryCall && (
+        <GalleryView
+          token={token}
+          conferenceId={activeGalleryCall.conferenceId}
+          initialMicOn={activeGalleryCall.initialMicOn}
+          initialCamOn={activeGalleryCall.initialCamOn}
+          displayName={activeGalleryCall.displayName}
+          onClose={() => setActiveGalleryCall(null)}
+        />
+      )}
+
       {/* ── CALL MODAL ──────────────────────────────────────────────────── */}
       {activeCall && (
         <CallModal
@@ -1567,7 +1925,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
       )}
 
       {/* ── GROUP CALL INVITE ───────────────────────────────────────────── */}
-      {conferenceInvite && !activeCall && (
+      {conferenceInvite && !activeCall && !activeGalleryCall && (
         <div style={ci.backdrop}>
           <div style={ci.card}>
             <p style={ci.kicker}>Group call</p>
@@ -1617,7 +1975,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
       )}
 
       {/* ── INCOMING CALL OVERLAY ────────────────────────────────────────── */}
-      {incomingCall && !activeCall && (
+      {incomingCall && !activeCall && !activeGalleryCall && (
         <div style={{
           position: 'fixed', inset: 0, zIndex: 900,
           display: 'flex', alignItems: 'flex-end', justifyContent: 'flex-end',
@@ -1812,6 +2170,374 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
         </div>
       )}
 
+      {showNewMeeting && (
+        <div
+          style={{
+            position: 'fixed', inset: 0, zIndex: 800,
+            background: 'rgba(0,0,0,0.7)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}
+          onClick={e => { if (e.target === e.currentTarget) { setShowNewMeeting(false); setMeetingSearch(''); } }}
+        >
+          <div style={{
+            background: 'var(--bg-panel)',
+            border: '1px solid var(--border-color)',
+            borderRadius: 16,
+            width: 380,
+            maxHeight: '70vh',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+            boxShadow: '0 24px 80px rgba(0,0,0,0.4)',
+          }}>
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '16px 20px', borderBottom: '1px solid var(--border-color)', flexShrink: 0,
+            }}>
+              <span style={{ fontWeight: 800, fontSize: '1rem', color: 'var(--text-primary)' }}>New Meeting</span>
+              <button
+                onClick={() => { setShowNewMeeting(false); setMeetingSearch(''); }}
+                style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: '1.1rem', lineHeight: 1 }}
+              >✕</button>
+            </div>
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 8,
+              margin: '10px 12px', background: 'var(--input-field-bg)',
+              border: '1px solid var(--border-color)', borderRadius: 10, padding: '8px 12px', flexShrink: 0,
+            }}>
+              <SearchIconSvg />
+              <input
+                autoFocus
+                style={{ flex: 1, background: 'transparent', border: 'none', color: 'var(--text-primary)', fontSize: '0.85rem' }}
+                placeholder="Search people to invite"
+                value={meetingSearch}
+                onChange={e => setMeetingSearch(e.target.value)}
+              />
+            </div>
+            <div style={{ flex: 1, overflowY: 'auto' }}>
+              {loadingUsers ? (
+                <ContactSkeleton />
+              ) : (
+                allUsers
+                  .filter(u => u.username.toLowerCase().includes(meetingSearch.toLowerCase()))
+                  .map(u => {
+                    const checked = meetingSelected.has(u.username);
+                    return (
+                      <button
+                        key={u.username}
+                        style={{ ...hs.listItem, background: checked ? 'var(--input-field-bg)' : hs.listItem.background }}
+                        onClick={() => toggleMeetingUser(u.username)}
+                      >
+                        <div style={{ position: 'relative', flexShrink: 0 }}>
+                          <div style={hs.contactAvatar}>{initials(u.username)}</div>
+                          <div style={{
+                            position: 'absolute', bottom: 1, right: 1,
+                            width: 11, height: 11, borderRadius: '50%',
+                            background: u.is_active ? '#25d366' : 'var(--text-muted)',
+                            border: '2px solid var(--bg-panel)',
+                          }} />
+                        </div>
+                        <div style={hs.itemInfo}>
+                          <span style={hs.itemName}>{u.username}</span>
+                          <span style={{ fontSize: '0.72rem', color: u.is_active ? '#25d366' : 'var(--text-muted)' }}>
+                            {u.is_active ? 'online' : 'offline'}
+                          </span>
+                        </div>
+                        <div style={{
+                          width: 18, height: 18, borderRadius: 4, flexShrink: 0,
+                          border: `1.5px solid ${checked ? 'var(--accent)' : 'var(--border-color)'}`,
+                          background: checked ? 'var(--accent)' : 'transparent',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        }}>
+                          {checked && (
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="20 6 9 17 4 12" />
+                            </svg>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })
+              )}
+              {!loadingUsers && allUsers.filter(u => u.username.toLowerCase().includes(meetingSearch.toLowerCase())).length === 0 && (
+                <div style={hs.emptyList}>{meetingSearch ? 'No users found' : 'No other users'}</div>
+              )}
+            </div>
+            {meetingError && (
+              <div style={{ padding: '8px 16px', color: '#ef4444', fontSize: '0.78rem', flexShrink: 0 }}>{meetingError}</div>
+            )}
+            <div style={{ padding: 12, borderTop: '1px solid var(--border-color)', flexShrink: 0 }}>
+              <button
+                onClick={startGalleryMeeting}
+                disabled={meetingSelected.size === 0 || creatingMeeting}
+                style={{
+                  width: '100%',
+                  background: meetingSelected.size === 0 ? 'var(--input-field-bg)' : 'var(--accent)',
+                  color: meetingSelected.size === 0 ? 'var(--text-muted)' : '#fff',
+                  border: 'none',
+                  borderRadius: 10,
+                  padding: '10px 0',
+                  fontSize: '0.85rem',
+                  fontWeight: 700,
+                  cursor: meetingSelected.size === 0 || creatingMeeting ? 'default' : 'pointer',
+                }}
+              >
+                {creatingMeeting ? 'Starting…' : `Start Meeting${meetingSelected.size ? ` (${meetingSelected.size})` : ''}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showMeetings && (
+        <div
+          style={{
+            position: 'fixed', inset: 0, zIndex: 800,
+            background: 'rgba(0,0,0,0.7)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}
+          onClick={e => { if (e.target === e.currentTarget) setShowMeetings(false); }}
+        >
+          <div style={{
+            background: 'var(--bg-panel)',
+            border: '1px solid var(--border-color)',
+            borderRadius: 18,
+            width: 480,
+            maxHeight: '80vh',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+            boxShadow: '0 24px 80px rgba(0,0,0,0.4)',
+          }}>
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 10,
+              padding: '18px 22px', borderBottom: '1px solid var(--border-color)', flexShrink: 0,
+            }}>
+              <div style={{
+                width: 34, height: 34, borderRadius: 9, background: 'var(--accent)', flexShrink: 0,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="4" width="18" height="18" rx="2" />
+                  <line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" />
+                </svg>
+              </div>
+              <span style={{ fontWeight: 800, fontSize: '1.05rem', color: 'var(--text-primary)', flex: 1 }}>
+                {showScheduleForm ? 'Schedule a Meeting' : 'Scheduled Meetings'}
+              </span>
+              <button
+                onClick={() => (showScheduleForm ? setShowScheduleForm(false) : setShowMeetings(false))}
+                style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: '1.2rem', lineHeight: 1 }}
+              >✕</button>
+            </div>
+
+            <div style={{ flex: 1, overflowY: 'auto', padding: showScheduleForm ? '18px 22px' : '8px 12px' }}>
+              {!showScheduleForm && (
+                loadingMeetings ? (
+                  <ContactSkeleton />
+                ) : upcomingMeetings.length === 0 ? (
+                  <div style={{ ...hs.emptyList, padding: '40px 10px' }}>
+                    No upcoming meetings — schedule one below.
+                  </div>
+                ) : (
+                  upcomingMeetings.map(m => (
+                    <div
+                      key={m.id}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 12,
+                        padding: '12px 10px', borderBottom: '1px solid var(--border-color)',
+                      }}
+                    >
+                      <div style={{
+                        width: 36, height: 36, borderRadius: 9, flexShrink: 0,
+                        background: 'var(--input-field-bg)', border: '1px solid var(--border-color)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: '0.7rem', fontWeight: 800, color: 'var(--accent)', lineHeight: 1.1, textAlign: 'center',
+                      }}>
+                        {new Date(m.scheduled_at).toLocaleDateString(undefined, { month: 'short' })}
+                        <br />
+                        {new Date(m.scheduled_at).getDate()}
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {m.title || 'Untitled meeting'}
+                        </div>
+                        <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
+                          {fmtRange(m.scheduled_at, m.duration_minutes)} · hosted by {m.creator_username}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => joinScheduledMeeting(m)}
+                        style={{
+                          background: 'var(--accent)', color: '#fff', border: 'none',
+                          borderRadius: 8, padding: '7px 14px', fontSize: '0.76rem',
+                          fontWeight: 700, cursor: 'pointer', flexShrink: 0,
+                        }}
+                      >
+                        Join
+                      </button>
+                      {m.creator_username === username && (
+                        <button
+                          onClick={() => cancelScheduledMeeting(m.id)}
+                          title="Cancel"
+                          style={{ background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '0.95rem', flexShrink: 0 }}
+                        >✕</button>
+                      )}
+                    </div>
+                  ))
+                )
+              )}
+
+              {showScheduleForm && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                  <div>
+                    <label style={hs.fieldLabel}>Title</label>
+                    <input
+                      placeholder="e.g. Weekly sync"
+                      value={scheduleTitle}
+                      onChange={e => setScheduleTitle(e.target.value)}
+                      style={hs.fieldInput}
+                    />
+                  </div>
+
+                  <div style={{ display: 'flex', gap: 12 }}>
+                    <div style={{ flex: 1 }}>
+                      <label style={hs.fieldLabel}>Start time</label>
+                      <input
+                        type="datetime-local"
+                        value={scheduleWhen}
+                        onChange={e => {
+                          const next = e.target.value;
+                          setScheduleWhen(next);
+                          // Keep the end time trailing the start by the same gap
+                          // (default 60m) rather than letting it go stale/invalid.
+                          const startMs = next ? new Date(next).getTime() : NaN;
+                          const endMs = scheduleEndWhen ? new Date(scheduleEndWhen).getTime() : NaN;
+                          if (!Number.isNaN(startMs) && (Number.isNaN(endMs) || endMs <= startMs)) {
+                            const d = new Date(startMs + 60 * 60000);
+                            const pad = (n: number) => String(n).padStart(2, '0');
+                            setScheduleEndWhen(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`);
+                          }
+                        }}
+                        style={hs.fieldInput}
+                      />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <label style={hs.fieldLabel}>End time</label>
+                      <input
+                        type="datetime-local"
+                        value={scheduleEndWhen}
+                        min={scheduleWhen || undefined}
+                        onChange={e => setScheduleEndWhen(e.target.value)}
+                        style={hs.fieldInput}
+                      />
+                    </div>
+                  </div>
+
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                    <div
+                      onClick={() => setScheduleWaitingRoom(v => !v)}
+                      style={{
+                        width: 18, height: 18, borderRadius: 4, flexShrink: 0,
+                        border: `1.5px solid ${scheduleWaitingRoom ? 'var(--accent)' : 'var(--border-color)'}`,
+                        background: scheduleWaitingRoom ? 'var(--accent)' : 'transparent',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+                      }}
+                    >
+                      {scheduleWaitingRoom && (
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                      )}
+                    </div>
+                    <span style={{ fontSize: '0.82rem', color: 'var(--text-primary)' }}>Waiting room — approve guests before they join</span>
+                  </label>
+
+                  <div>
+                    <label style={hs.fieldLabel}>
+                      Invite{scheduleSelected.size > 0 ? ` (${scheduleSelected.size})` : ''}
+                    </label>
+                    <div style={{ maxHeight: 180, overflowY: 'auto', border: '1px solid var(--border-color)', borderRadius: 10 }}>
+                      {allUsers.map(u => {
+                        const checked = scheduleSelected.has(u.username);
+                        return (
+                          <button
+                            key={u.username}
+                            onClick={() => toggleScheduleUser(u.username)}
+                            style={{ ...hs.listItem, background: checked ? 'var(--input-field-bg)' : hs.listItem.background }}
+                          >
+                            <div style={hs.contactAvatar}>{initials(u.username)}</div>
+                            <div style={hs.itemInfo}><span style={hs.itemName}>{u.username}</span></div>
+                            <div style={{
+                              width: 18, height: 18, borderRadius: 4, flexShrink: 0,
+                              border: `1.5px solid ${checked ? 'var(--accent)' : 'var(--border-color)'}`,
+                              background: checked ? 'var(--accent)' : 'transparent',
+                              display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            }}>
+                              {checked && (
+                                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                                  <polyline points="20 6 9 17 4 12" />
+                                </svg>
+                              )}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: 10, marginTop: 2 }}>
+                    <button
+                      onClick={() => setShowScheduleForm(false)}
+                      style={{
+                        flex: 1, background: 'var(--input-field-bg)', border: '1px solid var(--border-color)',
+                        borderRadius: 10, color: 'var(--text-primary)', fontSize: '0.84rem', padding: '10px 0', cursor: 'pointer',
+                      }}
+                    >Cancel</button>
+                    <button
+                      onClick={submitSchedule}
+                      disabled={!scheduleWhen || scheduling}
+                      style={{
+                        flex: 1, background: !scheduleWhen ? 'var(--input-field-bg)' : 'var(--accent)',
+                        color: !scheduleWhen ? 'var(--text-muted)' : '#fff', border: 'none',
+                        borderRadius: 10, padding: '10px 0', fontSize: '0.84rem', fontWeight: 700,
+                        cursor: !scheduleWhen || scheduling ? 'default' : 'pointer',
+                      }}
+                    >{scheduling ? 'Scheduling…' : 'Schedule'}</button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {meetingsError && (
+              <div style={{ padding: '8px 16px', color: '#ef4444', fontSize: '0.78rem', flexShrink: 0 }}>{meetingsError}</div>
+            )}
+
+            {!showScheduleForm && (
+              <div style={{ padding: 14, borderTop: '1px solid var(--border-color)', flexShrink: 0 }}>
+                <button
+                  onClick={async () => {
+                    setShowScheduleForm(true);
+                    if (allUsers.length === 0) {
+                      setLoadingUsers(true);
+                      try {
+                        const users = await getUsers(token);
+                        setAllUsers(users.filter(u => u.username !== username));
+                      } catch {}
+                      finally { setLoadingUsers(false); }
+                    }
+                  }}
+                  style={{
+                    width: '100%', background: 'var(--accent)', color: '#fff', border: 'none',
+                    borderRadius: 10, padding: '11px 0', fontSize: '0.85rem', fontWeight: 700, cursor: 'pointer',
+                  }}
+                >+ Schedule a meeting</button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
@@ -1950,6 +2676,25 @@ const hs: Record<string, React.CSSProperties> = {
     textAlign: 'center',
     color: 'var(--text-muted)',
     fontSize: '0.82rem',
+  },
+  fieldLabel: {
+    display: 'block',
+    fontSize: '0.72rem',
+    fontWeight: 700,
+    color: 'var(--text-muted)',
+    textTransform: 'uppercase',
+    letterSpacing: '0.03em',
+    marginBottom: 6,
+  },
+  fieldInput: {
+    width: '100%',
+    background: 'var(--input-field-bg)',
+    border: '1px solid var(--border-color)',
+    borderRadius: 10,
+    color: 'var(--text-primary)',
+    fontSize: '0.85rem',
+    padding: '10px 12px',
+    boxSizing: 'border-box',
   },
   listItem: {
     display: 'flex',

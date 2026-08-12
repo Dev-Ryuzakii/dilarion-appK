@@ -11,6 +11,9 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        // LiveKit's audioswitch transitive dep (com.github.davidliu:audioswitch) is
+        // JitPack-hosted, not on Maven Central.
+        maven { url = uri("https://jitpack.io") }
     }
 }
 

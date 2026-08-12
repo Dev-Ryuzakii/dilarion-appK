@@ -249,6 +249,92 @@ data class MediaUploadResponse(
     val message: String? = null,
 )
 
+// ─── Meetings (scheduled) ────────────────────────────────────────────────────
+// A meeting is inert until someone joins — join_by_code hands back a
+// conference_id + participants shaped exactly like an instant meeting's
+// create+invite, so the client join path is identical either way.
+
+data class MeetingSummary(
+    val id: Int,
+    val title: String? = null,
+    @SerializedName("scheduled_at") val scheduledAt: String,
+    @SerializedName("duration_minutes") val durationMinutes: Int = 60,
+    val status: String,
+    @SerializedName("join_code") val joinCode: String,
+    @SerializedName("creator_username") val creatorUsername: String,
+    @SerializedName("group_id") val groupId: Int? = null,
+    @SerializedName("waiting_room_enabled") val waitingRoomEnabled: Boolean = false,
+)
+
+data class MeetingsResponse(
+    val meetings: List<MeetingSummary> = emptyList(),
+)
+
+data class MeetingCreateRequest(
+    val title: String? = null,
+    @SerializedName("scheduled_at") val scheduledAt: String,
+    @SerializedName("duration_minutes") val durationMinutes: Int = 60,
+    @SerializedName("group_id") val groupId: Int? = null,
+    @SerializedName("invitee_usernames") val inviteeUsernames: List<String>? = null,
+    val recurrence: String? = null,
+    @SerializedName("waiting_room_enabled") val waitingRoomEnabled: Boolean = false,
+)
+
+data class MeetingCreateResponse(
+    @SerializedName("meeting_id") val meetingId: Int,
+    @SerializedName("join_code") val joinCode: String,
+    @SerializedName("scheduled_at") val scheduledAt: String,
+)
+
+data class MeetingJoinRequest(
+    @SerializedName("join_code") val joinCode: String,
+)
+
+// ─── Whiteboard ──────────────────────────────────────────────────────────────
+// Ephemeral for v1 — strokes relay live via the existing WS push pattern.
+// Exactly one of username/groupId/conferenceId identifies the target.
+
+data class WhiteboardStroke(
+    val x0: Double, val y0: Double, val x1: Double, val y1: Double, // normalized 0..1
+    val color: String,
+    val width: Float,
+)
+
+data class WhiteboardStrokeRequest(
+    val username: String? = null,
+    @SerializedName("group_id") val groupId: Int? = null,
+    @SerializedName("conference_id") val conferenceId: Int? = null,
+    val stroke: WhiteboardStroke,
+)
+
+data class WhiteboardClearRequest(
+    val username: String? = null,
+    @SerializedName("group_id") val groupId: Int? = null,
+    @SerializedName("conference_id") val conferenceId: Int? = null,
+)
+
+data class MeetingJoinResponse(
+    @SerializedName("conference_id") val conferenceId: Int,
+    val status: String = "admitted", // "admitted" | "waiting"
+    val participants: List<String> = emptyList(),
+)
+
+data class WaitingParticipant(
+    @SerializedName("user_id") val userId: Int,
+    val username: String,
+)
+
+data class WaitingRoomResponse(
+    val waiting: List<WaitingParticipant> = emptyList(),
+)
+
+/** Room-access token for group video (gallery view). Room maps 1:1 onto the conference. */
+data class LiveKitTokenResponse(
+    val url: String,
+    val token: String,
+    val room: String,
+)
+
 // ─── Call History ──────────────────────────────────────────────────────────────
 
 data class CallHistoryItem(

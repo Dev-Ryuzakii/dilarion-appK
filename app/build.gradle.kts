@@ -29,6 +29,24 @@ android {
         }
     }
 
+    flavorDimensions += "env"
+    productFlavors {
+        create("production") {
+            dimension = "env"
+            buildConfigField("String", "BASE_URL", "\"https://apidilarion.eibstratoc.com/\"")
+            buildConfigField("String", "WS_BASE", "\"wss://apidilarion.eibstratoc.com/ws\"")
+        }
+        // Named "staging", not "test": AGP reserves flavor names starting with
+        // "test" for its own androidTest source sets and rejects the build.
+        create("staging") {
+            dimension = "env"
+            versionNameSuffix = "-test"
+            resValue("string", "app_name", "Dilarion Test")
+            buildConfigField("String", "BASE_URL", "\"https://testdilarion.eibstratoc.com/\"")
+            buildConfigField("String", "WS_BASE", "\"wss://testdilarion.eibstratoc.com/ws\"")
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -40,6 +58,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     packaging {
@@ -68,6 +87,13 @@ dependencies {
     implementation(libs.lifecycle.runtime.compose)
     implementation(libs.navigation.compose)
 
+    // Live camera preview in the pre-join lobby — separate from LiveKit's own
+    // capture pipeline, which only starts once the call is actually joined.
+    implementation("androidx.camera:camera-core:1.3.4")
+    implementation("androidx.camera:camera-camera2:1.3.4")
+    implementation("androidx.camera:camera-lifecycle:1.3.4")
+    implementation("androidx.camera:camera-view:1.3.4")
+
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
     implementation(libs.hilt.navigation.compose)
@@ -87,6 +113,13 @@ dependencies {
     implementation(libs.coil.compose)
 
     implementation("io.getstream:stream-webrtc-android:1.3.8")
+
+    // Group video (LiveKit SFU). Compose components pull in livekit-android (core SDK)
+    // transitively - not pinning the core artifact separately avoids a version conflict
+    // between the two. Its WebRTC dep (io.github.webrtc-sdk:android-prefixed) shades
+    // org.webrtc -> livekit.org.webrtc specifically to avoid colliding with
+    // stream-webrtc-android above, which the 1:1/mesh call path uses.
+    implementation("io.livekit:livekit-android-compose-components:2.4.0")
 
     // QR scanning for device linking
     implementation("com.journeyapps:zxing-android-embedded:4.3.0")

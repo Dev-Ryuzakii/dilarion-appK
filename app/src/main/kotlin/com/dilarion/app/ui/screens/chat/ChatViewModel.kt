@@ -49,7 +49,14 @@ data class ChatUiState(
     val isUploadingMedia: Boolean = false,
     val currentUsername: String = "",
     val error: String? = null,
-    val isUnlocked: Boolean = false,
+    // Per-item unlock — "msg_<id>" / "media_<mediaId>". Entering the master token
+    // reveals only the ONE item that prompted for it, not the whole conversation
+    // (matches desktop: masterToken is never retained, each locked bubble prompts
+    // and discards it after use).
+    val unlockedIds: Set<String> = emptySet(),
+    val decryptedTexts: Map<Int, String> = emptyMap(),
+    // Non-null while the in-app document viewer is showing; keys documentBytesCache.
+    val viewingDocumentKey: String? = null,
     val savedMasterToken: String? = null,
     val isRecording: Boolean = false,
     val recordingSeconds: Int = 0,
@@ -110,21 +117,49 @@ class ChatViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(mentionQuery = query)
     }
 
-    fun unlock(enteredToken: String): Boolean {
+    /**
+     * Reveals exactly one item — [targetKey] is "msg_<id>" for a text message or
+     * "media_<mediaId>" for a document/image/voice note. Never unlocks anything
+     * else; the caller must ask again for the next locked item.
+     */
+    fun unlock(enteredToken: String, targetKey: String): Boolean {
         val saved = _uiState.value.savedMasterToken
-        return if (saved != null && enteredToken == saved) {
-            _uiState.value = _uiState.value.copy(isUnlocked = true)
-            loadMessages()
-            true
-        } else false
+        if (saved == null || enteredToken != saved) return false
+        _uiState.value = _uiState.value.copy(unlockedIds = _uiState.value.unlockedIds + targetKey)
+        if (targetKey.startsWith("msg_")) {
+            decryptOne(targetKey.removePrefix("msg_").toIntOrNull())
+        }
+        return true
+    }
+
+    private fun decryptOne(messageId: Int?) {
+        val id = messageId ?: return
+        val msg = _uiState.value.messages.find { it.id == id } ?: return
+        if (msg.content == null || msg.encryptedKey == null || msg.iv == null) return
+        viewModelScope.launch {
+            val privKey = sessionManager.privateKey.first()
+            val myDeviceUuid = sessionManager.deviceUuid.first()
+            val me = _uiState.value.currentUsername
+            if (privKey.isNullOrBlank()) return@launch
+            val plain = try {
+                var encKey = msg.encryptedKey
+                if (encKey.startsWith("{")) {
+                    val mapType = object : com.google.gson.reflect.TypeToken<Map<String, String>>() {}.type
+                    val keysMap: Map<String, String> = com.google.gson.Gson().fromJson(encKey, mapType)
+                    encKey = keysMap[myDeviceUuid] ?: keysMap[me] ?: encKey
+                }
+                cryptoManager.decryptMessage(msg.content, encKey, msg.iv, privKey)
+            } catch (e: Exception) {
+                "[Decryption Failed]"
+            }
+            _uiState.value = _uiState.value.copy(decryptedTexts = _uiState.value.decryptedTexts + (id to plain))
+        }
     }
 
     fun loadMessages() {
         viewModelScope.launch {
             val token = sessionManager.sessionToken.first() ?: return@launch
             val bearer = "Bearer $token"
-            val privKey = sessionManager.privateKey.first()
-            val myDeviceUuid = sessionManager.deviceUuid.first()
             val me = _uiState.value.currentUsername
             runCatching {
                 val rawMessages: List<Message> = if (groupId != null) {
@@ -136,27 +171,11 @@ class ChatViewModel @Inject constructor(
                                     (msg.sender == me && msg.recipient == peerUsername)
                         } ?: emptyList()
                 }
-                
-                val decrypted = rawMessages.map { msg ->
-                    if (_uiState.value.isUnlocked && msg.content != null && msg.encryptedKey != null && msg.iv != null && privKey != null && privKey.isNotBlank()) {
-                        try {
-                            var encKey = msg.encryptedKey
-                            if (encKey.startsWith("{")) {
-                                val mapType = object : com.google.gson.reflect.TypeToken<Map<String, String>>() {}.type
-                                val keysMap: Map<String, String> = com.google.gson.Gson().fromJson(encKey, mapType)
-                                // Prefer our device_uuid entry; fall back to the legacy
-                                // username-keyed entry for older messages.
-                                encKey = keysMap[myDeviceUuid] ?: keysMap[me] ?: encKey
-                            }
-                            val plain = cryptoManager.decryptMessage(msg.content, encKey, msg.iv, privKey)
-                            msg.copy(content = plain)
-                        } catch (e: Exception) {
-                            msg.copy(content = "[Decryption Failed]")
-                        }
-                    } else {
-                        msg
-                    }
-                }
+                // Messages stay in raw/encrypted form here always now — decryptOne()
+                // fills in decryptedTexts lazily, per message, only once its own
+                // unlock is confirmed. Re-unlock the same message twice in one
+                // session and this list refreshing underneath it won't lose that.
+                val decrypted = rawMessages
 
                 _uiState.value = _uiState.value.copy(
                     messages = decrypted.sortedBy { it.timestamp },
@@ -241,18 +260,34 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    fun sendImage(uri: Uri, context: Context) {
+    /** Picked file's real name via the content resolver; ContentResolver's URI segment is not reliable. */
+    private fun queryDisplayName(context: Context, uri: Uri): String? {
+        return context.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)
+            ?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+    }
+
+    /**
+     * Sends any picked file — image, PDF, or other document — classified by its
+     * real MIME type. `decoyKind` (invoice/delivery/minutes/memo) picks which
+     * decoy document the server generates for this attachment; null lets the
+     * server choose one deterministically from the media_id instead.
+     */
+    fun sendAttachment(uri: Uri, context: Context, decoyKind: String? = null) {
         viewModelScope.launch {
             val token = sessionManager.sessionToken.first() ?: return@launch
             _uiState.value = _uiState.value.copy(isUploadingMedia = true)
             runCatching {
+                val mime = context.contentResolver.getType(uri) ?: "application/octet-stream"
+                val displayName = queryDisplayName(context, uri) ?: "attachment"
                 val bytes = context.contentResolver.openInputStream(uri)?.readBytes() ?: return@launch
-                val tempFile = File(context.cacheDir, "upload_${System.currentTimeMillis()}.jpg")
+                val tempFile = File(context.cacheDir, "upload_${System.currentTimeMillis()}_$displayName")
                 tempFile.writeBytes(bytes)
-                val requestFile = tempFile.asRequestBody("image/jpeg".toMediaTypeOrNull())
-                val filePart = MultipartBody.Part.createFormData("file", tempFile.name, requestFile)
+                val requestFile = tempFile.asRequestBody(mime.toMediaTypeOrNull())
+                val filePart = MultipartBody.Part.createFormData("file", displayName, requestFile)
                 val usernamePart = peerUsername.toRequestBody("text/plain".toMediaTypeOrNull())
-                apiService.uploadMedia("Bearer $token", usernamePart, filePart)
+                val contentTypePart = mime.toRequestBody("text/plain".toMediaTypeOrNull())
+                val decoyKindPart = decoyKind?.toRequestBody("text/plain".toMediaTypeOrNull())
+                apiService.uploadMedia("Bearer $token", usernamePart, filePart, contentTypePart, decoyKindPart)
                 tempFile.delete()
                 loadMedia()
             }.onFailure {
@@ -371,6 +406,57 @@ class ChatViewModel @Inject constructor(
                 )
             }
         }
+    }
+
+    /**
+     * Opens a document attachment. Locked: fetches and opens the generated decoy
+     * (cached server-side, safe to reopen). Unlocked: fetches the real file —
+     * a one-time view the server deletes after this single read — and opens that
+     * instead. Each state gets its own cache key so an earlier decoy view is never
+     * mistaken for the real file once the screen is unlocked.
+     */
+    // Decoy/real document bytes, in memory only — never written to disk, matching
+    // desktop's data:-URL iframe approach. Not exposed via StateFlow: ByteArray
+    // isn't something Compose should be diffing on every recomposition; the UI
+    // reads it once via getDocumentBytes() when viewingDocumentKey changes.
+    private val documentBytesCache = mutableMapOf<String, ByteArray>()
+
+    /**
+     * Opens a document attachment in the in-app viewer. Locked: shows the
+     * generated decoy. Unlocked (this specific document's key is in
+     * unlockedIds): fetches the real file — a one-time view the server deletes
+     * after this single read. Each state has its own cache key, kept in memory
+     * for the rest of this screen session, so re-tapping after the first real
+     * view re-renders from memory instead of hitting the server's 410 wall.
+     */
+    fun openDocument(mediaId: String) {
+        val useReal = _uiState.value.unlockedIds.contains("media_$mediaId")
+        val cacheKey = "${if (useReal) "docreal" else "docdecoy"}_$mediaId"
+        if (documentBytesCache.containsKey(cacheKey)) {
+            _uiState.value = _uiState.value.copy(viewingDocumentKey = cacheKey)
+            return
+        }
+        viewModelScope.launch {
+            val token = sessionManager.sessionToken.first() ?: return@launch
+            runCatching {
+                val resp = if (useReal) {
+                    apiService.downloadMedia("Bearer $token", mediaId)
+                } else {
+                    apiService.downloadDecoyFile("Bearer $token", mediaId)
+                }
+                val bytes = resp.body()?.bytes() ?: return@launch
+                documentBytesCache[cacheKey] = bytes
+                _uiState.value = _uiState.value.copy(viewingDocumentKey = cacheKey)
+            }.onFailure {
+                _uiState.value = _uiState.value.copy(error = it.message)
+            }
+        }
+    }
+
+    fun getDocumentBytes(cacheKey: String): ByteArray? = documentBytesCache[cacheKey]
+
+    fun closeDocumentViewer() {
+        _uiState.value = _uiState.value.copy(viewingDocumentKey = null)
     }
 
     private fun startPlayer(filePath: String, mediaId: String) {

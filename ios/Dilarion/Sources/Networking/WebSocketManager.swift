@@ -6,6 +6,7 @@ enum WSEvent {
     case incomingCall(IncomingCallData)
     case typing(from: String, isTyping: Bool)
     case callSignal([String: Any])
+    case whiteboardEvent([String: Any])
     case newMedia
     case connected
     case disconnected
@@ -16,7 +17,9 @@ class WebSocketManager: ObservableObject {
     private init() {}
 
     private var task: URLSessionWebSocketTask?
-    private let baseWSURL = "wss://apidilarion.eibstratoc.com/ws"
+    // Set via WS_BASE_URL in Config-Production.xcconfig / Config-Staging.xcconfig.
+    private let baseWSURL = (Bundle.main.object(forInfoDictionaryKey: "WSBaseURL") as? String)
+        .flatMap { $0.isEmpty ? nil : $0 } ?? "wss://apidilarion.eibstratoc.com/ws"
     let events = PassthroughSubject<WSEvent, Never>()
     @Published var isConnected = false
 
@@ -94,11 +97,14 @@ class WebSocketManager: ObservableObject {
             AudioManager.shared.playNotificationSound()
             NotificationManager.shared.notifyNewMedia(from: json["sender_username"] as? String)
             events.send(.newMedia)
-        case "call_answer", "call_ice", "call_ended":
+        case "call_answer", "call_ice", "call_ended",
+             "conference_invite", "conference_peer_connect", "conference_signal", "conference_participant_left":
             if type == "call_ended" {
                 NotificationManager.shared.cancelCallNotification()
             }
             events.send(.callSignal(json))
+        case "whiteboard_stroke", "whiteboard_clear":
+            events.send(.whiteboardEvent(json))
         default:
             break
         }

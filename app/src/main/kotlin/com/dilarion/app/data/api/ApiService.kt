@@ -207,6 +207,75 @@ interface ApiService {
         @Path("id") conferenceId: Int,
     ): Response<com.google.gson.JsonObject>
 
+    /** Short-lived LiveKit room-access token — group calls render through the SFU, not mesh. */
+    @GET("calls/conference/{id}/livekit-token")
+    suspend fun getLiveKitToken(
+        @Header("Authorization") bearer: String,
+        @Path("id") conferenceId: Int,
+        @Query("display_name") displayName: String?,
+    ): Response<com.dilarion.app.data.model.LiveKitTokenResponse>
+
+    // ─── Waiting room (host-only) ────────────────────────────────────────────
+
+    @GET("calls/conference/{id}/waiting-room")
+    suspend fun getWaitingRoom(
+        @Header("Authorization") bearer: String,
+        @Path("id") conferenceId: Int,
+    ): Response<com.dilarion.app.data.model.WaitingRoomResponse>
+
+    @POST("calls/conference/{id}/waiting-room/{userId}/admit")
+    suspend fun admitFromWaitingRoom(
+        @Header("Authorization") bearer: String,
+        @Path("id") conferenceId: Int,
+        @Path("userId") userId: Int,
+    ): Response<com.google.gson.JsonObject>
+
+    @POST("calls/conference/{id}/waiting-room/{userId}/deny")
+    suspend fun denyFromWaitingRoom(
+        @Header("Authorization") bearer: String,
+        @Path("id") conferenceId: Int,
+        @Path("userId") userId: Int,
+    ): Response<com.google.gson.JsonObject>
+
+    // ─── Meetings (scheduled) ────────────────────────────────────────────────
+
+    @POST("meetings/create")
+    suspend fun createMeeting(
+        @Header("Authorization") bearer: String,
+        @Body body: com.dilarion.app.data.model.MeetingCreateRequest,
+    ): Response<com.dilarion.app.data.model.MeetingCreateResponse>
+
+    @GET("meetings/upcoming")
+    suspend fun getUpcomingMeetings(
+        @Header("Authorization") bearer: String,
+    ): Response<com.dilarion.app.data.model.MeetingsResponse>
+
+    @POST("meetings/join_by_code")
+    suspend fun joinMeetingByCode(
+        @Header("Authorization") bearer: String,
+        @Body body: com.dilarion.app.data.model.MeetingJoinRequest,
+    ): Response<com.dilarion.app.data.model.MeetingJoinResponse>
+
+    @POST("meetings/{id}/cancel")
+    suspend fun cancelMeeting(
+        @Header("Authorization") bearer: String,
+        @Path("id") meetingId: Int,
+    ): Response<com.google.gson.JsonObject>
+
+    // ─── Whiteboard ──────────────────────────────────────────────────────────
+
+    @POST("whiteboard/stroke")
+    suspend fun whiteboardStroke(
+        @Header("Authorization") bearer: String,
+        @Body body: com.dilarion.app.data.model.WhiteboardStrokeRequest,
+    ): Response<com.google.gson.JsonObject>
+
+    @POST("whiteboard/clear")
+    suspend fun whiteboardClear(
+        @Header("Authorization") bearer: String,
+        @Body body: com.dilarion.app.data.model.WhiteboardClearRequest,
+    ): Response<com.google.gson.JsonObject>
+
     // ─── Media ─────────────────────────────────────────────────────────────────
 
     @Multipart
@@ -216,6 +285,7 @@ interface ApiService {
         @Part("username") username: RequestBody,
         @Part file: MultipartBody.Part,
         @Part("content_type") contentType: RequestBody? = null,
+        @Part("decoy_kind") decoyKind: RequestBody? = null,
     ): Response<MediaUploadResponse>
 
     @GET("media/inbox")
@@ -229,6 +299,12 @@ interface ApiService {
 
     @GET("media/decoy-voice/{mediaId}")
     suspend fun downloadDecoyVoice(
+        @Header("Authorization") bearer: String,
+        @Path("mediaId") mediaId: String,
+    ): Response<ResponseBody>
+
+    @GET("media/decoy-file/{mediaId}")
+    suspend fun downloadDecoyFile(
         @Header("Authorization") bearer: String,
         @Path("mediaId") mediaId: String,
     ): Response<ResponseBody>

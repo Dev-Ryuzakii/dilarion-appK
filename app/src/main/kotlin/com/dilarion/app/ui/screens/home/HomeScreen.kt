@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -29,7 +30,7 @@ import com.dilarion.app.ui.theme.*
 import java.text.SimpleDateFormat
 import java.util.Locale
 
-private enum class HomeTab { CHATS, GROUPS, CALLS }
+private enum class HomeTab { CHATS, GROUPS, MEETINGS, CALLS }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -38,6 +39,8 @@ fun HomeScreen(
     onOpenChat: (String) -> Unit,
     onOpenGroupChat: (Int, String) -> Unit,
     onNewChat: () -> Unit,
+    onNewMeeting: () -> Unit,
+    onMeetings: () -> Unit,
     onSettings: () -> Unit,
     onLogout: () -> Unit,
 ) {
@@ -92,6 +95,13 @@ fun HomeScreen(
                     colors = NavigationBarItemDefaults.colors(indicatorColor = DilarionRed.copy(alpha = 0.12f), selectedIconColor = DilarionRed, selectedTextColor = DilarionRed),
                 )
                 NavigationBarItem(
+                    selected = selectedTab == HomeTab.MEETINGS,
+                    onClick = { selectedTab = HomeTab.MEETINGS },
+                    icon = { Icon(Icons.Default.Videocam, "Meetings") },
+                    label = { Text("Meetings") },
+                    colors = NavigationBarItemDefaults.colors(indicatorColor = DilarionRed.copy(alpha = 0.12f), selectedIconColor = DilarionRed, selectedTextColor = DilarionRed),
+                )
+                NavigationBarItem(
                     selected = selectedTab == HomeTab.CALLS,
                     onClick = {
                         selectedTab = HomeTab.CALLS
@@ -114,10 +124,57 @@ fun HomeScreen(
     ) { innerPadding ->
         Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
             when (selectedTab) {
-                HomeTab.CHATS  -> ChatsTab(uiState, onOpenChat)
-                HomeTab.GROUPS -> GroupsTab(uiState, onOpenGroupChat)
-                HomeTab.CALLS  -> CallsTab(uiState, uiState.currentUsername)
+                HomeTab.CHATS    -> ChatsTab(uiState, onOpenChat)
+                HomeTab.GROUPS   -> GroupsTab(uiState, onOpenGroupChat)
+                HomeTab.MEETINGS -> MeetingsTab(onNewMeeting, onMeetings)
+                HomeTab.CALLS    -> CallsTab(uiState, uiState.currentUsername)
             }
+        }
+    }
+}
+
+// ── Meetings Tab ─────────────────────────────────────────────────────────────
+// Consolidates the two things that used to be small top-bar icon buttons.
+
+@Composable
+private fun MeetingsTab(onNewMeeting: () -> Unit, onMeetings: () -> Unit) {
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        MeetingsTabCard(
+            icon = Icons.Default.Videocam,
+            title = "Start Instant Meeting",
+            subtitle = "Group video — invite anyone, add more later",
+            onClick = onNewMeeting,
+        )
+        MeetingsTabCard(
+            icon = Icons.Default.CalendarMonth,
+            title = "Scheduled Meetings",
+            subtitle = "Upcoming, join by code, or schedule a new one",
+            onClick = onMeetings,
+        )
+    }
+}
+
+@Composable
+private fun MeetingsTabCard(icon: ImageVector, title: String, subtitle: String, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(SurfaceWhite)
+            .clickable(onClick = onClick)
+            .padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier.size(40.dp).clip(CircleShape).background(DilarionRed),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(icon, null, tint = SurfaceWhite)
+        }
+        Spacer(Modifier.width(14.dp))
+        Column {
+            Text(title, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+            Text(subtitle, fontSize = 12.sp, color = Color.Gray)
         }
     }
 }

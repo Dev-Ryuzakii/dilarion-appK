@@ -1,5 +1,6 @@
 package com.dilarion.app.di
 
+import com.dilarion.app.BuildConfig
 import com.dilarion.app.data.api.ApiService
 import dagger.Module
 import dagger.Provides
@@ -16,7 +17,7 @@ import javax.inject.Singleton
 @InstallIn(SingletonComponent::class)
 object NetworkModule {
 
-    private const val BASE_URL = "https://apidilarion.eibstratoc.com/"
+    private val BASE_URL = BuildConfig.BASE_URL
 
     @Provides
     @Singleton

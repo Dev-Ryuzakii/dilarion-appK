@@ -1,6 +1,7 @@
 package com.dilarion.app.ui.screens.chat
 
 import android.Manifest
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.*
@@ -24,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -42,11 +44,14 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.compose.runtime.collectAsState
+import androidx.compose.foundation.lazy.items
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.dilarion.app.data.model.MediaItem
 import com.dilarion.app.data.model.Message
 import com.dilarion.app.ui.theme.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Locale
@@ -91,6 +96,28 @@ private fun isVoiceMedia(item: MediaItem): Boolean =
             item.mediaType.contains("voice", ignoreCase = true) ||
             item.filename.endsWith(".mp4") && item.mediaType.contains("audio", ignoreCase = true)
 
+private fun isImageMedia(item: MediaItem): Boolean =
+    item.contentType?.startsWith("image/") == true || item.mediaType.contains("photo", ignoreCase = true)
+
+/** Generic files/documents — get a decoy on first open rather than the plain lock icon. */
+private fun isDocumentMedia(item: MediaItem): Boolean {
+    if (isVoiceMedia(item) || isImageMedia(item)) return false
+    val ct = item.contentType
+    return ct?.startsWith("application/") == true || ct?.startsWith("media/") == true || item.mediaType == "raw"
+}
+
+/** Classifies a picked file's MIME type before upload — documents get a decoy-kind prompt. */
+private fun isDocumentMime(mime: String?): Boolean =
+    mime != null && !mime.startsWith("image/") && !mime.startsWith("video/") && !mime.startsWith("audio/")
+
+/** Must match DECOY_KINDS in the backend. */
+private val DECOY_KIND_LABELS = listOf(
+    "invoice" to "Invoice",
+    "delivery" to "Delivery note",
+    "minutes" to "Meeting minutes",
+    "memo" to "Memo",
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen(
@@ -99,6 +126,7 @@ fun ChatScreen(
     groupName: String?,
     onBack: () -> Unit,
     onCall: ((String) -> Unit)? = null,
+    onWhiteboard: (() -> Unit)? = null,
     viewModel: ChatViewModel = hiltViewModel(),
 ) {
     val context = LocalContext.current
@@ -108,9 +136,12 @@ fun ChatScreen(
     val uiState by viewModel.uiState.collectAsState()
     val listState = rememberLazyListState()
     var inputText by remember { mutableStateOf("") }
-    var showUnlockDialog by remember { mutableStateOf(false) }
+    // Which specific message/media key is being unlocked right now — null means
+    // no dialog showing. Never a global "unlock everything" toggle.
+    var unlockTarget by remember { mutableStateOf<String?>(null) }
     var unlockError by remember { mutableStateOf<String?>(null) }
     var viewerImagePath by remember { mutableStateOf<String?>(null) }
+    var pendingDocUri by remember { mutableStateOf<Uri?>(null) }
 
     val combinedItems = remember(uiState.messages, uiState.mediaItems) {
         viewModel.getCombinedItems()
@@ -122,9 +153,12 @@ fun ChatScreen(
         if (combinedItems.isNotEmpty()) listState.animateScrollToItem(combinedItems.size - 1)
     }
 
-    // Image picker
+    // Attachment picker — any file; documents get a decoy-kind prompt before upload
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri != null) viewModel.sendImage(uri, context)
+        if (uri != null) {
+            val mime = context.contentResolver.getType(uri)
+            if (isDocumentMime(mime)) pendingDocUri = uri else viewModel.sendAttachment(uri, context)
+        }
     }
 
     // Audio permission
@@ -141,20 +175,34 @@ fun ChatScreen(
         )
     }
 
-    if (showUnlockDialog) {
+    unlockTarget?.let { target ->
         UnlockDialog(
             error = unlockError,
-            onDismiss = { showUnlockDialog = false; unlockError = null },
+            onDismiss = { unlockTarget = null; unlockError = null },
             onConfirm = { token ->
-                val ok = viewModel.unlock(token)
-                if (ok) { showUnlockDialog = false; unlockError = null }
+                val ok = viewModel.unlock(token, target)
+                if (ok) { unlockTarget = null; unlockError = null }
                 else unlockError = "Incorrect master token"
             },
         )
     }
 
+    uiState.viewingDocumentKey?.let { key ->
+        val bytes = viewModel.getDocumentBytes(key)
+        if (bytes != null) {
+            DocumentViewerDialog(bytes = bytes, onDismiss = { viewModel.closeDocumentViewer() })
+        }
+    }
+
     viewerImagePath?.let { path ->
         FullScreenImageViewer(imagePath = path, onDismiss = { viewerImagePath = null })
+    }
+
+    pendingDocUri?.let { uri ->
+        DecoyKindDialog(
+            onPick = { kind -> viewModel.sendAttachment(uri, context, kind); pendingDocUri = null },
+            onDismiss = { pendingDocUri = null },
+        )
     }
 
     Scaffold(
@@ -188,17 +236,15 @@ fun ChatScreen(
                     }
                 },
                 actions = {
+                    if (onWhiteboard != null) {
+                        IconButton(onClick = onWhiteboard) {
+                            Icon(Icons.Default.Draw, "Whiteboard", tint = SurfaceWhite)
+                        }
+                    }
                     if (groupId == null && onCall != null) {
                         IconButton(onClick = { onCall(username) }) {
                             Icon(Icons.Default.Call, "Call", tint = SurfaceWhite)
                         }
-                    }
-                    IconButton(onClick = { if (!uiState.isUnlocked) showUnlockDialog = true }) {
-                        Icon(
-                            if (uiState.isUnlocked) Icons.Default.LockOpen else Icons.Default.Lock,
-                            contentDescription = if (uiState.isUnlocked) "Unlocked" else "Unlock",
-                            tint = SurfaceWhite,
-                        )
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = DilarionRed),
@@ -217,20 +263,6 @@ fun ChatScreen(
         Column(
             modifier = Modifier.fillMaxSize().padding(innerPadding).imePadding(),
         ) {
-            if (!uiState.isUnlocked && combinedItems.isNotEmpty()) {
-                Surface(color = DilarionRed.copy(alpha = 0.1f), modifier = Modifier.fillMaxWidth()) {
-                    Row(
-                        modifier = Modifier.clickable { showUnlockDialog = true }.padding(horizontal = 16.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center,
-                    ) {
-                        Icon(Icons.Default.Lock, null, modifier = Modifier.size(14.dp), tint = DilarionRed)
-                        Spacer(Modifier.width(6.dp))
-                        Text("Tap to unlock messages with master token", fontSize = 12.sp, color = DilarionRed, fontWeight = FontWeight.Medium)
-                    }
-                }
-            }
-
             LazyColumn(
                 state = listState,
                 modifier = Modifier.weight(1f),
@@ -274,8 +306,8 @@ fun ChatScreen(
                                 MessageBubble(
                                     message = message,
                                     isMine = isMine,
-                                    isUnlocked = uiState.isUnlocked,
-                                    onTapLocked = { showUnlockDialog = true },
+                                    decryptedText = uiState.decryptedTexts[message.id],
+                                    onTapLocked = { unlockTarget = "msg_${message.id}" },
                                     currentUsername = uiState.currentUsername,
                                     isGroup = groupId != null,
                                     senderName = if (groupId != null && !isMine) message.sender else null,
@@ -285,30 +317,42 @@ fun ChatScreen(
                                 val mediaItem = item.item
                                 val isMine = mediaItem.sender != null && mediaItem.sender == uiState.currentUsername
                                 val isVoice = isVoiceMedia(mediaItem)
-                                val imgKey = "img_${mediaItem.mediaId}"
-                                val localPath = uiState.localFilePaths[imgKey]
-                                if (!isVoice && localPath == null && uiState.isUnlocked) {
-                                    LaunchedEffect(mediaItem.mediaId) {
-                                        viewModel.downloadImageForDisplay(mediaItem.mediaId, context)
-                                    }
-                                }
-                                MediaBubble(
-                                    item = mediaItem,
-                                    isMine = isMine,
-                                    isVoice = isVoice,
-                                    isUnlocked = uiState.isUnlocked,
-                                    isPlaying = uiState.playingMediaId == mediaItem.mediaId,
-                                    localImagePath = if (!isVoice) localPath else null,
-                                    onPlayTap = {
-                                        if (uiState.playingMediaId == mediaItem.mediaId) {
-                                            viewModel.stopPlayback()
-                                        } else {
-                                            viewModel.playMedia(mediaItem.mediaId, uiState.isUnlocked, context)
+                                val isDocument = isDocumentMedia(mediaItem)
+                                val mediaUnlocked = uiState.unlockedIds.contains("media_${mediaItem.mediaId}")
+                                if (isDocument) {
+                                    DocumentBubble(
+                                        isMine = isMine,
+                                        timestamp = mediaItem.timestamp,
+                                        isUnlocked = mediaUnlocked,
+                                        onOpen = { viewModel.openDocument(mediaItem.mediaId) },
+                                        onLockTap = { unlockTarget = "media_${mediaItem.mediaId}" },
+                                    )
+                                } else {
+                                    val imgKey = "img_${mediaItem.mediaId}"
+                                    val localPath = uiState.localFilePaths[imgKey]
+                                    if (!isVoice && localPath == null && mediaUnlocked) {
+                                        LaunchedEffect(mediaItem.mediaId) {
+                                            viewModel.downloadImageForDisplay(mediaItem.mediaId, context)
                                         }
-                                    },
-                                    onImageTap = { path -> viewerImagePath = path },
-                                    onLockTap = { showUnlockDialog = true },
-                                )
+                                    }
+                                    MediaBubble(
+                                        item = mediaItem,
+                                        isMine = isMine,
+                                        isVoice = isVoice,
+                                        isUnlocked = mediaUnlocked,
+                                        isPlaying = uiState.playingMediaId == mediaItem.mediaId,
+                                        localImagePath = if (!isVoice) localPath else null,
+                                        onPlayTap = {
+                                            if (uiState.playingMediaId == mediaItem.mediaId) {
+                                                viewModel.stopPlayback()
+                                            } else {
+                                                viewModel.playMedia(mediaItem.mediaId, mediaUnlocked, context)
+                                            }
+                                        },
+                                        onImageTap = { path -> viewerImagePath = path },
+                                        onLockTap = { unlockTarget = "media_${mediaItem.mediaId}" },
+                                    )
+                                }
                             }
                         }
                     }
@@ -331,7 +375,7 @@ fun ChatScreen(
                         // Attach button
                         if (groupId == null) {
                             IconButton(
-                                onClick = { imagePicker.launch("image/*") },
+                                onClick = { imagePicker.launch("*/*") },
                                 modifier = Modifier.size(44.dp),
                             ) {
                                 Icon(Icons.Default.AttachFile, "Attach", tint = TextSecondary)
@@ -600,6 +644,148 @@ private fun MediaBubble(
     }
 }
 
+// ── DocumentBubble ────────────────────────────────────────────────────────────
+
+/**
+ * A document attachment. Tapping it always opens something — the generated
+ * decoy while locked, the real file once the screen is unlocked — so it must
+ * look identical in both states; nothing here may hint that a decoy exists.
+ * The small lock icon (matching the voice-note bubble) is the only way to
+ * trigger the master-token dialog, kept separate from the open action itself.
+ */
+@Composable
+private fun DocumentBubble(
+    isMine: Boolean,
+    timestamp: String?,
+    isUnlocked: Boolean,
+    onOpen: () -> Unit,
+    onLockTap: () -> Unit,
+) {
+    val bubbleColor = if (isMine) ChatBubbleSelf else ChatBubbleOther
+    val bubbleShape = if (isMine) {
+        RoundedCornerShape(topStart = 18.dp, topEnd = 4.dp, bottomStart = 18.dp, bottomEnd = 18.dp)
+    } else {
+        RoundedCornerShape(topStart = 4.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 18.dp)
+    }
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = if (isMine) Arrangement.End else Arrangement.Start,
+    ) {
+        Column(
+            modifier = Modifier
+                .widthIn(max = 260.dp)
+                .clip(bubbleShape)
+                .background(bubbleColor)
+                .padding(8.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(4.dp)) {
+                IconButton(onClick = onOpen, modifier = Modifier.size(36.dp)) {
+                    Icon(Icons.Default.Description, "Open document", tint = DilarionRed, modifier = Modifier.size(24.dp))
+                }
+                Spacer(Modifier.width(4.dp))
+                Text("Tap to open", style = MaterialTheme.typography.bodySmall, color = TextSecondary, modifier = Modifier.weight(1f))
+                if (!isUnlocked) {
+                    IconButton(onClick = onLockTap, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Default.Lock, "Unlock real document", tint = TextSecondary, modifier = Modifier.size(16.dp))
+                    }
+                }
+            }
+            Spacer(Modifier.height(2.dp))
+            Text(
+                formatTimestamp(timestamp ?: ""),
+                style = MaterialTheme.typography.labelSmall,
+                color = TextSecondary,
+                modifier = Modifier.align(Alignment.End).padding(end = 4.dp),
+            )
+        }
+    }
+}
+
+// ── Document viewer (in-app, no disk) ────────────────────────────────────────
+
+/**
+ * Renders a PDF from an in-memory byte array — shown in-app, never handed to an
+ * external viewer. android.graphics.pdf.PdfRenderer requires a seekable file
+ * descriptor (a plain in-memory pipe isn't seekable, so that's not an option),
+ * so this opens a fd on a temp file and unlinks it immediately — the open fd
+ * keeps the data readable for PdfRenderer, but no path to it exists on disk
+ * beyond the instant between create and delete, so nothing else (other apps,
+ * a file browser, a crash dump) can ever see or open it.
+ */
+@Composable
+private fun DocumentViewerDialog(bytes: ByteArray, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    var pages by remember { mutableStateOf<List<android.graphics.Bitmap>>(emptyList()) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var loading by remember { mutableStateOf(true) }
+
+    LaunchedEffect(bytes) {
+        val result = withContext(Dispatchers.IO) {
+            runCatching {
+                val tmp = File.createTempFile("docpreview", ".pdf", context.cacheDir)
+                tmp.writeBytes(bytes)
+                val pfd = try {
+                    android.os.ParcelFileDescriptor.open(tmp, android.os.ParcelFileDescriptor.MODE_READ_ONLY)
+                } finally {
+                    tmp.delete()
+                }
+                val renderer = android.graphics.pdf.PdfRenderer(pfd)
+                val bitmaps = buildList {
+                    for (i in 0 until renderer.pageCount) {
+                        renderer.openPage(i).use { page ->
+                            val bmp = android.graphics.Bitmap.createBitmap(
+                                page.width * 2, page.height * 2, android.graphics.Bitmap.Config.ARGB_8888,
+                            )
+                            bmp.eraseColor(android.graphics.Color.WHITE)
+                            page.render(bmp, null, null, android.graphics.pdf.PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                            add(bmp)
+                        }
+                    }
+                }
+                renderer.close()
+                pfd.close()
+                bitmaps
+            }
+        }
+        result.onSuccess { pages = it }.onFailure { error = it.message ?: "Could not open document" }
+        loading = false
+    }
+
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Box(Modifier.fillMaxSize().background(Color(0xFF1C1C1E))) {
+            when {
+                loading -> CircularProgressIndicator(Modifier.align(Alignment.Center), color = SurfaceWhite)
+                error != null -> Text(error ?: "", color = Color(0xFFEF4444), modifier = Modifier.align(Alignment.Center).padding(24.dp))
+                else -> LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    items(pages) { bmp ->
+                        Image(
+                            bitmap = bmp.asImageBitmap(),
+                            contentDescription = "Document page",
+                            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)),
+                            contentScale = ContentScale.FillWidth,
+                        )
+                    }
+                }
+            }
+            IconButton(
+                onClick = onDismiss,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .statusBarsPadding()
+                    .padding(12.dp)
+                    .background(Color.White.copy(alpha = 0.15f), CircleShape),
+            ) {
+                Icon(Icons.Default.Close, "Close", tint = Color.White)
+            }
+        }
+    }
+}
+
 // ── Full-screen image viewer (WhatsApp-style) ────────────────────────────────
 
 @Composable
@@ -712,6 +898,32 @@ private fun UnlockDialog(
     )
 }
 
+@Composable
+private fun DecoyKindDialog(
+    onPick: (String?) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Default.Description, null, tint = DilarionRed) },
+        title = { Text("Decoy for this file", textAlign = TextAlign.Center) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                DECOY_KIND_LABELS.forEach { (kind, label) ->
+                    TextButton(onClick = { onPick(kind) }, modifier = Modifier.fillMaxWidth()) {
+                        Text(label, modifier = Modifier.weight(1f), textAlign = TextAlign.Start)
+                    }
+                }
+                TextButton(onClick = { onPick(null) }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Random", modifier = Modifier.weight(1f), textAlign = TextAlign.Start)
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
 private val AVATAR_COLORS = listOf(
     Color(0xFF7C3AED), Color(0xFF0891B2), Color(0xFF059669),
     Color(0xFFD97706), Color(0xFFC0392B), Color(0xFFDB2777),
@@ -749,7 +961,7 @@ private fun SenderAvatar(username: String) {
 private fun MessageBubble(
     message: Message,
     isMine: Boolean,
-    isUnlocked: Boolean,
+    decryptedText: String?,
     onTapLocked: () -> Unit,
     currentUsername: String = "",
     isGroup: Boolean = false,
@@ -764,7 +976,7 @@ private fun MessageBubble(
     val hasRecipient = !message.recipient.isNullOrBlank() && message.recipient != "group"
     val isForMe = hasRecipient && message.recipient == currentUsername
     val privatePurple = Color(0xFFA78BFA)
-    val showDecoy = (isEncrypted && !isUnlocked) || looksLikeCiphertext(message.content)
+    val showDecoy = decryptedText == null && (isEncrypted || looksLikeCiphertext(message.content))
 
     val bubbleColor = when {
         isPrivateTagged -> Color(0xFF1A1020)
@@ -837,7 +1049,7 @@ private fun MessageBubble(
                         .background(bubbleColor)
                         .then(
                             if (!isPrivateTagged && isEncrypted)
-                                Modifier.clickable(enabled = !isUnlocked) { onTapLocked() }
+                                Modifier.clickable(enabled = decryptedText == null) { onTapLocked() }
                             else Modifier
                         )
                         .padding(horizontal = 12.dp, vertical = 8.dp),
@@ -859,7 +1071,7 @@ private fun MessageBubble(
                             style = MaterialTheme.typography.bodyMedium,
                         )
                     } else {
-                        Text(message.content ?: "", color = TextPrimary, style = MaterialTheme.typography.bodyMedium)
+                        Text(decryptedText ?: message.content ?: "", color = TextPrimary, style = MaterialTheme.typography.bodyMedium)
                     }
                     Spacer(Modifier.height(2.dp))
                     Row(

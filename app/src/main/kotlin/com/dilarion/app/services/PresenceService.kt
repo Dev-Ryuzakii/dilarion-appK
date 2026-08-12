@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Build
 import android.util.Log
 import com.google.gson.Gson
+import com.dilarion.app.BuildConfig
 import com.dilarion.app.data.model.WsMessage
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -18,7 +19,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 private const val TAG = "PresenceService"
-private const val WS_BASE = "wss://apidilarion.eibstratoc.com/ws"
+private val WS_BASE = BuildConfig.WS_BASE
 private const val PREFS_NAME = "dilarion_device"
 private const val KEY_DEVICE_ID = "device_id"
 

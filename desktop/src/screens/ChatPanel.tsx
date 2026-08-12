@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import {
   ChatMessage,
+  DecoyKind,
   getConversation,
   sendText,
   uploadMedia,
@@ -14,7 +15,9 @@ import { generateDecoy } from '../services/decoy';
 import { loadKeypair } from '../services/keys';
 import { presenceService, WsMessage } from '../services/presence';
 import { LockIcon, MicIcon as MicIconSvg, PaperclipIcon as PaperclipIconSvg } from '../components/Icons';
-import MediaBubble from '../components/MediaBubble';
+import MediaBubble, { DocumentBubble } from '../components/MediaBubble';
+import WhiteboardModal from '../components/WhiteboardModal';
+import MeetingCard, { JoinMeetingHandler } from '../components/MeetingCard';
 
 interface Props {
   token: string;
@@ -24,12 +27,16 @@ interface Props {
   masterToken: string | null;
   onMasterTokenSaved: (t: string) => void;
   onCall: (partner: string, type: 'audio' | 'video') => void;
+  onJoinMeeting: JoinMeetingHandler;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 function isEncrypted(ct: string | null | undefined): boolean {
   return ct === 'encrypted';
+}
+function isMeeting(ct: string | null | undefined): boolean {
+  return ct === 'meeting';
 }
 
 // Legacy rows written by the old server fallback. These strings must never reach
@@ -50,6 +57,18 @@ function isImage(ct: string | null | undefined): boolean {
 function isMedia(ct: string | null | undefined): boolean {
   return !!(ct?.startsWith('media/') || ct?.startsWith('application/'));
 }
+// Generic files/documents, as opposed to photos and voice notes: these get a
+// decoy document on first tap rather than a plain lock gate (see DocumentBubble).
+function isDocument(ct: string | null | undefined): boolean {
+  return isMedia(ct) && !isImage(ct) && !isVoice(ct);
+}
+
+const DECOY_KIND_LABELS: [DecoyKind, string][] = [
+  ['invoice', 'Invoice'],
+  ['delivery', 'Delivery note'],
+  ['minutes', 'Meeting minutes'],
+  ['memo', 'Memo'],
+];
 
 function initials(name: string): string {
   return name
@@ -409,14 +428,17 @@ interface MessageBubbleProps {
   onDecrypt: (masterToken: string, messageId: number) => Promise<string>;
   onMasterTokenSaved: (t: string) => void;
   onRemoveMessage: (id: number) => void;
+  onJoinMeeting: JoinMeetingHandler;
 }
 
-function MessageBubble({ msg, isMine, token, masterToken, onDecrypt, onMasterTokenSaved, onRemoveMessage }: MessageBubbleProps) {
+function MessageBubble({ msg, isMine, token, masterToken, onDecrypt, onMasterTokenSaved, onRemoveMessage, onJoinMeeting }: MessageBubbleProps) {
   const ct = msg.content_type;
   const mediaId = msg.content;
 
   let body: React.ReactNode;
-  if (isEncrypted(ct)) {
+  if (isMeeting(ct)) {
+    body = <MeetingCard content={msg.content} senderUsername={msg.sender} onJoin={onJoinMeeting} />;
+  } else if (isEncrypted(ct)) {
     body = (
       <EncryptedBubble
         token={token}
@@ -426,6 +448,16 @@ function MessageBubble({ msg, isMine, token, masterToken, onDecrypt, onMasterTok
         isMine={isMine}
         onDecrypt={onDecrypt}
         onMasterTokenSaved={onMasterTokenSaved}
+      />
+    );
+  } else if (isDocument(ct)) {
+    body = (
+      <DocumentBubble
+        token={token}
+        mediaId={mediaId}
+        masterToken={masterToken}
+        onMasterTokenSaved={onMasterTokenSaved}
+        onRemove={() => onRemoveMessage(msg.id)}
       />
     );
   } else if (isImage(ct) || isVoice(ct) || isMedia(ct)) {
@@ -517,7 +549,7 @@ interface PendingMsg {
   timestamp: string;
 }
 
-export default function ChatPanel({ token, myUsername, partner, partnerOnline, masterToken, onMasterTokenSaved, onCall }: Props) {
+export default function ChatPanel({ token, myUsername, partner, partnerOnline, masterToken, onMasterTokenSaved, onCall, onJoinMeeting }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [pending, setPending] = useState<PendingMsg[]>([]);
   const [loading, setLoading] = useState(true);
@@ -527,6 +559,8 @@ export default function ChatPanel({ token, myUsername, partner, partnerOnline, m
   const [recording, setRecording] = useState(false);
   const [recSeconds, setRecSeconds] = useState(0);
   const [partnerTyping, setPartnerTyping] = useState(false);
+  const [pendingDocFile, setPendingDocFile] = useState<File | null>(null);
+  const [showWhiteboard, setShowWhiteboard] = useState(false);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -669,8 +703,27 @@ export default function ChatPanel({ token, myUsername, partner, partnerOnline, m
     if (!file) return;
     e.target.value = '';
     const ct = file.type || 'application/octet-stream';
+    // Documents get a decoy — ask which kind before uploading. Photos/videos
+    // upload immediately, same as before.
+    if (isDocument(ct)) {
+      setPendingDocFile(file);
+      return;
+    }
     try {
       await uploadMedia(token, partner, file, ct, file.name);
+      await loadConversation();
+    } catch {
+      // silently fail
+    }
+  }
+
+  async function sendPendingDoc(kind?: DecoyKind) {
+    const file = pendingDocFile;
+    if (!file) return;
+    setPendingDocFile(null);
+    const ct = file.type || 'application/octet-stream';
+    try {
+      await uploadMedia(token, partner, file, ct, file.name, kind);
       await loadConversation();
     } catch {
       // silently fail
@@ -759,6 +812,11 @@ export default function ChatPanel({ token, myUsername, partner, partnerOnline, m
         </div>
         {/* Call buttons */}
         <div style={{ display: 'flex', gap: 6 }}>
+          <button onClick={() => setShowWhiteboard(true)} style={cs.callBtn} title="Whiteboard">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 19l7-7 3 3-7 7-3-3z" /><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z" /><path d="M2 2l7.586 7.586" /><circle cx="11" cy="11" r="2" />
+            </svg>
+          </button>
           <button onClick={() => onCall(partner, 'audio')} style={cs.callBtn} title="Voice call">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 1h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.64a16 16 0 0 0 6 6l.95-.95a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/>
@@ -771,6 +829,10 @@ export default function ChatPanel({ token, myUsername, partner, partnerOnline, m
           </button>
         </div>
       </div>
+
+      {showWhiteboard && (
+        <WhiteboardModal token={token} target={{ username: partner }} onClose={() => setShowWhiteboard(false)} />
+      )}
 
       {/* Messages area */}
       <div style={cs.messagesArea}>
@@ -798,6 +860,7 @@ export default function ChatPanel({ token, myUsername, partner, partnerOnline, m
                     onDecrypt={handleDecrypt}
                     onMasterTokenSaved={onMasterTokenSaved}
                     onRemoveMessage={id => setMessages(prev => prev.filter(m => m.id !== id))}
+                    onJoinMeeting={onJoinMeeting}
                   />
                 </React.Fragment>
               );
@@ -829,6 +892,41 @@ export default function ChatPanel({ token, myUsername, partner, partnerOnline, m
           >
             ✕
           </button>
+        </div>
+      )}
+
+      {pendingDocFile && (
+        <div style={{
+          padding: '10px 16px',
+          background: 'var(--bg-card)',
+          borderTop: '1px solid var(--border-color)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 8,
+        }}>
+          <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+            Decoy for "{pendingDocFile.name}":
+          </span>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {DECOY_KIND_LABELS.map(([kind, label]) => (
+              <button
+                key={kind}
+                onClick={() => sendPendingDoc(kind)}
+                style={cs.decoyKindBtn}
+              >
+                {label}
+              </button>
+            ))}
+            <button onClick={() => sendPendingDoc()} style={cs.decoyKindBtn}>
+              Random
+            </button>
+            <button
+              onClick={() => setPendingDocFile(null)}
+              style={{ ...cs.decoyKindBtn, color: '#ef4444', border: '1px solid rgba(239,68,68,0.4)' }}
+            >
+              Cancel
+            </button>
+          </div>
         </div>
       )}
 
@@ -1080,6 +1178,15 @@ const cs: Record<string, React.CSSProperties> = {
     flexShrink: 0,
     transition: 'color 0.15s',
     border: 'none',
+  },
+  decoyKindBtn: {
+    background: 'var(--input-field-bg)',
+    border: '1px solid var(--border-color)',
+    borderRadius: 8,
+    color: 'var(--text-primary)',
+    fontSize: '0.78rem',
+    padding: '6px 12px',
+    cursor: 'pointer',
   },
   sendBtn: {
     background: 'var(--accent)',

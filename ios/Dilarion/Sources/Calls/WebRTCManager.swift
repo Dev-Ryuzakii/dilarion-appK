@@ -11,6 +11,16 @@ class WebRTCManager: NSObject, ObservableObject {
     private var videoCapturer: RTCCameraVideoCapturer?
     private var isFrontCamera = true
     private var onIceCandidate: ((RTCIceCandidate) -> Void)?
+
+    // ── Conference (multi-party) ──────────────────────────────────────────────
+    // Separate from `peerConnection` above (the 1:1 path's single connection) so
+    // starting/joining a conference never disturbs an unrelated 1:1 call. One
+    // RTCPeerConnection per other participant, each with its own delegate since
+    // RTCPeerConnectionDelegate callbacks carry no "which peer" information —
+    // the delegate instance captures the username itself.
+    private var conferencePeers: [String: RTCPeerConnection] = [:]
+    /// Must be retained here — RTCPeerConnection does not strongly hold its delegate.
+    private var conferenceDelegates: [String: ConferencePeerDelegate] = [:]
     
     @Published var localVideoTrack: RTCVideoTrack? = nil
     @Published var remoteVideoTrack: RTCVideoTrack? = nil
@@ -243,6 +253,155 @@ class WebRTCManager: NSObject, ObservableObject {
             else { quality = 4 }
             completion(quality)
         }
+    }
+
+    // ── Conference peer management ────────────────────────────────────────────
+
+    @discardableResult
+    func createConferencePeer(
+        username: String,
+        onIce: @escaping (String, RTCIceCandidate) -> Void,
+        onRemoteAudioTrack: @escaping (String) -> Void
+    ) -> RTCPeerConnection? {
+        if let existing = conferencePeers[username] { return existing }
+
+        let configuration = RTCConfiguration()
+        configuration.iceServers = iceServers
+        configuration.sdpSemantics = .unifiedPlan
+        let constraints = RTCMediaConstraints(
+            mandatoryConstraints: ["OfferToReceiveAudio": "true", "OfferToReceiveVideo": "false"],
+            optionalConstraints: nil
+        )
+
+        let delegate = ConferencePeerDelegate(username: username, onIce: onIce, onRemoteAudioTrack: onRemoteAudioTrack)
+        guard let pc = factory.peerConnection(with: configuration, constraints: constraints, delegate: delegate) else {
+            return nil
+        }
+
+        if let audioTrack = localAudioTrack {
+            pc.add(audioTrack, streamIds: ["conf_\(username)"])
+        }
+
+        conferencePeers[username] = pc
+        conferenceDelegates[username] = delegate
+        return pc
+    }
+
+    func createConferenceOffer(username: String) async throws -> String {
+        guard let pc = conferencePeers[username] else {
+            throw NSError(domain: "WebRTC", code: -1, userInfo: [NSLocalizedDescriptionKey: "No peer connection for \(username)"])
+        }
+        let constraints = RTCMediaConstraints(
+            mandatoryConstraints: ["OfferToReceiveAudio": "true", "OfferToReceiveVideo": "false"],
+            optionalConstraints: nil
+        )
+        return try await withCheckedThrowingContinuation { continuation in
+            pc.offer(for: constraints) { sdp, error in
+                if let error = error { continuation.resume(throwing: error); return }
+                guard let sdp = sdp else {
+                    continuation.resume(throwing: NSError(domain: "WebRTC", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to create conference offer"]))
+                    return
+                }
+                pc.setLocalDescription(sdp) { error in
+                    if let error = error { continuation.resume(throwing: error) }
+                    else { continuation.resume(returning: sdp.sdp) }
+                }
+            }
+        }
+    }
+
+    /// Remote offer arrived (from an existing participant, once we've joined) — answer it.
+    func handleConferenceOffer(username: String, sdp sdpStr: String) async throws -> String {
+        guard let pc = conferencePeers[username] else {
+            throw NSError(domain: "WebRTC", code: -1, userInfo: [NSLocalizedDescriptionKey: "No peer connection for \(username)"])
+        }
+        let sdp = RTCSessionDescription(type: .offer, sdp: sdpStr)
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            pc.setRemoteDescription(sdp) { error in
+                if let error = error { continuation.resume(throwing: error) } else { continuation.resume() }
+            }
+        }
+        let constraints = RTCMediaConstraints(
+            mandatoryConstraints: ["OfferToReceiveAudio": "true", "OfferToReceiveVideo": "false"],
+            optionalConstraints: nil
+        )
+        return try await withCheckedThrowingContinuation { continuation in
+            pc.answer(for: constraints) { sdp, error in
+                if let error = error { continuation.resume(throwing: error); return }
+                guard let sdp = sdp else {
+                    continuation.resume(throwing: NSError(domain: "WebRTC", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to create conference answer"]))
+                    return
+                }
+                pc.setLocalDescription(sdp) { error in
+                    if let error = error { continuation.resume(throwing: error) }
+                    else { continuation.resume(returning: sdp.sdp) }
+                }
+            }
+        }
+    }
+
+    func handleConferenceAnswer(username: String, sdp sdpStr: String) async throws {
+        guard let pc = conferencePeers[username] else { return }
+        let sdp = RTCSessionDescription(type: .answer, sdp: sdpStr)
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            pc.setRemoteDescription(sdp) { error in
+                if let error = error { continuation.resume(throwing: error) } else { continuation.resume() }
+            }
+        }
+    }
+
+    func addConferenceIceCandidate(username: String, sdpMid: String, sdpMLineIndex: Int32, candidate candidateStr: String) {
+        guard let pc = conferencePeers[username] else { return }
+        pc.add(RTCIceCandidate(sdp: candidateStr, sdpMLineIndex: sdpMLineIndex, sdpMid: sdpMid))
+    }
+
+    func closeConferencePeer(username: String) {
+        conferencePeers[username]?.close()
+        conferencePeers.removeValue(forKey: username)
+        conferenceDelegates.removeValue(forKey: username)
+    }
+
+    func closeAllConferencePeers() {
+        conferencePeers.values.forEach { $0.close() }
+        conferencePeers = [:]
+        conferenceDelegates = [:]
+    }
+}
+
+/// Per-peer delegate so N simultaneous conference connections can each route
+/// their ICE candidates and remote tracks back to the right username — the 1:1
+/// path doesn't need this since WebRTCManager is its own delegate there and
+/// only ever has one peer connection at a time.
+private class ConferencePeerDelegate: NSObject, RTCPeerConnectionDelegate {
+    let username: String
+    let onIce: (String, RTCIceCandidate) -> Void
+    let onRemoteAudioTrack: (String) -> Void
+
+    init(username: String, onIce: @escaping (String, RTCIceCandidate) -> Void, onRemoteAudioTrack: @escaping (String) -> Void) {
+        self.username = username
+        self.onIce = onIce
+        self.onRemoteAudioTrack = onRemoteAudioTrack
+    }
+
+    func peerConnection(_ peerConnection: RTCPeerConnection, didChange stateChanged: RTCSignalingState) {}
+    func peerConnection(_ peerConnection: RTCPeerConnection, didAdd stream: RTCMediaStream) {}
+    func peerConnection(_ peerConnection: RTCPeerConnection, didRemove stream: RTCMediaStream) {}
+    func peerConnectionShouldNegotiate(_ peerConnection: RTCPeerConnection) {}
+    func peerConnection(_ peerConnection: RTCPeerConnection, didChange newState: RTCIceConnectionState) {}
+    func peerConnection(_ peerConnection: RTCPeerConnection, didChange newState: RTCIceGatheringState) {}
+    func peerConnection(_ peerConnection: RTCPeerConnection, didRemove candidates: [RTCIceCandidate]) {}
+    func peerConnection(_ peerConnection: RTCPeerConnection, didOpen dataChannel: RTCDataChannel) {}
+
+    func peerConnection(_ peerConnection: RTCPeerConnection, didGenerate candidate: RTCIceCandidate) {
+        let username = self.username
+        DispatchQueue.main.async { [onIce] in onIce(username, candidate) }
+    }
+
+    func peerConnection(_ peerConnection: RTCPeerConnection, didAdd receiver: RTCRtpReceiver, streams: [RTCMediaStream]) {
+        // Voice-only, matching the Android/desktop conference path.
+        guard receiver.track is RTCAudioTrack else { return }
+        let username = self.username
+        DispatchQueue.main.async { [onRemoteAudioTrack] in onRemoteAudioTrack(username) }
     }
 }
 

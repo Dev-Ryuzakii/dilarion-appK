@@ -1,0 +1,8 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Dilarion Test",
+  "build": {
+    "beforeDevCommand": "npm run dev:test",
+    "beforeBuildCommand": "npm run build:test"
+  }
+}

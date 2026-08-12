@@ -1,6 +1,10 @@
 name: Dilarion
 options:
   bundleIdPrefix: com.dilarion
+configs:
+  Debug: debug
+  Release: release
+  Staging: release
 targets:
   Dilarion:
     type: application
@@ -12,11 +16,20 @@ targets:
     dependencies:
       - package: WebRTC
         product: WebRTC
+    # Debug/Release point at production; Staging points at the test VPS
+    # (testdilarion.eibstratoc.com) so testers can run a separate build
+    # without touching what's already on production users' devices.
+    configFiles:
+      Debug: Config-Production.xcconfig
+      Release: Config-Production.xcconfig
+      Staging: Config-Staging.xcconfig
     info:
       path: Dilarion/Info.plist
       properties:
         CFBundleDisplayName: "Dilarionn"
         CFBundleName: "Dilarionn"
+        APIBaseURL: "$(API_BASE_URL)"
+        WSBaseURL: "$(WS_BASE_URL)"
         UILaunchScreen:
           UIColorName: ""
         UISupportedInterfaceOrientations:
@@ -33,3 +46,20 @@ packages:
   WebRTC:
     url: https://github.com/stasel/WebRTC.git
     from: 125.0.0
+schemes:
+  Dilarion:
+    build:
+      targets:
+        Dilarion: all
+    run:
+      config: Debug
+    archive:
+      config: Release
+  Dilarion Staging:
+    build:
+      targets:
+        Dilarion: all
+    run:
+      config: Staging
+    archive:
+      config: Staging
