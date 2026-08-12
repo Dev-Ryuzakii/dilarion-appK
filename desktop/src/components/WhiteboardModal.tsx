@@ -49,26 +49,27 @@ export default function WhiteboardModal({
   }, []);
 
   useEffect(() => {
+    const matchesTarget = (data: any) => {
+      if (target.conferenceId) return data?.conference_id === target.conferenceId;
+      if (target.groupId) return data?.group_id === target.groupId;
+      return !data?.group_id && !data?.conference_id; // 1:1: any non-group/non-meeting stroke scoped to this conversation
+    };
     const handler = (msg: WsMessage) => {
       if (msg.type === 'whiteboard_stroke') {
         const data = msg.data;
-        const matchesTarget = target.groupId
-          ? data?.group_id === target.groupId
-          : !data?.group_id; // 1:1: any non-group stroke from a WS event scoped to this conversation
-        if (!matchesTarget) return;
+        if (!matchesTarget(data)) return;
         const s = data?.stroke as WhiteboardStroke | undefined;
         if (s) drawSegment(s.x0, s.y0, s.x1, s.y1, s.color, s.width);
       } else if (msg.type === 'whiteboard_clear') {
         const data = msg.data;
-        const matchesTarget = target.groupId ? data?.group_id === target.groupId : !data?.group_id;
-        if (!matchesTarget) return;
+        if (!matchesTarget(data)) return;
         const canvas = canvasRef.current;
         canvas?.getContext('2d')?.clearRect(0, 0, canvas.width, canvas.height);
       }
     };
     presenceService.addListener(handler);
     return () => presenceService.removeListener(handler);
-  }, [target.groupId]);
+  }, [target.groupId, target.conferenceId]);
 
   function toNormalized(e: React.PointerEvent<HTMLCanvasElement>): { x: number; y: number } {
     const canvas = canvasRef.current!;

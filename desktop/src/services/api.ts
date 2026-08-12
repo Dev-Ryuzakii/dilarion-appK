@@ -812,11 +812,12 @@ export async function denyFromWaitingRoom(token: string, conferenceId: number, u
 // ── Whiteboard ───────────────────────────────────────────────────────────────
 // Ephemeral for v1 — strokes relay live via WS, nothing is persisted server-
 // side, so a fresh open starts with a blank board. Exactly one of
-// username/groupId identifies the target.
+// username/groupId/conferenceId identifies the target.
 
 export interface WhiteboardTarget {
   username?: string;
   groupId?: number;
+  conferenceId?: number;
 }
 
 export interface WhiteboardStroke {
@@ -829,7 +830,7 @@ export async function sendWhiteboardStroke(token: string, target: WhiteboardTarg
   await fetch(`${BASE}/whiteboard/stroke`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ username: target.username ?? null, group_id: target.groupId ?? null, stroke }),
+    body: JSON.stringify({ username: target.username ?? null, group_id: target.groupId ?? null, conference_id: target.conferenceId ?? null, stroke }),
   }).catch(() => {});
 }
 
@@ -837,7 +838,7 @@ export async function sendWhiteboardClear(token: string, target: WhiteboardTarge
   await fetch(`${BASE}/whiteboard/clear`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ username: target.username ?? null, group_id: target.groupId ?? null }),
+    body: JSON.stringify({ username: target.username ?? null, group_id: target.groupId ?? null, conference_id: target.conferenceId ?? null }),
   }).catch(() => {});
 }
 

@@ -5,6 +5,7 @@ import {
   getWaitingRoom, admitFromWaitingRoom, denyFromWaitingRoom, WaitingParticipant,
 } from '../services/api';
 import { presenceService, WsMessage } from '../services/presence';
+import WhiteboardModal from './WhiteboardModal';
 
 // Group video via self-hosted LiveKit — the SFU room every group call (2+
 // people) now renders through, replacing the old mesh-WebRTC conference path
@@ -47,6 +48,7 @@ export default function GalleryView({
   const videoRefs = useRef<Record<string, HTMLVideoElement | null>>({});
 
   const [showParticipants, setShowParticipants] = useState(false);
+  const [showWhiteboard, setShowWhiteboard] = useState(false);
   const [allUsers, setAllUsers] = useState<Contact[]>([]);
   const [addSearch, setAddSearch] = useState('');
   const [inviting, setInviting] = useState<string | null>(null);
@@ -268,6 +270,11 @@ export default function GalleryView({
             )}
           </button>
           <button
+            onClick={() => setShowWhiteboard(true)}
+            title="Whiteboard"
+            style={{ background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: 8, color: '#fff', width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+          ><WhiteboardIcon /></button>
+          <button
             onClick={leave}
             title="Close"
             style={{ background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: 8, color: '#fff', width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
@@ -346,6 +353,10 @@ export default function GalleryView({
           <button onClick={openParticipants} title="Add people" style={ctrlBtnStyle(true)}><PersonAddIcon /></button>
           <button onClick={leave} title="Leave" style={{ ...ctrlBtnStyle(false), background: '#ef4444' }}><HangupIcon /></button>
         </div>
+      )}
+
+      {showWhiteboard && (
+        <WhiteboardModal token={token} target={{ conferenceId }} onClose={() => setShowWhiteboard(false)} />
       )}
 
       {showParticipants && (
@@ -567,6 +578,13 @@ function CloseIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+    </svg>
+  );
+}
+function WhiteboardIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
     </svg>
   );
 }
