@@ -809,6 +809,27 @@ export async function denyFromWaitingRoom(token: string, conferenceId: number, u
   if (!res.ok) throw new Error(`Failed to deny (${res.status})`);
 }
 
+// ── Recording ──────────────────────────────────────────────────────────────────
+// Host-only. Backend drives LiveKit Egress; the file never touches this
+// client — it lands directly on the VPS, visible only via the superadmin
+// Drive site.
+
+export async function startConferenceRecording(token: string, conferenceId: number): Promise<void> {
+  const res = await fetch(`${BASE}/calls/conference/${conferenceId}/recording/start`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error((await res.json().catch(() => null))?.detail || `Failed to start recording (${res.status})`);
+}
+
+export async function stopConferenceRecording(token: string, conferenceId: number): Promise<void> {
+  const res = await fetch(`${BASE}/calls/conference/${conferenceId}/recording/stop`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error((await res.json().catch(() => null))?.detail || `Failed to stop recording (${res.status})`);
+}
+
 // ── In-meeting chat ────────────────────────────────────────────────────────────
 // Scoped to a conference_id instead of a group/DM. Reuses the same encrypted_
 // content/decoy_content/encrypted_key/iv model as DMs and group chat.

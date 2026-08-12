@@ -3,6 +3,7 @@ import { Room, RoomEvent, Track, RemoteParticipant, TrackPublication, Participan
 import {
   getLiveKitToken, getIceServers, getUsers, conferenceInvite as apiConferenceInvite, Contact,
   getWaitingRoom, admitFromWaitingRoom, denyFromWaitingRoom, WaitingParticipant,
+  startConferenceRecording, stopConferenceRecording,
 } from '../services/api';
 import { presenceService, WsMessage } from '../services/presence';
 import WhiteboardModal from './WhiteboardModal';
@@ -85,6 +86,11 @@ export default function GalleryView({
 
   const [waiting, setWaiting] = useState<WaitingParticipant[]>([]);
   const [admitting, setAdmitting] = useState<number | null>(null);
+
+  const [isHost, setIsHost] = useState(false);
+  const [recording, setRecording] = useState(false);
+  const [recordingBusy, setRecordingBusy] = useState(false);
+  const [recordingError, setRecordingError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -251,16 +257,38 @@ export default function GalleryView({
   // just silently finds nothing to show for a guest. Refreshes on load and on
   // every "someone wants to join" WS push instead of polling.
   useEffect(() => {
-    getWaitingRoom(token, conferenceId).then(setWaiting).catch(() => {});
+    getWaitingRoom(token, conferenceId).then(list => { setWaiting(list); setIsHost(true); }).catch(() => {});
     const onMsg = (msg: WsMessage) => {
-      if (msg.type !== 'conference_join_request') return;
-      const data = msg.data || {};
-      if (data.conference_id !== conferenceId) return;
-      setWaiting(prev => (prev.some(w => w.user_id === data.user_id) ? prev : [...prev, { user_id: data.user_id, username: data.username }]));
+      if (msg.type === 'conference_join_request') {
+        const data = msg.data || {};
+        if (data.conference_id !== conferenceId) return;
+        setWaiting(prev => (prev.some(w => w.user_id === data.user_id) ? prev : [...prev, { user_id: data.user_id, username: data.username }]));
+      } else if (msg.type === 'conference_recording_started') {
+        if (msg.data?.conference_id === conferenceId) setRecording(true);
+      } else if (msg.type === 'conference_recording_stopped') {
+        if (msg.data?.conference_id === conferenceId) setRecording(false);
+      }
     };
     presenceService.addListener(onMsg);
     return () => presenceService.removeListener(onMsg);
   }, [token, conferenceId]);
+
+  async function toggleRecording() {
+    setRecordingBusy(true);
+    setRecordingError(null);
+    try {
+      if (recording) {
+        await stopConferenceRecording(token, conferenceId);
+        setRecording(false);
+      } else {
+        await startConferenceRecording(token, conferenceId);
+        setRecording(true);
+      }
+    } catch (err: any) {
+      setRecordingError(err?.message || 'Recording failed');
+    }
+    setRecordingBusy(false);
+  }
 
   async function admitGuest(userId: number) {
     setAdmitting(userId);
@@ -360,10 +388,24 @@ export default function GalleryView({
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         padding: '14px 20px', flexShrink: 0,
       }}>
-        <span style={{ color: '#fff', fontWeight: 700, fontSize: '0.95rem' }}>
+        <span style={{ color: '#fff', fontWeight: 700, fontSize: '0.95rem', display: 'flex', alignItems: 'center', gap: 8 }}>
           Group Video {tileList.length > 0 && `· ${tileList.length}`}
+          {recording && (
+            <span style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.4)', borderRadius: 20, padding: '2px 10px', fontSize: '0.7rem', color: '#ef4444', fontWeight: 700 }}>
+              <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#ef4444' }} />
+              REC
+            </span>
+          )}
         </span>
         <div style={{ display: 'flex', gap: 8 }}>
+          {isHost && (
+            <button
+              onClick={toggleRecording}
+              disabled={recordingBusy}
+              title={recording ? 'Stop recording' : 'Start recording'}
+              style={{ background: recording ? 'rgba(239,68,68,0.25)' : 'rgba(255,255,255,0.1)', border: 'none', borderRadius: 8, color: '#fff', width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: recordingBusy ? 'wait' : 'pointer', opacity: recordingBusy ? 0.6 : 1 }}
+            ><RecordIcon active={recording} /></button>
+          )}
           <button
             onClick={openParticipants}
             title="Participants"
@@ -462,6 +504,13 @@ export default function GalleryView({
           </div>
         );
       })()}
+
+      {recordingError && (
+        <div style={{ position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)', zIndex: 970, background: '#2a1414', border: '1px solid rgba(239,68,68,0.4)', borderRadius: 8, padding: '8px 14px', color: '#fca5a5', fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: 10 }}>
+          {recordingError}
+          <button onClick={() => setRecordingError(null)} style={{ background: 'transparent', border: 'none', color: '#fca5a5', cursor: 'pointer' }}>✕</button>
+        </div>
+      )}
 
       {/* Floating reactions — rise and fade, purely decorative, no persistence */}
       <div style={{ position: 'fixed', right: 24, bottom: 100, zIndex: 960, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, pointerEvents: 'none' }}>
@@ -767,6 +816,14 @@ function WhiteboardIcon() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+    </svg>
+  );
+}
+function RecordIcon({ active }: { active: boolean }) {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+      <circle cx="12" cy="12" r="9" stroke="#fff" strokeWidth="2" />
+      <circle cx="12" cy="12" r="5" fill={active ? '#ef4444' : 'none'} stroke={active ? '#ef4444' : '#fff'} strokeWidth="2" />
     </svg>
   );
 }
