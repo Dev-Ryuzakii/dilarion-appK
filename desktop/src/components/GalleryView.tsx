@@ -53,6 +53,13 @@ export default function GalleryView({
   const [micOn, setMicOn] = useState(initialMicOn);
   const [camOn, setCamOn] = useState(initialCamOn);
   const videoRefs = useRef<Record<string, HTMLVideoElement | null>>({});
+  // Whichever happens first — the track publishing, or the tile's <video>
+  // element mounting — completes the attach. Without this, a track that
+  // publishes before its tile has rendered (common for the LOCAL camera,
+  // which publishes right after the tile is added to state) never gets
+  // attached: remote participants still see it fine via their own
+  // TrackSubscribed, but the local preview stays blank.
+  const trackRefs = useRef<Record<string, Track>>({});
 
   const [showParticipants, setShowParticipants] = useState(false);
   const [showWhiteboard, setShowWhiteboard] = useState(false);
@@ -126,6 +133,7 @@ export default function GalleryView({
           })
           .on(RoomEvent.TrackSubscribed, (track, _pub, participant) => {
             if (track.kind === Track.Kind.Video) {
+              trackRefs.current[participant.identity] = track;
               const el = videoRefs.current[participant.identity];
               if (el) track.attach(el);
             } else if (track.kind === Track.Kind.Audio) {
@@ -135,9 +143,10 @@ export default function GalleryView({
           .on(RoomEvent.TrackMuted, (pub, participant) => setTrackState(participant, pub, false))
           .on(RoomEvent.TrackUnmuted, (pub, participant) => setTrackState(participant, pub, true))
           .on(RoomEvent.LocalTrackPublished, pub => {
-            if (pub.kind === Track.Kind.Video) {
+            if (pub.kind === Track.Kind.Video && pub.track) {
+              trackRefs.current[room.localParticipant.identity] = pub.track;
               const el = videoRefs.current[room.localParticipant.identity];
-              if (el && pub.track) pub.track.attach(el);
+              if (el) pub.track.attach(el);
             }
             setTrackState(room.localParticipant, pub, true);
           });
@@ -315,7 +324,7 @@ export default function GalleryView({
         if (tileList.length <= 1) {
           return tileList[0] ? (
             <div style={{ flex: 1, padding: 16, minHeight: 0 }}>
-              <TileCard tile={tileList[0]} videoRefs={videoRefs} fill />
+              <TileCard tile={tileList[0]} videoRefs={videoRefs} trackRefs={trackRefs} fill />
             </div>
           ) : null;
         }
@@ -325,7 +334,7 @@ export default function GalleryView({
             <div style={{ flex: 1, display: 'flex', gap: 10, padding: 16, minHeight: 0 }}>
               {tileList.map(tile => (
                 <div key={tile.identity} style={{ flex: 1, minWidth: 0 }}>
-                  <TileCard tile={tile} videoRefs={videoRefs} fill />
+                  <TileCard tile={tile} videoRefs={videoRefs} trackRefs={trackRefs} fill />
                 </div>
               ))}
             </div>
@@ -346,13 +355,13 @@ export default function GalleryView({
                 gap: 10, overflowY: 'auto',
               }}>
                 {sideTiles.map(tile => (
-                  <TileCard key={tile.identity} tile={tile} videoRefs={videoRefs} compact />
+                  <TileCard key={tile.identity} tile={tile} videoRefs={videoRefs} trackRefs={trackRefs} compact />
                 ))}
               </div>
             )}
             {mainTile && (
               <div style={{ flex: 1, minWidth: 0 }}>
-                <TileCard tile={mainTile} videoRefs={videoRefs} fill />
+                <TileCard tile={mainTile} videoRefs={videoRefs} trackRefs={trackRefs} fill />
               </div>
             )}
           </div>
@@ -470,11 +479,13 @@ export default function GalleryView({
 function TileCard({
   tile,
   videoRefs,
+  trackRefs,
   compact,
   fill,
 }: {
   tile: Tile;
   videoRefs: React.MutableRefObject<Record<string, HTMLVideoElement | null>>;
+  trackRefs: React.MutableRefObject<Record<string, Track>>;
   compact?: boolean;
   fill?: boolean;
 }) {
@@ -487,7 +498,13 @@ function TileCard({
       }}
     >
       <video
-        ref={el => { videoRefs.current[tile.identity] = el; }}
+        ref={el => {
+          videoRefs.current[tile.identity] = el;
+          if (el) {
+            const track = trackRefs.current[tile.identity];
+            if (track) track.attach(el);
+          }
+        }}
         autoPlay
         playsInline
         muted={tile.isLocal}

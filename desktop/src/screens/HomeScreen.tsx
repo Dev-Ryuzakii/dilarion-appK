@@ -159,7 +159,7 @@ function SettingsTabIcon({ active }: { active: boolean }) {
 
 // ── Placeholder panels ─────────────────────────────────────────────────────────
 
-function WelcomePlaceholder({ children, title, subtitle }: { children?: React.ReactNode; title: string; subtitle: string }) {
+function WelcomePlaceholder({ children, title, subtitle, action }: { children?: React.ReactNode; title: string; subtitle: string; action?: React.ReactNode }) {
   return (
     <div style={{
       flex: 1,
@@ -188,7 +188,25 @@ function WelcomePlaceholder({ children, title, subtitle }: { children?: React.Re
       </div>
       <h2 style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.04em' }}>{title}</h2>
       <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', textAlign: 'center' }}>{subtitle}</p>
+      {action && <div style={{ marginTop: 6 }}>{action}</div>}
     </div>
+  );
+}
+
+// Small flat illustration for the Meetings empty state — a screen with a
+// camera lens and two participant dots, styled with the accent color so it
+// tracks whichever accent the user picked in Appearance.
+function MeetingsIllustration() {
+  return (
+    <svg width="52" height="52" viewBox="0 0 64 64" fill="none">
+      <rect x="6" y="14" width="52" height="34" rx="6" fill="var(--accent)" fillOpacity="0.14" stroke="var(--accent)" strokeWidth="2" />
+      <circle cx="32" cy="31" r="9" fill="var(--accent)" fillOpacity="0.22" stroke="var(--accent)" strokeWidth="2" />
+      <circle cx="32" cy="31" r="3.2" fill="var(--accent)" />
+      <path d="M24 54h16" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" />
+      <path d="M32 48v6" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" />
+      <circle cx="14" cy="21" r="3" fill="var(--accent)" fillOpacity="0.6" />
+      <circle cx="50" cy="21" r="3" fill="var(--accent)" fillOpacity="0.6" />
+    </svg>
   );
 }
 
@@ -1746,16 +1764,22 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
 
     if (activeTab === 'meetings') {
       return (
-        <WelcomePlaceholder title="Meetings" subtitle="Start an instant group call, or open Scheduled Meetings to join by code or plan ahead.">
-          <button
-            onClick={openNewMeeting}
-            style={{
-              background: 'var(--accent)', color: '#fff', border: 'none',
-              borderRadius: 10, padding: '10px 20px', fontSize: '0.85rem', fontWeight: 700, cursor: 'pointer',
-            }}
-          >
-            Start Instant Meeting
-          </button>
+        <WelcomePlaceholder
+          title="Meetings"
+          subtitle="Start an instant group call, or open Scheduled Meetings to join by code or plan ahead."
+          action={
+            <button
+              onClick={openNewMeeting}
+              style={{
+                background: 'var(--accent)', color: '#fff', border: 'none',
+                borderRadius: 10, padding: '10px 20px', fontSize: '0.85rem', fontWeight: 700, cursor: 'pointer',
+              }}
+            >
+              Start Instant Meeting
+            </button>
+          }
+        >
+          <MeetingsIllustration />
         </WelcomePlaceholder>
       );
     }
