@@ -23,7 +23,18 @@ interface Tile {
   isSpeaking: boolean;
   micOn: boolean;
   camOn: boolean;
+  isScreenShare?: boolean;
 }
+
+const SCREEN_SHARE_SUFFIX = '::screen';
+
+interface FloatingReaction {
+  id: number;
+  emoji: string;
+  from: string;
+}
+
+const REACTION_EMOJIS = ['👍', '❤️', '😂', '👏', '🎉', '😮'];
 
 export default function GalleryView({
   token,
@@ -52,6 +63,9 @@ export default function GalleryView({
   const [connecting, setConnecting] = useState(true);
   const [micOn, setMicOn] = useState(initialMicOn);
   const [camOn, setCamOn] = useState(initialCamOn);
+  const [screenSharing, setScreenSharing] = useState(false);
+  const [showReactionPicker, setShowReactionPicker] = useState(false);
+  const [floatingReactions, setFloatingReactions] = useState<FloatingReaction[]>([]);
   const videoRefs = useRef<Record<string, HTMLVideoElement | null>>({});
   // Whichever happens first — the track publishing, or the tile's <video>
   // element mounting — completes the attach. Without this, a track that
@@ -99,6 +113,25 @@ export default function GalleryView({
       });
     }
 
+    // Screen share gets its own tile (participant::screen) rather than
+    // replacing the camera tile — a person's camera and their screen are
+    // both worth seeing at once, matching Meet/Teams.
+    function upsertScreenTile(identity: string, displayName: string, isLocal: boolean) {
+      const key = identity + SCREEN_SHARE_SUFFIX;
+      setTiles(prev => ({
+        ...prev,
+        [key]: {
+          identity: key, displayName: `${displayName}'s screen`, isLocal,
+          isSpeaking: false, micOn: false, camOn: true, isScreenShare: true,
+        },
+      }));
+    }
+
+    function removeScreenTile(identity: string) {
+      removeTile(identity + SCREEN_SHARE_SUFFIX);
+      delete trackRefs.current[identity + SCREEN_SHARE_SUFFIX];
+    }
+
     function setTrackState(participant: Participant, pub: TrackPublication, enabled: boolean) {
       setTiles(prev => {
         const t = prev[participant.identity];
@@ -133,6 +166,14 @@ export default function GalleryView({
           })
           .on(RoomEvent.TrackSubscribed, (track, _pub, participant) => {
             if (track.kind === Track.Kind.Video) {
+              if (track.source === Track.Source.ScreenShare) {
+                const key = participant.identity + SCREEN_SHARE_SUFFIX;
+                trackRefs.current[key] = track;
+                upsertScreenTile(participant.identity, participant.name || participant.identity, false);
+                const el = videoRefs.current[key];
+                if (el) track.attach(el);
+                return;
+              }
               trackRefs.current[participant.identity] = track;
               const el = videoRefs.current[participant.identity];
               if (el) track.attach(el);
@@ -140,15 +181,45 @@ export default function GalleryView({
               track.attach();
             }
           })
+          .on(RoomEvent.TrackUnsubscribed, (track, _pub, participant) => {
+            if (track.kind === Track.Kind.Video && track.source === Track.Source.ScreenShare) {
+              removeScreenTile(participant.identity);
+            }
+          })
           .on(RoomEvent.TrackMuted, (pub, participant) => setTrackState(participant, pub, false))
           .on(RoomEvent.TrackUnmuted, (pub, participant) => setTrackState(participant, pub, true))
           .on(RoomEvent.LocalTrackPublished, pub => {
             if (pub.kind === Track.Kind.Video && pub.track) {
+              if (pub.source === Track.Source.ScreenShare) {
+                const key = room.localParticipant.identity + SCREEN_SHARE_SUFFIX;
+                trackRefs.current[key] = pub.track;
+                upsertScreenTile(room.localParticipant.identity, myUsername, true);
+                const el = videoRefs.current[key];
+                if (el) pub.track.attach(el);
+                return;
+              }
               trackRefs.current[room.localParticipant.identity] = pub.track;
               const el = videoRefs.current[room.localParticipant.identity];
               if (el) pub.track.attach(el);
             }
             setTrackState(room.localParticipant, pub, true);
+          })
+          .on(RoomEvent.LocalTrackUnpublished, pub => {
+            if (pub.kind === Track.Kind.Video && pub.source === Track.Source.ScreenShare) {
+              removeScreenTile(room.localParticipant.identity);
+              setScreenSharing(false);
+            }
+          })
+          .on(RoomEvent.DataReceived, (payload, participant) => {
+            try {
+              const msg = JSON.parse(new TextDecoder().decode(payload));
+              if (msg?.type === 'reaction' && typeof msg.emoji === 'string') {
+                const from = participant?.name || participant?.identity || 'Someone';
+                const id = Date.now() + Math.random();
+                setFloatingReactions(prev => [...prev, { id, emoji: msg.emoji, from }]);
+                setTimeout(() => setFloatingReactions(prev => prev.filter(r => r.id !== id)), 2500);
+              }
+            } catch {}
           });
 
         if (cancelled) return;
@@ -223,6 +294,29 @@ export default function GalleryView({
     const next = !camOn;
     await room.localParticipant.setCameraEnabled(next);
     setCamOn(next);
+  }
+
+  async function toggleScreenShare() {
+    const room = roomRef.current;
+    if (!room) return;
+    const next = !screenSharing;
+    try {
+      await room.localParticipant.setScreenShareEnabled(next);
+      setScreenSharing(next);
+    } catch {
+      // user cancelled the OS share picker — leave state as-is
+    }
+  }
+
+  function sendReaction(emoji: string) {
+    const room = roomRef.current;
+    if (!room) return;
+    setShowReactionPicker(false);
+    const id = Date.now() + Math.random();
+    setFloatingReactions(prev => [...prev, { id, emoji, from: 'You' }]);
+    setTimeout(() => setFloatingReactions(prev => prev.filter(r => r.id !== id)), 2500);
+    const payload = new TextEncoder().encode(JSON.stringify({ type: 'reaction', emoji }));
+    room.localParticipant.publishData(payload, { reliable: false });
   }
 
   function leave() {
@@ -342,6 +436,7 @@ export default function GalleryView({
         }
 
         const mainTile =
+          tileList.find(t => t.isScreenShare) ??
           tileList.find(t => t.isSpeaking && !t.isLocal) ??
           tileList.find(t => !t.isLocal) ??
           tileList[0];
@@ -368,10 +463,41 @@ export default function GalleryView({
         );
       })()}
 
+      {/* Floating reactions — rise and fade, purely decorative, no persistence */}
+      <div style={{ position: 'fixed', right: 24, bottom: 100, zIndex: 960, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, pointerEvents: 'none' }}>
+        {floatingReactions.map(r => (
+          <div key={r.id} className="reaction-float" style={{ fontSize: '1.6rem', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span>{r.emoji}</span>
+            <span style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.6)' }}>{r.from}</span>
+          </div>
+        ))}
+      </div>
+
       {!connecting && !error && (
-        <div style={{ display: 'flex', justifyContent: 'center', gap: 14, padding: '16px 0 24px' }}>
+        <div style={{ position: 'relative', display: 'flex', justifyContent: 'center', gap: 14, padding: '16px 0 24px' }}>
+          {showReactionPicker && (
+            <div
+              style={{
+                position: 'absolute', bottom: '100%', marginBottom: 8, left: '50%', transform: 'translateX(-50%)',
+                background: '#1a1a22', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 12,
+                padding: '8px 10px', display: 'flex', gap: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+              }}
+            >
+              {REACTION_EMOJIS.map(e => (
+                <button
+                  key={e}
+                  onClick={() => sendReaction(e)}
+                  style={{ background: 'transparent', border: 'none', fontSize: '1.3rem', cursor: 'pointer', padding: 2 }}
+                >
+                  {e}
+                </button>
+              ))}
+            </div>
+          )}
           <button onClick={toggleMic} title={micOn ? 'Mute' : 'Unmute'} style={ctrlBtnStyle(micOn)}>{micOn ? <MicIcon /> : <MicOffIcon />}</button>
           <button onClick={toggleCam} title={camOn ? 'Stop Video' : 'Start Video'} style={ctrlBtnStyle(camOn)}>{camOn ? <VideoIcon /> : <VideoOffIcon />}</button>
+          <button onClick={toggleScreenShare} title={screenSharing ? 'Stop sharing' : 'Share screen'} style={ctrlBtnStyle(!screenSharing)}><ScreenShareIcon /></button>
+          <button onClick={() => setShowReactionPicker(v => !v)} title="React" style={ctrlBtnStyle(true)}><ReactionIcon /></button>
           <button onClick={openParticipants} title="Add people" style={ctrlBtnStyle(true)}><PersonAddIcon /></button>
           <button onClick={leave} title="Leave" style={{ ...ctrlBtnStyle(false), background: '#ef4444' }}><HangupIcon /></button>
         </div>
@@ -508,7 +634,7 @@ function TileCard({
         autoPlay
         playsInline
         muted={tile.isLocal}
-        style={{ width: '100%', height: '100%', objectFit: 'cover', display: tile.camOn ? 'block' : 'none' }}
+        style={{ width: '100%', height: '100%', objectFit: tile.isScreenShare ? 'contain' : 'cover', display: tile.camOn ? 'block' : 'none' }}
       />
       {!tile.camOn && (
         <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -522,7 +648,7 @@ function TileCard({
           </div>
         </div>
       )}
-      {!tile.micOn && (
+      {!tile.micOn && !tile.isScreenShare && (
         <div style={{
           position: 'absolute', top: 6, right: 6,
           width: compact ? 16 : 22, height: compact ? 16 : 22, borderRadius: '50%',
@@ -590,6 +716,20 @@ function VideoOffIcon() {
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M16 16v1a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2m5.66 0H14a2 2 0 0 1 2 2v3.34l1 1L23 7v10" />
       <line x1="1" y1="1" x2="23" y2="23" />
+    </svg>
+  );
+}
+function ScreenShareIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2" y="3" width="20" height="14" rx="2" /><path d="M8 21h8M12 17v4" /><path d="M12 7v6M9 10l3-3 3 3" />
+    </svg>
+  );
+}
+function ReactionIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="10" /><path d="M8 14s1.5 2 4 2 4-2 4-2" /><line x1="9" y1="9" x2="9.01" y2="9" /><line x1="15" y1="9" x2="15.01" y2="9" />
     </svg>
   );
 }

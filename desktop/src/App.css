@@ -46,3 +46,13 @@ input  { font-family: inherit; outline: none; }
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
+
+@keyframes reaction-float {
+  0%   { opacity: 0; transform: translateY(10px); }
+  15%  { opacity: 1; transform: translateY(0); }
+  80%  { opacity: 1; }
+  100% { opacity: 0; transform: translateY(-24px); }
+}
+.reaction-float {
+  animation: reaction-float 2.5s ease-out forwards;
+}
