@@ -339,7 +339,8 @@ fun ChatScreen(
                                     onReply = { viewModel.setReplyTarget(message) },
                                     onForward = { viewModel.setForwardTarget(message) },
                                     onPinToggle = { viewModel.togglePin(message) },
-                                    onStar = { viewModel.starMessage(message) },
+                                    onStar = { viewModel.toggleStar(message) },
+                                    isStarred = uiState.starredIds.contains(message.id),
                                     onEdit = {
                                         viewModel.startEdit(
                                             message,
@@ -1047,6 +1048,7 @@ private fun MessageActionsMenu(
     onDismiss: () -> Unit,
     isMine: Boolean,
     isPinned: Boolean,
+    isStarred: Boolean,
     onReact: (String) -> Unit,
     onReply: () -> Unit,
     onForward: () -> Unit,
@@ -1061,7 +1063,7 @@ private fun MessageActionsMenu(
         DropdownMenuItem(text = { Text("Reply") }, onClick = { onReply(); onDismiss() })
         DropdownMenuItem(text = { Text("Forward") }, onClick = { onForward(); onDismiss() })
         DropdownMenuItem(text = { Text(if (isPinned) "Unpin" else "Pin") }, onClick = { onPinToggle(); onDismiss() })
-        DropdownMenuItem(text = { Text("Star") }, onClick = { onStar(); onDismiss() })
+        DropdownMenuItem(text = { Text(if (isStarred) "Unstar" else "Star") }, onClick = { onStar(); onDismiss() })
         if (isMine) {
             DropdownMenuItem(text = { Text("Edit") }, onClick = { onEdit(); onDismiss() })
             DropdownMenuItem(text = { Text("Delete") }, onClick = { onDelete(); onDismiss() })
@@ -1104,6 +1106,7 @@ private fun MessageBubble(
     onStar: () -> Unit = {},
     onEdit: () -> Unit = {},
     onDelete: () -> Unit = {},
+    isStarred: Boolean = false,
 ) {
     var showMenu by remember { mutableStateOf(false) }
 
@@ -1287,6 +1290,7 @@ private fun MessageBubble(
                         onDismiss = { showMenu = false },
                         isMine = isMine,
                         isPinned = message.isPinned,
+                        isStarred = isStarred,
                         onReact = onReact,
                         onReply = onReply,
                         onForward = onForward,

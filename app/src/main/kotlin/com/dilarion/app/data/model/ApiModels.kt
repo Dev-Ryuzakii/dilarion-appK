@@ -91,6 +91,11 @@ data class Message(
 
 data class ReactionRequest(val emoji: String)
 
+data class StarredMessagesResponse(
+    val messages: List<Message> = emptyList(),
+    val count: Int = 0,
+)
+
 data class MessageEditRequest(
     val message: String,
     @SerializedName("encrypted_key") val encryptedKey: String? = null,

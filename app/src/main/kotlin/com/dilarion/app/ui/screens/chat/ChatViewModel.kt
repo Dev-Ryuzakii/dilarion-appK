@@ -70,6 +70,7 @@ data class ChatUiState(
     val editingMessage: Message? = null,
     val forwardTarget: Message? = null,
     val forwardError: String? = null,
+    val starredIds: Set<Int> = emptySet(),
 )
 
 @HiltViewModel
@@ -99,6 +100,7 @@ class ChatViewModel @Inject constructor(
             val masterToken = sessionManager.masterToken.first()
             _uiState.value = _uiState.value.copy(currentUsername = me, savedMasterToken = masterToken)
             loadMessages()
+            loadStarred()
             if (gId == null) loadMedia()
             else loadGroupMembers(gId)
             observeWebSocket()
@@ -205,10 +207,30 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    fun starMessage(msg: Message) {
+    fun toggleStar(msg: Message) {
+        val isStarred = _uiState.value.starredIds.contains(msg.id)
         viewModelScope.launch {
             val token = sessionManager.sessionToken.first() ?: return@launch
-            runCatching { apiService.starMessage("Bearer $token", msg.id) }
+            runCatching {
+                if (isStarred) apiService.unstarMessage("Bearer $token", msg.id)
+                else apiService.starMessage("Bearer $token", msg.id)
+            }.onSuccess {
+                val ids = _uiState.value.starredIds
+                _uiState.value = _uiState.value.copy(
+                    starredIds = if (isStarred) ids - msg.id else ids + msg.id
+                )
+            }
+        }
+    }
+
+    private fun loadStarred() {
+        viewModelScope.launch {
+            val token = sessionManager.sessionToken.first() ?: return@launch
+            runCatching {
+                apiService.getStarredMessages("Bearer $token").body()?.messages ?: emptyList()
+            }.onSuccess { starred ->
+                _uiState.value = _uiState.value.copy(starredIds = starred.map { it.id }.toSet())
+            }
         }
     }
 

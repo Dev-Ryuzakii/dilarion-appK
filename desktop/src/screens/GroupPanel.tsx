@@ -18,6 +18,8 @@ import {
   pinMessage,
   unpinMessage,
   starMessage,
+  unstarMessage,
+  getStarredMessages,
 } from '../services/api';
 import { encryptMessage } from '../services/crypto';
 import { generateDecoy } from '../services/decoy';
@@ -303,7 +305,7 @@ function ReactionPills({ reactions, onToggle }: { reactions: ChatMessage['reacti
 }
 
 function HoverActions({
-  isMine, onReact, onReply, onForward, onPinToggle, onStarToggle, onEdit, onDelete, isPinned,
+  isMine, onReact, onReply, onForward, onPinToggle, onStarToggle, onEdit, onDelete, isPinned, isStarred,
 }: {
   isMine: boolean;
   onReact: (emoji: string) => void;
@@ -314,6 +316,7 @@ function HoverActions({
   onEdit?: () => void;
   onDelete?: () => void;
   isPinned: boolean;
+  isStarred: boolean;
 }) {
   const [showPicker, setShowPicker] = useState(false);
   const btn: React.CSSProperties = {
@@ -333,7 +336,7 @@ function HoverActions({
       <button style={btn} title="Reply" onClick={onReply}>↩</button>
       <button style={btn} title="Forward" onClick={onForward}>➡</button>
       <button style={{ ...btn, color: isPinned ? 'var(--accent)' : 'var(--text-muted)' }} title={isPinned ? 'Unpin' : 'Pin'} onClick={onPinToggle}>📌</button>
-      <button style={btn} title="Star" onClick={onStarToggle}>⭐</button>
+      <button style={{ ...btn, color: isStarred ? '#f59e0b' : 'var(--text-muted)' }} title={isStarred ? 'Unstar' : 'Star'} onClick={onStarToggle}>{isStarred ? '⭐' : '☆'}</button>
       {isMine && onEdit && <button style={btn} title="Edit" onClick={onEdit}>✏️</button>}
       {isMine && onDelete && <button style={{ ...btn, color: '#ef4444' }} title="Delete" onClick={onDelete}>🗑</button>}
     </div>
@@ -357,11 +360,12 @@ interface GroupMsgBubbleProps {
   onStarToggle: () => void;
   onEdit: () => void;
   onDelete: () => void;
+  isStarred: boolean;
 }
 
 function GroupMsgBubble({
   msg, isMine, myUsername, token, masterToken, onDecrypt, onMasterTokenSaved, onJoinMeeting,
-  replyToMsg, onReact, onReply, onForward, onPinToggle, onStarToggle, onEdit, onDelete,
+  replyToMsg, onReact, onReply, onForward, onPinToggle, onStarToggle, onEdit, onDelete, isStarred,
 }: GroupMsgBubbleProps) {
   const ct = msg.content_type;
   const mediaId = msg.content;
@@ -443,6 +447,7 @@ function GroupMsgBubble({
             onEdit={isMine ? onEdit : undefined}
             onDelete={isMine ? onDelete : undefined}
             isPinned={!!msg.is_pinned}
+            isStarred={isStarred}
           />
         </div>
       )}
@@ -534,6 +539,7 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
   const [members, setMembers] = useState<GroupMember[]>([]);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [replyTarget, setReplyTarget] = useState<ChatMessage | null>(null);
+  const [starredIds, setStarredIds] = useState<Set<number>>(new Set());
   const [editingMessage, setEditingMessage] = useState<ChatMessage | null>(null);
   const [forwardTarget, setForwardTarget] = useState<ChatMessage | null>(null);
   const [forwardUsername, setForwardUsername] = useState('');
@@ -560,6 +566,7 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
     setText('');
     loadMessages();
     getGroupMembers(token, group.id).then(setMembers).catch(() => {});
+    getStarredMessages(token).then(list => setStarredIds(new Set(list.map(m => m.id)))).catch(() => {});
   }, [loadMessages, token, group.id]);
 
   useEffect(() => {
@@ -606,8 +613,15 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
   }
 
   async function handleStarToggle(msg: ChatMessage) {
+    const isStarred = starredIds.has(msg.id);
     try {
-      await starMessage(token, msg.id);
+      if (isStarred) {
+        await unstarMessage(token, msg.id);
+        setStarredIds(prev => { const next = new Set(prev); next.delete(msg.id); return next; });
+      } else {
+        await starMessage(token, msg.id);
+        setStarredIds(prev => new Set(prev).add(msg.id));
+      }
     } catch {}
   }
 
@@ -843,6 +857,7 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
                 onStarToggle={() => handleStarToggle(msg)}
                 onEdit={() => handleEditStart(msg)}
                 onDelete={() => handleDeleteMessage(msg)}
+                isStarred={starredIds.has(msg.id)}
               />
             );
             return acc;

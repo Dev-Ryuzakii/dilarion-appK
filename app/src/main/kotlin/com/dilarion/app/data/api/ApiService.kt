@@ -143,6 +143,11 @@ interface ApiService {
         @Path("id") messageId: Int,
     ): Response<com.google.gson.JsonObject>
 
+    @GET("messages/starred")
+    suspend fun getStarredMessages(
+        @Header("Authorization") bearer: String,
+    ): Response<com.dilarion.app.data.model.StarredMessagesResponse>
+
     // ─── Groups ────────────────────────────────────────────────────────────────
 
     @GET("groups")
