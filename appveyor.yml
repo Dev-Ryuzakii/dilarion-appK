@@ -2,6 +2,9 @@ image: Visual Studio 2022
 
 environment:
   TAURI_SIGNING_PRIVATE_KEY: ''
+  # AppVeyor sets CI=True (capital T); tauri-cli's --ci flag reads this env
+  # var and its parser only accepts lowercase true/false, so it fails as-is.
+  CI: 'true'
 
 install:
   - ps: Install-Product node 20 x64
