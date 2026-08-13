@@ -7,6 +7,12 @@ const BASE = import.meta.env.VITE_API_BASE || 'https://apidilarion.eibstratoc.co
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
+export interface MessageReaction {
+  emoji: string;
+  count: number;
+  reacted_by_me: boolean;
+}
+
 export interface ChatMessage {
   id: number;
   sender: string;
@@ -19,6 +25,13 @@ export interface ChatMessage {
   decoy_content?: string;
   encrypted_key?: string | null;
   iv?: string | null;
+  reactions?: MessageReaction[];
+  reply_to_message_id?: number | null;
+  forwarded_from_message_id?: number | null;
+  is_edited?: boolean;
+  is_deleted?: boolean;
+  is_pinned?: boolean;
+  mentions?: string[];
 }
 
 export interface Contact {
@@ -213,7 +226,7 @@ export async function sendText(
   token: string,
   username: string,
   message: string,
-  opts: { encryptedKey: string; iv: string; decoyContent: string },
+  opts: { encryptedKey: string; iv: string; decoyContent: string; replyToMessageId?: number; forwardedFromMessageId?: number; mentions?: string[] },
 ): Promise<void> {
   const res = await fetch(`${BASE}/messages/send`, {
     method: 'POST',
@@ -227,6 +240,9 @@ export async function sendText(
       encrypted_key: opts.encryptedKey,
       iv: opts.iv,
       decoy_content: opts.decoyContent,
+      reply_to_message_id: opts.replyToMessageId ?? null,
+      forwarded_from_message_id: opts.forwardedFromMessageId ?? null,
+      mentions: opts.mentions ?? null,
     }),
   });
   if (!res.ok) throw new Error('Failed to send message');
@@ -456,7 +472,7 @@ export async function sendGroupMessage(
   token: string,
   groupId: number,
   message: string,
-  opts: { encryptedKey: string; iv: string; decoyContent: string },
+  opts: { encryptedKey: string; iv: string; decoyContent: string; replyToMessageId?: number; forwardedFromMessageId?: number; mentions?: string[] },
   addressedToUsername?: string,
 ): Promise<void> {
   const body: Record<string, unknown> = {
@@ -465,6 +481,9 @@ export async function sendGroupMessage(
     encrypted_key: opts.encryptedKey,
     iv: opts.iv,
     decoy_content: opts.decoyContent,
+    reply_to_message_id: opts.replyToMessageId ?? null,
+    forwarded_from_message_id: opts.forwardedFromMessageId ?? null,
+    mentions: opts.mentions ?? null,
   };
   if (addressedToUsername) body.addressed_to_username = addressedToUsername;
   const res = await fetch(`${BASE}/messages/group/send`, {
@@ -940,4 +959,103 @@ export async function createMasterToken(token: string, masterToken: string): Pro
     body: JSON.stringify({ mastertoken: masterToken }),
   });
   if (!res.ok) throw new Error('Failed to create master token');
+}
+
+// ── Chat collaboration: reactions, edit, delete, pin, star ─────────────────────
+
+export async function toggleReaction(token: string, messageId: number, emoji: string): Promise<'added' | 'removed'> {
+  const res = await fetch(`${BASE}/messages/${messageId}/react`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ emoji }),
+  });
+  if (!res.ok) throw new Error('Failed to react');
+  const body = await res.json();
+  return body.status;
+}
+
+export async function editMessage(
+  token: string,
+  messageId: number,
+  ciphertext: string,
+  opts: { encryptedKey?: string; iv?: string; decoyContent?: string },
+): Promise<void> {
+  const res = await fetch(`${BASE}/messages/${messageId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      message: ciphertext,
+      encrypted_key: opts.encryptedKey ?? null,
+      iv: opts.iv ?? null,
+      decoy_content: opts.decoyContent ?? null,
+    }),
+  });
+  if (!res.ok) throw new Error('Failed to edit message');
+}
+
+export async function deleteMessage(token: string, messageId: number): Promise<void> {
+  const res = await fetch(`${BASE}/messages/${messageId}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error('Failed to delete message');
+}
+
+export async function pinMessage(token: string, messageId: number): Promise<void> {
+  const res = await fetch(`${BASE}/messages/${messageId}/pin`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error('Failed to pin message');
+}
+
+export async function unpinMessage(token: string, messageId: number): Promise<void> {
+  const res = await fetch(`${BASE}/messages/${messageId}/unpin`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error('Failed to unpin message');
+}
+
+export async function getPinnedMessages(token: string, opts: { username?: string; groupId?: number }): Promise<ChatMessage[]> {
+  const q = new URLSearchParams();
+  if (opts.username) q.set('username', opts.username);
+  if (opts.groupId) q.set('group_id', String(opts.groupId));
+  const res = await fetch(`${BASE}/messages/pinned?${q.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error('Failed to fetch pinned messages');
+  const body = await res.json();
+  return body.messages ?? [];
+}
+
+export async function starMessage(token: string, messageId: number): Promise<void> {
+  const res = await fetch(`${BASE}/messages/${messageId}/star`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error('Failed to star message');
+}
+
+export async function unstarMessage(token: string, messageId: number): Promise<void> {
+  const res = await fetch(`${BASE}/messages/${messageId}/star`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error('Failed to unstar message');
+}
+
+export interface StarredMessageItem extends ChatMessage {
+  group_id?: number | null;
+  group_name?: string | null;
+  starred_at?: string;
+}
+
+export async function getStarredMessages(token: string): Promise<StarredMessageItem[]> {
+  const res = await fetch(`${BASE}/messages/starred`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error('Failed to fetch starred messages');
+  const body = await res.json();
+  return body.messages ?? [];
 }
