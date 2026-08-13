@@ -7,10 +7,17 @@ import {
   getGroupMessages,
   getGroupMembers,
   sendGroupMessage,
+  sendText,
   getUserDevices,
   decryptChatMessage,
   confirmMasterToken,
   uploadGroupMedia,
+  toggleReaction,
+  editMessage,
+  deleteMessage,
+  pinMessage,
+  unpinMessage,
+  starMessage,
 } from '../services/api';
 import { encryptMessage } from '../services/crypto';
 import { generateDecoy } from '../services/decoy';
@@ -271,6 +278,68 @@ function PrivateTagBubble({ recipient }: { recipient: string }) {
 
 // ── Message bubble ─────────────────────────────────────────────────────────────
 
+const REACTION_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
+
+function ReactionPills({ reactions, onToggle }: { reactions: ChatMessage['reactions']; onToggle: (emoji: string) => void }) {
+  if (!reactions || reactions.length === 0) return null;
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
+      {reactions.map(r => (
+        <button
+          key={r.emoji}
+          onClick={() => onToggle(r.emoji)}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 3, fontSize: '0.72rem',
+            background: r.reacted_by_me ? 'var(--accent)' : 'var(--bg-card)',
+            border: '1px solid var(--border-color)', borderRadius: 12,
+            padding: '1px 7px', cursor: 'pointer', color: r.reacted_by_me ? '#fff' : 'var(--text-secondary)',
+          }}
+        >
+          <span>{r.emoji}</span><span>{r.count}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function HoverActions({
+  isMine, onReact, onReply, onForward, onPinToggle, onStarToggle, onEdit, onDelete, isPinned,
+}: {
+  isMine: boolean;
+  onReact: (emoji: string) => void;
+  onReply: () => void;
+  onForward: () => void;
+  onPinToggle: () => void;
+  onStarToggle: () => void;
+  onEdit?: () => void;
+  onDelete?: () => void;
+  isPinned: boolean;
+}) {
+  const [showPicker, setShowPicker] = useState(false);
+  const btn: React.CSSProperties = {
+    background: 'transparent', border: 'none', cursor: 'pointer', padding: 3,
+    color: 'var(--text-muted)', fontSize: '0.85rem', borderRadius: 4,
+  };
+  return (
+    <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 1, background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 8, padding: 2 }}>
+      <button style={btn} title="React" onClick={() => setShowPicker(v => !v)}>😀</button>
+      {showPicker && (
+        <div style={{ position: 'absolute', bottom: '100%', marginBottom: 4, left: 0, background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 10, padding: 6, display: 'flex', gap: 4, zIndex: 20, boxShadow: '0 4px 16px rgba(0,0,0,0.3)' }}>
+          {REACTION_EMOJIS.map(e => (
+            <button key={e} style={{ ...btn, fontSize: '1.1rem' }} onClick={() => { onReact(e); setShowPicker(false); }}>{e}</button>
+          ))}
+        </div>
+      )}
+      <button style={btn} title="Reply" onClick={onReply}>↩</button>
+      <button style={btn} title="Forward" onClick={onForward}>➡</button>
+      <button style={{ ...btn, color: isPinned ? 'var(--accent)' : 'var(--text-muted)' }} title={isPinned ? 'Unpin' : 'Pin'} onClick={onPinToggle}>📌</button>
+      <button style={btn} title="Star" onClick={onStarToggle}>⭐</button>
+      {isMine && onEdit && <button style={btn} title="Edit" onClick={onEdit}>✏️</button>}
+      {isMine && onDelete && <button style={{ ...btn, color: '#ef4444' }} title="Delete" onClick={onDelete}>🗑</button>}
+    </div>
+  );
+}
+
 interface GroupMsgBubbleProps {
   msg: ChatMessage;
   isMine: boolean;
@@ -280,14 +349,36 @@ interface GroupMsgBubbleProps {
   onDecrypt: (masterToken: string, messageId: number) => Promise<string>;
   onMasterTokenSaved: (t: string) => void;
   onJoinMeeting: JoinMeetingHandler;
+  replyToMsg?: ChatMessage | null;
+  onReact: (emoji: string) => void;
+  onReply: () => void;
+  onForward: () => void;
+  onPinToggle: () => void;
+  onStarToggle: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
 }
 
-function GroupMsgBubble({ msg, isMine, myUsername, token, masterToken, onDecrypt, onMasterTokenSaved, onJoinMeeting }: GroupMsgBubbleProps) {
+function GroupMsgBubble({
+  msg, isMine, myUsername, token, masterToken, onDecrypt, onMasterTokenSaved, onJoinMeeting,
+  replyToMsg, onReact, onReply, onForward, onPinToggle, onStarToggle, onEdit, onDelete,
+}: GroupMsgBubbleProps) {
   const ct = msg.content_type;
   const mediaId = msg.content;
   const isPrivateTagged = ct === 'private_tagged';
   const hasRecipient = msg.recipient && msg.recipient !== 'group';
   const isForMe = hasRecipient && msg.recipient === myUsername;
+  const [hovered, setHovered] = useState(false);
+
+  if (msg.is_deleted) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: isMine ? 'flex-end' : 'flex-start', marginBottom: 4 }}>
+        <div style={{ ...(isMine ? ms.bubbleMine : ms.bubbleTheirs), background: 'transparent', border: '1px dashed var(--border-color)' }}>
+          <span style={{ fontSize: '0.82rem', fontStyle: 'italic', color: 'var(--text-muted)' }}>This message was deleted</span>
+        </div>
+      </div>
+    );
+  }
 
   let body: React.ReactNode;
   if (isMeeting(ct)) {
@@ -329,12 +420,33 @@ function GroupMsgBubble({ msg, isMine, myUsername, token, masterToken, onDecrypt
     : {};
 
   return (
-    <div style={{
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: isMine ? 'flex-end' : 'flex-start',
-      marginBottom: 4,
-    }}>
+    <div
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: isMine ? 'flex-end' : 'flex-start',
+        marginBottom: 4,
+        position: 'relative',
+      }}
+    >
+      {hovered && (
+        <div style={{ position: 'absolute', top: -34, [isMine ? 'right' : 'left']: 0, zIndex: 15 } as React.CSSProperties}>
+          <HoverActions
+            isMine={isMine}
+            onReact={onReact}
+            onReply={onReply}
+            onForward={onForward}
+            onPinToggle={onPinToggle}
+            onStarToggle={onStarToggle}
+            onEdit={isMine ? onEdit : undefined}
+            onDelete={isMine ? onDelete : undefined}
+            isPinned={!!msg.is_pinned}
+          />
+        </div>
+      )}
+
       {!isMine && (
         <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginBottom: 2, marginLeft: 4 }}>
           {msg.sender}
@@ -353,13 +465,37 @@ function GroupMsgBubble({ msg, isMine, myUsername, token, masterToken, onDecrypt
           <LockIcon size={9} color="#a78bfa" /> Only you can read this
         </span>
       )}
+
+      {msg.forwarded_from_message_id && (
+        <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', fontStyle: 'italic', marginBottom: 2 }}>Forwarded</span>
+      )}
+
+      {replyToMsg && (
+        <div style={{
+          fontSize: '0.72rem', color: 'var(--text-muted)', borderLeft: '2px solid var(--accent)',
+          paddingLeft: 6, marginBottom: 3, maxWidth: '68%', opacity: 0.85,
+        }}>
+          <div style={{ fontWeight: 600 }}>{replyToMsg.sender}</div>
+          <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {replyToMsg.is_deleted ? 'Message deleted' : (replyToMsg.decoy_content || '…')}
+          </div>
+        </div>
+      )}
+
       <div style={isMine
         ? { ...ms.bubbleMine, ...encryptedStyle }
         : { ...ms.bubbleTheirs, ...encryptedStyle }
       }>
         {body}
       </div>
-      <span style={ms.ts}>{fmtTime(msg.timestamp)}</span>
+
+      <ReactionPills reactions={msg.reactions} onToggle={onReact} />
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 3, marginTop: 3 }}>
+        {msg.is_pinned && <span title="Pinned" style={{ fontSize: '0.7rem' }}>📌</span>}
+        {msg.is_edited && <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>edited</span>}
+        <span style={ms.ts}>{fmtTime(msg.timestamp)}</span>
+      </div>
     </div>
   );
 }
@@ -397,6 +533,11 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
   const [taggedUser, setTaggedUser] = useState<string | null>(null);
   const [members, setMembers] = useState<GroupMember[]>([]);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const [replyTarget, setReplyTarget] = useState<ChatMessage | null>(null);
+  const [editingMessage, setEditingMessage] = useState<ChatMessage | null>(null);
+  const [forwardTarget, setForwardTarget] = useState<ChatMessage | null>(null);
+  const [forwardUsername, setForwardUsername] = useState('');
+  const [forwardError, setForwardError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -447,19 +588,103 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
     return decryptChatMessage(msg, kp?.privateKey ?? null, myUsername, kp?.deviceUuid ?? null);
   }
 
+  // ── Collaboration actions ────────────────────────────────────────────────────
+
+  async function handleReact(messageId: number, emoji: string) {
+    try {
+      await toggleReaction(token, messageId, emoji);
+      await loadMessages();
+    } catch {}
+  }
+
+  async function handlePinToggle(msg: ChatMessage) {
+    try {
+      if (msg.is_pinned) await unpinMessage(token, msg.id);
+      else await pinMessage(token, msg.id);
+      await loadMessages();
+    } catch {}
+  }
+
+  async function handleStarToggle(msg: ChatMessage) {
+    try {
+      await starMessage(token, msg.id);
+    } catch {}
+  }
+
+  async function handleDeleteMessage(msg: ChatMessage) {
+    if (!window.confirm('Delete this message? This cannot be undone.')) return;
+    try {
+      await deleteMessage(token, msg.id);
+      await loadMessages();
+    } catch (err: any) {
+      setSendError(err?.message || 'Failed to delete message');
+    }
+  }
+
+  async function handleEditStart(msg: ChatMessage) {
+    if (!masterToken) {
+      setSendError('Unlock a message with your master token first, then edit it');
+      return;
+    }
+    try {
+      const plaintext = await handleDecrypt(masterToken, msg.id);
+      setEditingMessage(msg);
+      setReplyTarget(null);
+      setText(plaintext);
+    } catch (err: any) {
+      setSendError(err?.message || 'Could not decrypt this message to edit it');
+    }
+  }
+
+  async function handleForwardConfirm() {
+    const target = forwardTarget;
+    const targetUsername = forwardUsername.trim();
+    if (!target || !targetUsername) return;
+    setForwardError(null);
+    if (!masterToken) {
+      setForwardError('Unlock this message with your master token first');
+      return;
+    }
+    try {
+      const plaintext = await handleDecrypt(masterToken, target.id);
+      const [theirDevices, myDevices] = await Promise.all([
+        getUserDevices(token, targetUsername),
+        getUserDevices(token, myUsername),
+      ]);
+      const deviceKeys: Record<string, string> = {};
+      for (const d of [...theirDevices, ...myDevices]) {
+        if (d.public_key) deviceKeys[d.device_uuid] = d.public_key;
+      }
+      if (Object.keys(deviceKeys).length === 0) throw new Error(`${targetUsername} has no linked devices with encryption keys yet`);
+      const { ciphertext, encryptedKeys, iv } = await encryptMessage(plaintext, deviceKeys);
+      await sendText(token, targetUsername, ciphertext, {
+        encryptedKey: JSON.stringify(encryptedKeys), iv, decoyContent: generateDecoy(),
+        forwardedFromMessageId: target.id,
+      });
+      setForwardTarget(null);
+      setForwardUsername('');
+    } catch (err: any) {
+      setForwardError(err?.message || 'Failed to forward message');
+    }
+  }
+
   async function handleSend() {
     const trimmed = text.trim();
     if (!trimmed || sending) return;
     setSending(true);
     const savedTagged = taggedUser;
+    const editTarget = editingMessage;
+    const replyId = replyTarget?.id;
     setText('');
     setTaggedUser(null);
     setMentionQuery(null);
+    setEditingMessage(null);
+    setReplyTarget(null);
     try {
       // Wrap the message key once per active device of every member (ourselves
       // included), keyed by device_uuid, so each member's every device can read it.
-      const members = await getGroupMembers(token, group.id);
-      const usernames = new Set<string>(members.map(m => m.username));
+      const groupMembers = await getGroupMembers(token, group.id);
+      const usernames = new Set<string>(groupMembers.map(m => m.username));
       usernames.add(myUsername);
       const deviceKeys: Record<string, string> = {};
       await Promise.all(
@@ -472,17 +697,30 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
       );
 
       const { ciphertext, encryptedKeys, iv } = await encryptMessage(trimmed, deviceKeys);
-      await sendGroupMessage(
-        token,
-        group.id,
-        ciphertext,
-        { encryptedKey: JSON.stringify(encryptedKeys), iv, decoyContent: generateDecoy() },
-        savedTagged ?? undefined,
-      );
+      if (editTarget) {
+        await editMessage(token, editTarget.id, ciphertext, {
+          encryptedKey: JSON.stringify(encryptedKeys), iv, decoyContent: generateDecoy(),
+        });
+      } else {
+        // @mentions are detected from the typed text against known member
+        // usernames — separate from the existing "tag one member privately"
+        // feature above (taggedUser/addressed_to_username), which stays as-is.
+        const mentioned = groupMembers
+          .map(m => m.username)
+          .filter(u => new RegExp(`(^|\\s)@${u}\\b`).test(trimmed));
+        await sendGroupMessage(
+          token,
+          group.id,
+          ciphertext,
+          { encryptedKey: JSON.stringify(encryptedKeys), iv, decoyContent: generateDecoy(), replyToMessageId: replyId, mentions: mentioned.length ? mentioned : undefined },
+          savedTagged ?? undefined,
+        );
+      }
       await loadMessages();
     } catch (err: any) {
       setText(trimmed);
       setTaggedUser(savedTagged);
+      if (editTarget) setEditingMessage(editTarget);
       setSendError(err?.message || 'Failed to send message');
     } finally {
       setSending(false);
@@ -597,6 +835,14 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
                 onDecrypt={handleDecrypt}
                 onMasterTokenSaved={onMasterTokenSaved}
                 onJoinMeeting={onJoinMeeting}
+                replyToMsg={msg.reply_to_message_id ? messages.find(m => m.id === msg.reply_to_message_id) ?? null : null}
+                onReact={emoji => handleReact(msg.id, emoji)}
+                onReply={() => { setReplyTarget(msg); setEditingMessage(null); }}
+                onForward={() => { setForwardTarget(msg); setForwardUsername(''); setForwardError(null); }}
+                onPinToggle={() => handlePinToggle(msg)}
+                onStarToggle={() => handleStarToggle(msg)}
+                onEdit={() => handleEditStart(msg)}
+                onDelete={() => handleDeleteMessage(msg)}
               />
             );
             return acc;
@@ -636,6 +882,48 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
             {members.filter(m => m.username !== myUsername && m.username.toLowerCase().includes(mentionQuery)).length === 0 && (
               <p style={{ padding: '10px 14px', color: 'var(--text-muted)', fontSize: '0.8rem' }}>No members match</p>
             )}
+          </div>
+        </div>
+      )}
+
+      {(replyTarget || editingMessage) && (
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '8px 16px', background: 'var(--bg-card)', borderTop: '1px solid var(--border-color)',
+        }}>
+          <div style={{ borderLeft: '2px solid var(--accent)', paddingLeft: 8, minWidth: 0 }}>
+            <div style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--accent)' }}>
+              {editingMessage ? 'Editing message' : `Replying to ${replyTarget?.sender}`}
+            </div>
+            {replyTarget && (
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {replyTarget.decoy_content || '…'}
+              </div>
+            )}
+          </div>
+          <button
+            onClick={() => { setReplyTarget(null); setEditingMessage(null); setText(''); }}
+            style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '0.9rem' }}
+          >✕</button>
+        </div>
+      )}
+
+      {forwardTarget && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 900, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 12, padding: 20, width: 320 }}>
+            <h3 style={{ margin: 0, marginBottom: 12, fontSize: '0.95rem' }}>Forward message</h3>
+            <input
+              autoFocus
+              value={forwardUsername}
+              onChange={e => setForwardUsername(e.target.value)}
+              placeholder="Recipient username"
+              style={{ width: '100%', background: 'var(--input-field-bg)', border: '1px solid var(--border-color)', borderRadius: 8, color: 'var(--text-primary)', fontSize: '0.85rem', padding: '8px 10px', marginBottom: 10 }}
+            />
+            {forwardError && <p style={{ color: '#ef4444', fontSize: '0.75rem', marginBottom: 10 }}>{forwardError}</p>}
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button onClick={() => setForwardTarget(null)} style={{ background: 'transparent', border: '1px solid var(--border-color)', borderRadius: 8, color: 'var(--text-primary)', padding: '7px 14px', cursor: 'pointer', fontSize: '0.8rem' }}>Cancel</button>
+              <button onClick={handleForwardConfirm} disabled={!forwardUsername.trim()} style={{ background: 'var(--accent)', border: 'none', borderRadius: 8, color: '#fff', padding: '7px 14px', cursor: 'pointer', fontSize: '0.8rem' }}>Forward</button>
+            </div>
           </div>
         </div>
       )}
