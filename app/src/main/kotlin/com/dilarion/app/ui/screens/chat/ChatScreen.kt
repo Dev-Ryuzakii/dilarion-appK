@@ -1042,49 +1042,84 @@ private fun ChatReactionPills(reactions: List<com.dilarion.app.data.model.Messag
     }
 }
 
+/** Real icon for every action except the reaction choices themselves, which
+ * stay actual emoji — matches WhatsApp: the row of emoji is emoji, the menu
+ * wrapping it is icons. Long-press shows the reaction row and the menu list
+ * together (WhatsApp's mobile pattern), unlike a hover-only chevron trigger
+ * which wouldn't make sense on touch. */
 @Composable
-private fun MessageActionsMenu(
-    expanded: Boolean,
-    onDismiss: () -> Unit,
+private fun MessageActionsPopup(
     isMine: Boolean,
     isPinned: Boolean,
     isStarred: Boolean,
+    onDismiss: () -> Unit,
     onReact: (String) -> Unit,
     onReply: () -> Unit,
     onForward: () -> Unit,
+    onCopy: () -> Unit,
+    onInfo: () -> Unit,
     onPinToggle: () -> Unit,
-    onStar: () -> Unit,
-    onEdit: () -> Unit,
-    onDelete: () -> Unit,
+    onStarToggle: () -> Unit,
+    onEdit: (() -> Unit)?,
+    onDelete: (() -> Unit)?,
 ) {
-    var showEmojiPicker by remember { mutableStateOf(false) }
-    DropdownMenu(expanded = expanded && !showEmojiPicker, onDismissRequest = onDismiss) {
-        DropdownMenuItem(text = { Text("React") }, onClick = { showEmojiPicker = true })
-        DropdownMenuItem(text = { Text("Reply") }, onClick = { onReply(); onDismiss() })
-        DropdownMenuItem(text = { Text("Forward") }, onClick = { onForward(); onDismiss() })
-        DropdownMenuItem(text = { Text(if (isPinned) "Unpin" else "Pin") }, onClick = { onPinToggle(); onDismiss() })
-        DropdownMenuItem(text = { Text(if (isStarred) "Unstar" else "Star") }, onClick = { onStar(); onDismiss() })
-        if (isMine) {
-            DropdownMenuItem(text = { Text("Edit") }, onClick = { onEdit(); onDismiss() })
-            DropdownMenuItem(text = { Text("Delete") }, onClick = { onDelete(); onDismiss() })
+    androidx.compose.ui.window.Popup(
+        alignment = Alignment.Center,
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.PopupProperties(focusable = true),
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            // Reaction row
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(Color(0xFF2A2A32))
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                CHAT_REACTION_EMOJIS.forEach { e ->
+                    Text(
+                        e, fontSize = 20.sp,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .clickable { onReact(e); onDismiss() }
+                            .padding(6.dp),
+                    )
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            // Action list
+            Column(
+                modifier = Modifier
+                    .width(200.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color(0xFF1E1E24)),
+            ) {
+                ActionRow(Icons.Default.Reply, "Reply") { onReply(); onDismiss() }
+                ActionRow(Icons.Default.Forward, "Forward") { onForward(); onDismiss() }
+                ActionRow(Icons.Default.ContentCopy, "Copy") { onCopy(); onDismiss() }
+                ActionRow(Icons.Default.Info, "Info") { onInfo(); onDismiss() }
+                ActionRow(if (isStarred) Icons.Default.Star else Icons.Default.StarBorder, if (isStarred) "Unstar" else "Star") { onStarToggle(); onDismiss() }
+                ActionRow(Icons.Default.PushPin, if (isPinned) "Unpin" else "Pin") { onPinToggle(); onDismiss() }
+                if (isMine && onEdit != null) ActionRow(Icons.Default.Edit, "Edit") { onEdit(); onDismiss() }
+                if (isMine && onDelete != null) ActionRow(Icons.Default.Delete, "Delete", danger = true) { onDelete(); onDismiss() }
+            }
         }
     }
-    if (showEmojiPicker) {
-        AlertDialog(
-            onDismissRequest = { showEmojiPicker = false; onDismiss() },
-            confirmButton = {},
-            title = { Text("React") },
-            text = {
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    CHAT_REACTION_EMOJIS.forEach { e ->
-                        Text(
-                            e, fontSize = 22.sp,
-                            modifier = Modifier.clickable { onReact(e); showEmojiPicker = false; onDismiss() },
-                        )
-                    }
-                }
-            },
-        )
+}
+
+@Composable
+private fun ActionRow(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, danger: Boolean = false, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Icon(icon, null, tint = if (danger) Color(0xFFEF4444) else SurfaceWhite, modifier = Modifier.size(19.dp))
+        Text(label, color = if (danger) Color(0xFFEF4444) else SurfaceWhite, fontSize = 14.sp)
     }
 }
 
@@ -1109,6 +1144,24 @@ private fun MessageBubble(
     isStarred: Boolean = false,
 ) {
     var showMenu by remember { mutableStateOf(false) }
+    var showInfo by remember { mutableStateOf(false) }
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+
+    if (showInfo) {
+        AlertDialog(
+            onDismissRequest = { showInfo = false },
+            confirmButton = { TextButton(onClick = { showInfo = false }) { Text("Close") } },
+            title = { Text("Message info") },
+            text = {
+                Column {
+                    Text("Sent: ${formatTimestamp(message.timestamp ?: "")}")
+                    Text("Delivered: ${if (message.delivered) "Yes" else "No"}")
+                    Text("Read: ${if (message.read) "Yes" else "No"}")
+                    if (message.isEdited) Text("Edited")
+                }
+            },
+        )
+    }
 
     if (message.isDeleted) {
         Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = if (isMine) Alignment.End else Alignment.Start) {
@@ -1285,20 +1338,26 @@ private fun MessageBubble(
                         }
                     }
                     }
-                    MessageActionsMenu(
-                        expanded = showMenu,
-                        onDismiss = { showMenu = false },
-                        isMine = isMine,
-                        isPinned = message.isPinned,
-                        isStarred = isStarred,
-                        onReact = onReact,
-                        onReply = onReply,
-                        onForward = onForward,
-                        onPinToggle = onPinToggle,
-                        onStar = onStar,
-                        onEdit = onEdit,
-                        onDelete = onDelete,
-                    )
+                    if (showMenu) {
+                        MessageActionsPopup(
+                            isMine = isMine,
+                            isPinned = message.isPinned,
+                            isStarred = isStarred,
+                            onDismiss = { showMenu = false },
+                            onReact = onReact,
+                            onReply = onReply,
+                            onForward = onForward,
+                            onCopy = {
+                                val text = decryptedText ?: message.content?.takeIf { !isEncrypted && !looksLikeCiphertext(it) }
+                                if (text != null) clipboard.setText(androidx.compose.ui.text.AnnotatedString(text))
+                            },
+                            onInfo = { showInfo = true },
+                            onPinToggle = onPinToggle,
+                            onStarToggle = onStar,
+                            onEdit = if (isMine) onEdit else null,
+                            onDelete = if (isMine) onDelete else null,
+                        )
+                    }
                 }
                 ChatReactionPills(message.reactions, onReact)
             }
