@@ -10,7 +10,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import java.time.Instant
 import java.time.YearMonth
 import java.time.ZoneId
 import java.time.ZonedDateTime
@@ -69,5 +68,9 @@ class CalendarViewModel @Inject constructor(
     }
 }
 
+// Instant.parse() requires a strict 'Z' suffix and rejects Python's
+// datetime.isoformat() output ("+00:00" offset form), so every occurrence
+// would silently fail to parse. OffsetDateTime.parse handles both offset
+// forms and any fractional-second precision.
 fun parseIsoToZoned(iso: String): ZonedDateTime =
-    ZonedDateTime.ofInstant(Instant.parse(iso), ZoneId.systemDefault())
+    java.time.OffsetDateTime.parse(iso).toZonedDateTime().withZoneSameInstant(ZoneId.systemDefault())
