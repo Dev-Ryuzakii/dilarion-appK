@@ -11,6 +11,8 @@ import com.dilarion.app.data.api.ApiService
 import com.dilarion.app.data.model.GroupMember
 import com.dilarion.app.data.model.MediaItem
 import com.dilarion.app.data.model.Message
+import com.dilarion.app.data.model.MessageEditRequest
+import com.dilarion.app.data.model.ReactionRequest
 import com.dilarion.app.data.model.SendDmRequest
 import com.dilarion.app.data.model.SendGroupMessageRequest
 import com.dilarion.app.security.SessionManager
@@ -64,6 +66,10 @@ data class ChatUiState(
     val groupMembers: List<GroupMember> = emptyList(),
     val taggedUser: String? = null,
     val mentionQuery: String? = null,
+    val replyTarget: Message? = null,
+    val editingMessage: Message? = null,
+    val forwardTarget: Message? = null,
+    val forwardError: String? = null,
 )
 
 @HiltViewModel
@@ -156,6 +162,123 @@ class ChatViewModel @Inject constructor(
         }
     }
 
+    /** Same decrypt path as decryptOne, but returns the plaintext instead of
+     * only stashing it in state — used by edit/forward which need the text
+     * itself, not just a UI reveal. */
+    private suspend fun decryptMessageText(msg: Message): String? {
+        if (msg.content == null || msg.encryptedKey == null || msg.iv == null) return null
+        val privKey = sessionManager.privateKey.first()
+        val myDeviceUuid = sessionManager.deviceUuid.first()
+        val me = _uiState.value.currentUsername
+        if (privKey.isNullOrBlank()) return null
+        return try {
+            var encKey = msg.encryptedKey
+            if (encKey.startsWith("{")) {
+                val mapType = object : com.google.gson.reflect.TypeToken<Map<String, String>>() {}.type
+                val keysMap: Map<String, String> = com.google.gson.Gson().fromJson(encKey, mapType)
+                encKey = keysMap[myDeviceUuid] ?: keysMap[me] ?: encKey
+            }
+            cryptoManager.decryptMessage(msg.content, encKey, msg.iv, privKey)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    // ── Collaboration actions ────────────────────────────────────────────────────
+
+    fun toggleReaction(messageId: Int, emoji: String) {
+        viewModelScope.launch {
+            val token = sessionManager.sessionToken.first() ?: return@launch
+            runCatching { apiService.toggleReaction("Bearer $token", messageId, ReactionRequest(emoji)) }
+            loadMessages()
+        }
+    }
+
+    fun togglePin(msg: Message) {
+        viewModelScope.launch {
+            val token = sessionManager.sessionToken.first() ?: return@launch
+            runCatching {
+                if (msg.isPinned) apiService.unpinMessage("Bearer $token", msg.id)
+                else apiService.pinMessage("Bearer $token", msg.id)
+            }
+            loadMessages()
+        }
+    }
+
+    fun starMessage(msg: Message) {
+        viewModelScope.launch {
+            val token = sessionManager.sessionToken.first() ?: return@launch
+            runCatching { apiService.starMessage("Bearer $token", msg.id) }
+        }
+    }
+
+    fun deleteMessage(msg: Message) {
+        viewModelScope.launch {
+            val token = sessionManager.sessionToken.first() ?: return@launch
+            runCatching { apiService.deleteMessage("Bearer $token", msg.id) }
+            loadMessages()
+        }
+    }
+
+    fun setReplyTarget(msg: Message?) {
+        _uiState.value = _uiState.value.copy(replyTarget = msg, editingMessage = null)
+    }
+
+    fun setForwardTarget(msg: Message?) {
+        _uiState.value = _uiState.value.copy(forwardTarget = msg, forwardError = null)
+    }
+
+    /** Edit requires the plaintext to prefill the composer — uses the device's
+     * own private key directly (same as any decrypt), no master-token gate
+     * needed since it's not a UI reveal, just recovering text to re-send. */
+    fun startEdit(msg: Message, onReady: (String) -> Unit, onFail: (String) -> Unit) {
+        viewModelScope.launch {
+            val plain = decryptMessageText(msg)
+            if (plain == null) {
+                onFail("Could not decrypt this message to edit it")
+            } else {
+                _uiState.value = _uiState.value.copy(editingMessage = msg, replyTarget = null)
+                onReady(plain)
+            }
+        }
+    }
+
+    fun cancelComposerAction() {
+        _uiState.value = _uiState.value.copy(replyTarget = null, editingMessage = null)
+    }
+
+    fun forwardMessage(targetUsername: String) {
+        val target = _uiState.value.forwardTarget ?: return
+        if (targetUsername.isBlank()) return
+        viewModelScope.launch {
+            val token = sessionManager.sessionToken.first() ?: return@launch
+            val bearer = "Bearer $token"
+            val me = _uiState.value.currentUsername
+            _uiState.value = _uiState.value.copy(forwardError = null)
+            val plain = decryptMessageText(target)
+            if (plain == null) {
+                _uiState.value = _uiState.value.copy(forwardError = "Unlock this message first")
+                return@launch
+            }
+            runCatching {
+                val deviceKeys = mutableMapOf<String, String>()
+                for (u in setOf(targetUsername, me)) {
+                    apiService.getUserDevices(bearer, u).body()?.devices?.forEach { d ->
+                        if (d.publicKey.isNotBlank()) deviceKeys[d.deviceUuid] = d.publicKey
+                    }
+                }
+                if (deviceKeys.isEmpty()) throw Exception("$targetUsername has no linked devices with encryption keys yet")
+                val (ciphertext, encKeysMap, iv) = cryptoManager.encryptGroupMessage(plain, deviceKeys)
+                val encryptedKeyJson = com.google.gson.Gson().toJson(encKeysMap)
+                val decoys = listOf("hey are you free tonight", "what are you up to later", "just checking in")
+                apiService.sendDm(bearer, SendDmRequest(targetUsername, ciphertext, encryptedKeyJson, iv, decoys.random(), forwardedFromMessageId = target.id))
+                _uiState.value = _uiState.value.copy(forwardTarget = null)
+            }.onFailure {
+                _uiState.value = _uiState.value.copy(forwardError = it.message ?: "Failed to forward message")
+            }
+        }
+    }
+
     fun loadMessages() {
         viewModelScope.launch {
             val token = sessionManager.sessionToken.first() ?: return@launch
@@ -205,11 +328,16 @@ class ChatViewModel @Inject constructor(
     fun sendMessage(text: String) {
         if (text.isBlank()) return
         val tagged = _uiState.value.taggedUser
+        val editTarget = _uiState.value.editingMessage
+        val replyId = _uiState.value.replyTarget?.id
         viewModelScope.launch {
             val token = sessionManager.sessionToken.first() ?: return@launch
             val bearer = "Bearer $token"
             val me = _uiState.value.currentUsername
-            _uiState.value = _uiState.value.copy(isSending = true, taggedUser = null, mentionQuery = null)
+            _uiState.value = _uiState.value.copy(
+                isSending = true, taggedUser = null, mentionQuery = null,
+                editingMessage = null, replyTarget = null,
+            )
 
             val optimistic = Message(
                 id = -System.currentTimeMillis().toInt(),
@@ -219,9 +347,11 @@ class ChatViewModel @Inject constructor(
                 groupId = groupId,
                 timestamp = java.time.Instant.now().toString(),
             )
-            _uiState.value = _uiState.value.copy(
-                messages = (_uiState.value.messages + optimistic).sortedBy { it.timestamp }
-            )
+            if (editTarget == null) {
+                _uiState.value = _uiState.value.copy(
+                    messages = (_uiState.value.messages + optimistic).sortedBy { it.timestamp }
+                )
+            }
 
             runCatching {
                 val decoys = listOf("hey are you free tonight", "what are you up to later", "just wanted to check in with you", "hope everything is going well with you", "did you eat anything yet today", "have so much work piled up right now")
@@ -244,16 +374,25 @@ class ChatViewModel @Inject constructor(
 
                 val (ciphertext, encKeysMap, iv) = cryptoManager.encryptGroupMessage(text.trim(), deviceKeys)
                 val encryptedKeyJson = com.google.gson.Gson().toJson(encKeysMap)
-                if (groupId != null) {
-                    apiService.sendGroupMessage(bearer, SendGroupMessageRequest(groupId!!, ciphertext, tagged, encryptedKeyJson, iv, decoy))
+                if (editTarget != null) {
+                    apiService.editMessage(bearer, editTarget.id, MessageEditRequest(ciphertext, encryptedKeyJson, iv, decoy))
+                } else if (groupId != null) {
+                    // @mentions are detected from typed @username tokens against known
+                    // group members — separate from the existing admin-only "tag one
+                    // member privately" feature (taggedUser/addressed_to_username).
+                    val mentioned = _uiState.value.groupMembers
+                        .map { it.username }
+                        .filter { Regex("(^|\\s)@$it\\b").containsMatchIn(text.trim()) }
+                    apiService.sendGroupMessage(bearer, SendGroupMessageRequest(groupId!!, ciphertext, tagged, encryptedKeyJson, iv, decoy, replyId, mentions = mentioned.ifEmpty { null }))
                 } else {
-                    apiService.sendDm(bearer, SendDmRequest(peerUsername, ciphertext, encryptedKeyJson, iv, decoy))
+                    apiService.sendDm(bearer, SendDmRequest(peerUsername, ciphertext, encryptedKeyJson, iv, decoy, replyId))
                 }
                 loadMessages()
             }.onFailure {
                 _uiState.value = _uiState.value.copy(
-                    messages = _uiState.value.messages.filter { it.id >= 0 },
+                    messages = if (editTarget == null) _uiState.value.messages.filter { it.id >= 0 } else _uiState.value.messages,
                     error = it.message,
+                    editingMessage = editTarget,
                 )
             }
             _uiState.value = _uiState.value.copy(isSending = false)

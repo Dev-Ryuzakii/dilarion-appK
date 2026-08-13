@@ -60,6 +60,12 @@ data class MyDevicesResponse(
 
 // ─── Messages ─────────────────────────────────────────────────────────────────
 
+data class MessageReaction(
+    val emoji: String,
+    val count: Int = 0,
+    @SerializedName("reacted_by_me") val reactedByMe: Boolean = false,
+)
+
 data class Message(
     val id: Int = 0,
     val sender: String? = null,
@@ -74,6 +80,22 @@ data class Message(
     @SerializedName("encrypted_key")         val encryptedKey: String? = null,
     val iv: String? = null,
     @SerializedName("is_admin_announcement") val isAdminAnnouncement: Boolean = false,
+    val reactions: List<MessageReaction>? = null,
+    @SerializedName("reply_to_message_id")        val replyToMessageId: Int? = null,
+    @SerializedName("forwarded_from_message_id")  val forwardedFromMessageId: Int? = null,
+    @SerializedName("is_edited")  val isEdited: Boolean = false,
+    @SerializedName("is_deleted") val isDeleted: Boolean = false,
+    @SerializedName("is_pinned")  val isPinned: Boolean = false,
+    val mentions: List<String>? = null,
+)
+
+data class ReactionRequest(val emoji: String)
+
+data class MessageEditRequest(
+    val message: String,
+    @SerializedName("encrypted_key") val encryptedKey: String? = null,
+    val iv: String? = null,
+    @SerializedName("decoy_content") val decoyContent: String? = null,
 )
 
 data class InboxResponse(
@@ -93,6 +115,9 @@ data class SendDmRequest(
     @SerializedName("encrypted_key") val encryptedKey: String? = null,
     val iv: String? = null,
     @SerializedName("decoy_content") val decoyContent: String? = null,
+    @SerializedName("reply_to_message_id") val replyToMessageId: Int? = null,
+    @SerializedName("forwarded_from_message_id") val forwardedFromMessageId: Int? = null,
+    val mentions: List<String>? = null,
 )
 
 // Send group: POST /messages/group/send → {group_id, message, addressed_to_username?}
@@ -103,6 +128,9 @@ data class SendGroupMessageRequest(
     @SerializedName("encrypted_key") val encryptedKey: String? = null,
     val iv: String? = null,
     @SerializedName("decoy_content") val decoyContent: String? = null,
+    @SerializedName("reply_to_message_id") val replyToMessageId: Int? = null,
+    @SerializedName("forwarded_from_message_id") val forwardedFromMessageId: Int? = null,
+    val mentions: List<String>? = null,
 )
 
 data class ConferenceMessagesResponse(

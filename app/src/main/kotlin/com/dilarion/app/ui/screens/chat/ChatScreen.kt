@@ -5,8 +5,10 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
@@ -204,6 +206,33 @@ fun ChatScreen(
         )
     }
 
+    if (uiState.forwardTarget != null) {
+        var forwardUsername by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { viewModel.setForwardTarget(null) },
+            title = { Text("Forward message") },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = forwardUsername,
+                        onValueChange = { forwardUsername = it },
+                        placeholder = { Text("Recipient username") },
+                        singleLine = true,
+                    )
+                    uiState.forwardError?.let {
+                        Text(it, color = Color(0xFFEF4444), fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { viewModel.forwardMessage(forwardUsername) }, enabled = forwardUsername.isNotBlank()) { Text("Forward") }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.setForwardTarget(null) }) { Text("Cancel") }
+            },
+        )
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -305,6 +334,20 @@ fun ChatScreen(
                                     currentUsername = uiState.currentUsername,
                                     isGroup = groupId != null,
                                     senderName = if (groupId != null && !isMine) message.sender else null,
+                                    replyToMsg = message.replyToMessageId?.let { rid -> uiState.messages.find { it.id == rid } },
+                                    onReact = { emoji -> viewModel.toggleReaction(message.id, emoji) },
+                                    onReply = { viewModel.setReplyTarget(message) },
+                                    onForward = { viewModel.setForwardTarget(message) },
+                                    onPinToggle = { viewModel.togglePin(message) },
+                                    onStar = { viewModel.starMessage(message) },
+                                    onEdit = {
+                                        viewModel.startEdit(
+                                            message,
+                                            onReady = { plaintext -> inputText = plaintext },
+                                            onFail = { },
+                                        )
+                                    },
+                                    onDelete = { viewModel.deleteMessage(message) },
                                 )
                             }
                             is ChatItem.MediaMessage -> {
@@ -410,6 +453,30 @@ fun ChatScreen(
                                                 }
                                             }
                                         }
+                                    }
+                                }
+                            }
+                            // Reply / edit banner
+                            if (uiState.replyTarget != null || uiState.editingMessage != null) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(bottom = 6.dp)
+                                        .background(Color(0xFF1A1A1A), RoundedCornerShape(8.dp))
+                                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            if (uiState.editingMessage != null) "Editing message" else "Replying to ${uiState.replyTarget?.sender}",
+                                            color = DilarionRed, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                                        )
+                                        uiState.replyTarget?.let {
+                                            Text(it.decoyContent ?: "…", color = TextSecondary, fontSize = 12.sp, maxLines = 1)
+                                        }
+                                    }
+                                    IconButton(onClick = { viewModel.cancelComposerAction(); inputText = "" }, modifier = Modifier.size(20.dp)) {
+                                        Icon(Icons.Default.Close, null, tint = TextSecondary, modifier = Modifier.size(14.dp))
                                     }
                                 }
                             }
@@ -951,6 +1018,75 @@ private fun SenderAvatar(username: String) {
     }
 }
 
+private val CHAT_REACTION_EMOJIS = listOf("👍", "❤️", "😂", "😮", "😢", "🙏")
+
+@Composable
+private fun ChatReactionPills(reactions: List<com.dilarion.app.data.model.MessageReaction>?, onToggle: (String) -> Unit) {
+    if (reactions.isNullOrEmpty()) return
+    Row(horizontalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.padding(top = 4.dp)) {
+        reactions.forEach { r ->
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(if (r.reactedByMe) DilarionRed else Color(0xFF2A2A32))
+                    .clickable { onToggle(r.emoji) }
+                    .padding(horizontal = 7.dp, vertical = 1.dp),
+            ) {
+                Text(r.emoji, fontSize = 12.sp)
+                Spacer(Modifier.width(3.dp))
+                Text("${r.count}", fontSize = 11.sp, color = SurfaceWhite)
+            }
+        }
+    }
+}
+
+@Composable
+private fun MessageActionsMenu(
+    expanded: Boolean,
+    onDismiss: () -> Unit,
+    isMine: Boolean,
+    isPinned: Boolean,
+    onReact: (String) -> Unit,
+    onReply: () -> Unit,
+    onForward: () -> Unit,
+    onPinToggle: () -> Unit,
+    onStar: () -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    var showEmojiPicker by remember { mutableStateOf(false) }
+    DropdownMenu(expanded = expanded && !showEmojiPicker, onDismissRequest = onDismiss) {
+        DropdownMenuItem(text = { Text("React") }, onClick = { showEmojiPicker = true })
+        DropdownMenuItem(text = { Text("Reply") }, onClick = { onReply(); onDismiss() })
+        DropdownMenuItem(text = { Text("Forward") }, onClick = { onForward(); onDismiss() })
+        DropdownMenuItem(text = { Text(if (isPinned) "Unpin" else "Pin") }, onClick = { onPinToggle(); onDismiss() })
+        DropdownMenuItem(text = { Text("Star") }, onClick = { onStar(); onDismiss() })
+        if (isMine) {
+            DropdownMenuItem(text = { Text("Edit") }, onClick = { onEdit(); onDismiss() })
+            DropdownMenuItem(text = { Text("Delete") }, onClick = { onDelete(); onDismiss() })
+        }
+    }
+    if (showEmojiPicker) {
+        AlertDialog(
+            onDismissRequest = { showEmojiPicker = false; onDismiss() },
+            confirmButton = {},
+            title = { Text("React") },
+            text = {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    CHAT_REACTION_EMOJIS.forEach { e ->
+                        Text(
+                            e, fontSize = 22.sp,
+                            modifier = Modifier.clickable { onReact(e); showEmojiPicker = false; onDismiss() },
+                        )
+                    }
+                }
+            },
+        )
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun MessageBubble(
     message: Message,
@@ -960,7 +1096,32 @@ private fun MessageBubble(
     currentUsername: String = "",
     isGroup: Boolean = false,
     senderName: String? = null,
+    replyToMsg: Message? = null,
+    onReact: (String) -> Unit = {},
+    onReply: () -> Unit = {},
+    onForward: () -> Unit = {},
+    onPinToggle: () -> Unit = {},
+    onStar: () -> Unit = {},
+    onEdit: () -> Unit = {},
+    onDelete: () -> Unit = {},
 ) {
+    var showMenu by remember { mutableStateOf(false) }
+
+    if (message.isDeleted) {
+        Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = if (isMine) Alignment.End else Alignment.Start) {
+            Box(
+                modifier = Modifier
+                    .widthIn(max = 260.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color.Transparent)
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+            ) {
+                Text("This message was deleted", color = TextSecondary, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic, style = MaterialTheme.typography.bodySmall)
+            }
+        }
+        return
+    }
+
     val isPrivateTagged = message.contentType == "private_tagged"
     // Older/other backends don't always tag content_type="encrypted"; treat the
     // presence of an encrypted key or an unreadable payload as locked too.
@@ -1036,18 +1197,39 @@ private fun MessageBubble(
                         modifier = Modifier.padding(start = 4.dp, bottom = 2.dp),
                     )
                 }
-                Column(
-                    modifier = Modifier
-                        .widthIn(max = 260.dp)
-                        .clip(bubbleShape)
-                        .background(bubbleColor)
-                        .then(
-                            if (!isPrivateTagged && isEncrypted)
-                                Modifier.clickable(enabled = decryptedText == null) { onTapLocked() }
-                            else Modifier
+                if (message.forwardedFromMessageId != null) {
+                    Text(
+                        "Forwarded", style = MaterialTheme.typography.labelSmall,
+                        color = TextSecondary, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+                        modifier = Modifier.padding(bottom = 2.dp),
+                    )
+                }
+                if (replyToMsg != null) {
+                    Column(
+                        modifier = Modifier
+                            .widthIn(max = 220.dp)
+                            .padding(bottom = 3.dp)
+                            .background(Color.Transparent),
+                    ) {
+                        Text(replyToMsg.sender ?: "", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = DilarionRed)
+                        Text(
+                            if (replyToMsg.isDeleted) "Message deleted" else (replyToMsg.decoyContent ?: "…"),
+                            style = MaterialTheme.typography.labelSmall, color = TextSecondary, maxLines = 1,
                         )
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                ) {
+                    }
+                }
+                Box {
+                    Column(
+                        modifier = Modifier
+                            .widthIn(max = 260.dp)
+                            .clip(bubbleShape)
+                            .background(bubbleColor)
+                            .combinedClickable(
+                                onClick = { if (!isPrivateTagged && isEncrypted && decryptedText == null) onTapLocked() },
+                                onLongClick = { showMenu = true },
+                            )
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                    ) {
                     if (isPrivateTagged) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             Icon(Icons.Default.Lock, null, tint = privatePurple, modifier = Modifier.size(14.dp))
@@ -1073,6 +1255,10 @@ private fun MessageBubble(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(3.dp),
                     ) {
+                        if (message.isPinned) Text("📌", fontSize = 10.sp)
+                        if (message.isEdited) {
+                            Text("edited", style = MaterialTheme.typography.labelSmall, color = TextSecondary, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic)
+                        }
                         Text(
                             formatTimestamp(message.timestamp ?: ""),
                             style = MaterialTheme.typography.labelSmall,
@@ -1095,7 +1281,22 @@ private fun MessageBubble(
                             }
                         }
                     }
+                    }
+                    MessageActionsMenu(
+                        expanded = showMenu,
+                        onDismiss = { showMenu = false },
+                        isMine = isMine,
+                        isPinned = message.isPinned,
+                        onReact = onReact,
+                        onReply = onReply,
+                        onForward = onForward,
+                        onPinToggle = onPinToggle,
+                        onStar = onStar,
+                        onEdit = onEdit,
+                        onDelete = onDelete,
+                    )
                 }
+                ChatReactionPills(message.reactions, onReact)
             }
         }
     }

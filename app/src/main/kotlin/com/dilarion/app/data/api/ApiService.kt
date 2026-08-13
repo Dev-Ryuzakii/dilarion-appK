@@ -97,6 +97,52 @@ interface ApiService {
         @Path("id") messageId: Int,
     ): Response<Unit>
 
+    // ─── Chat collaboration: reactions, edit, delete, pin, star ─────────────────
+
+    @POST("messages/{id}/react")
+    suspend fun toggleReaction(
+        @Header("Authorization") bearer: String,
+        @Path("id") messageId: Int,
+        @Body request: ReactionRequest,
+    ): Response<com.google.gson.JsonObject>
+
+    @PUT("messages/{id}")
+    suspend fun editMessage(
+        @Header("Authorization") bearer: String,
+        @Path("id") messageId: Int,
+        @Body request: MessageEditRequest,
+    ): Response<com.google.gson.JsonObject>
+
+    @DELETE("messages/{id}")
+    suspend fun deleteMessage(
+        @Header("Authorization") bearer: String,
+        @Path("id") messageId: Int,
+    ): Response<com.google.gson.JsonObject>
+
+    @POST("messages/{id}/pin")
+    suspend fun pinMessage(
+        @Header("Authorization") bearer: String,
+        @Path("id") messageId: Int,
+    ): Response<com.google.gson.JsonObject>
+
+    @POST("messages/{id}/unpin")
+    suspend fun unpinMessage(
+        @Header("Authorization") bearer: String,
+        @Path("id") messageId: Int,
+    ): Response<com.google.gson.JsonObject>
+
+    @POST("messages/{id}/star")
+    suspend fun starMessage(
+        @Header("Authorization") bearer: String,
+        @Path("id") messageId: Int,
+    ): Response<com.google.gson.JsonObject>
+
+    @DELETE("messages/{id}/star")
+    suspend fun unstarMessage(
+        @Header("Authorization") bearer: String,
+        @Path("id") messageId: Int,
+    ): Response<com.google.gson.JsonObject>
+
     // ─── Groups ────────────────────────────────────────────────────────────────
 
     @GET("groups")
