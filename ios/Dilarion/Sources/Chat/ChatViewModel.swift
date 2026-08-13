@@ -36,7 +36,18 @@ struct ChatUiState {
     var taggedUser: String? = nil
     var error: String? = nil
     var currentUsername: String = KeychainHelper.shared.read(key: "username") ?? ""
+
+    // Chat collaboration: reactions, edit, delete, pin, star, reply, forward, mentions
+    var replyTarget: Message? = nil
+    var editingMessage: Message? = nil
+    var forwardTarget: Message? = nil
+    var pinnedMessages: [PinnedMessage] = []
+    var starredMessageIds: Set<Int> = []
+    var showPinnedBanner: Bool { !pinnedMessages.isEmpty }
 }
+
+// Available quick-react emoji, matches desktop/Android's reaction picker set.
+let quickReactionEmoji = ["👍", "❤️", "😂", "😮", "😢", "🙏"]
 
 @MainActor
 class ChatViewModel: ObservableObject {
@@ -58,6 +69,8 @@ class ChatViewModel: ObservableObject {
         self.groupId = groupId
         subscribeToWS()
         Task { await loadMessages() }
+        Task { await loadPinnedMessages() }
+        Task { await loadStarredIds() }
         if let gid = groupId {
             Task { await loadGroupMembers(gid) }
         } else {
@@ -116,17 +129,14 @@ class ChatViewModel: ObservableObject {
         do {
             var rawMessages: [Message] = []
             if let gid = groupId {
-                // GET /messages/group/{groupId} → GroupMessagesResponse { messages: [...] }
-                let resp: GroupMessagesResponse = try await APIClient.shared.get("/messages/group/\(gid)")
-                rawMessages = resp.messages
+                // GET /groups/{groupId}/messages — full field parity (reactions,
+                // reply/forward/edit/delete/pin, mentions); the legacy
+                // /messages/group/{id} endpoint lacks all of that.
+                rawMessages = try await APIClient.shared.getGroupMessages(groupId: gid)
             } else {
-                // DM: GET /messages/inbox → filter for this peer (same as Android)
-                let resp: InboxResponse = try await APIClient.shared.get("/messages/inbox")
-                let me = state.currentUsername
-                rawMessages = resp.messages.filter { msg in
-                    (msg.sender == partnerUsername && msg.recipient == me) ||
-                    (msg.sender == me && msg.recipient == partnerUsername)
-                }
+                // GET /messages/conversation/{partner} — same full field parity;
+                // /messages/inbox is the legacy bare-bones list.
+                rawMessages = try await APIClient.shared.getConversation(partner: partnerUsername)
             }
             
             var decryptedMessages: [Message] = []
@@ -135,6 +145,10 @@ class ChatViewModel: ObservableObject {
             let me = state.currentUsername
 
             for var msg in rawMessages {
+                if msg.isDeleted == true {
+                    decryptedMessages.append(msg)
+                    continue
+                }
                 if state.isUnlocked, let content = msg.content, let encKey = msg.encryptedKey, let iv = msg.iv, let pk = privKeyB64, !pk.isEmpty {
                     do {
                         var actualEncKey = encKey
@@ -144,21 +158,9 @@ class ChatViewModel: ObservableObject {
                             actualEncKey = (myDeviceUuid.flatMap { map[$0] }) ?? map[me] ?? encKey
                         }
                         let plain = try EncryptionManager.shared.decryptMessage(ciphertextB64: content, encryptedKeyB64: actualEncKey, ivB64: iv, privateKeyB64: pk)
-                        msg = Message(
-                            id: msg.id, sender: msg.sender, recipient: msg.recipient, groupId: msg.groupId, 
-                            content: plain, encryptedContent: msg.encryptedContent, decoyContent: msg.decoyContent, 
-                            encryptedKey: msg.encryptedKey, iv: msg.iv,
-                            contentType: msg.contentType, mediaType: msg.mediaType, timestamp: msg.timestamp, 
-                            read: msg.read, isPrivateTagged: msg.isPrivateTagged
-                        )
+                        msg.content = plain
                     } catch {
-                        msg = Message(
-                            id: msg.id, sender: msg.sender, recipient: msg.recipient, groupId: msg.groupId, 
-                            content: "[Decryption Failed]", encryptedContent: msg.encryptedContent, decoyContent: msg.decoyContent, 
-                            encryptedKey: msg.encryptedKey, iv: msg.iv,
-                            contentType: msg.contentType, mediaType: msg.mediaType, timestamp: msg.timestamp, 
-                            read: msg.read, isPrivateTagged: msg.isPrivateTagged
-                        )
+                        msg.content = "[Decryption Failed]"
                     }
                 }
                 decryptedMessages.append(msg)
@@ -202,16 +204,43 @@ class ChatViewModel: ObservableObject {
         return Self.mediaFilenameRegex.firstMatch(in: content, options: [], range: range) != nil
     }
 
+    // Cleartext @mention scan — server can't parse @mentions out of ciphertext,
+    // so the client says who was mentioned explicitly, for notification
+    // targeting only, never message content.
+    private func extractMentions(_ text: String) -> [String]? {
+        guard groupId != nil else { return nil }
+        let knownUsernames = Set(state.groupMembers.map { $0.username })
+        guard !knownUsernames.isEmpty else { return nil }
+        var found = Set<String>()
+        let range = NSRange(text.startIndex..., in: text)
+        let regex = try! NSRegularExpression(pattern: #"@(\w+)"#)
+        regex.enumerateMatches(in: text, options: [], range: range) { match, _, _ in
+            guard let match, let r = Range(match.range(at: 1), in: text) else { return }
+            let candidate = String(text[r])
+            if knownUsernames.contains(candidate) { found.insert(candidate) }
+        }
+        return found.isEmpty ? nil : Array(found)
+    }
+
     // MARK: — Send text
     func sendMessage(_ text: String) async {
         let tagged = state.taggedUser
         let me = state.currentUsername
+        let replyToId = state.replyTarget?.id
+        let forwardedFromId = state.forwardTarget?.id
+        let mentions = extractMentions(text)
 
-        await MainActor.run { state.isSending = true; state.taggedUser = nil; state.mentionQuery = nil }
+        await MainActor.run {
+            state.isSending = true
+            state.taggedUser = nil
+            state.mentionQuery = nil
+            state.replyTarget = nil
+            state.forwardTarget = nil
+        }
 
         // Optimistic message (negative id = pending)
         let optimisticId = -(Int(Date().timeIntervalSince1970 * 1000) % 100000)
-        let optimistic = Message(
+        var optimistic = Message(
             id: optimisticId,
             sender: me,
             recipient: groupId == nil ? partnerUsername : (tagged ?? "group"),
@@ -227,6 +256,9 @@ class ChatViewModel: ObservableObject {
             read: false,
             isPrivateTagged: nil
         )
+        optimistic.replyToMessageId = replyToId
+        optimistic.forwardedFromMessageId = forwardedFromId
+        optimistic.mentions = mentions
         await MainActor.run {
             state.messages.append(optimistic)
             state.messages.sort { ($0.timestamp ?? "") < ($1.timestamp ?? "") }
@@ -236,7 +268,7 @@ class ChatViewModel: ObservableObject {
             let decoys = ["hey are you free tonight", "what are you up to later", "just wanted to check in with you", "hope everything is going well with you", "did you eat anything yet today", "have so much work piled up right now"]
             let decoy = decoys.randomElement()!
             let plaintext = text.trimmingCharacters(in: .whitespaces)
-            
+
             // Wrap the AES key once per active device (keyed by device_uuid) of every
             // recipient and of ourselves, so all of everyone's devices can read it.
             var recipients = Set<String>()
@@ -266,7 +298,10 @@ class ChatViewModel: ObservableObject {
                     addressedToUsername: tagged,
                     encryptedKey: encKeysJson,
                     iv: iv,
-                    decoyContent: decoy
+                    decoyContent: decoy,
+                    replyToMessageId: replyToId,
+                    forwardedFromMessageId: forwardedFromId,
+                    mentions: mentions
                 )
                 try await APIClient.shared.postVoid("/messages/group/send", body: req)
             } else {
@@ -275,7 +310,10 @@ class ChatViewModel: ObservableObject {
                     message: ciphertext,
                     encryptedKey: encKeysJson,
                     iv: iv,
-                    decoyContent: decoy
+                    decoyContent: decoy,
+                    replyToMessageId: replyToId,
+                    forwardedFromMessageId: forwardedFromId,
+                    mentions: mentions
                 )
                 try await APIClient.shared.postVoid("/messages/send", body: req)
             }
@@ -337,6 +375,190 @@ class ChatViewModel: ObservableObject {
     func setMentionQuery(_ q: String?) { state.mentionQuery = q }
     func setTaggedUser(_ u: String?) { state.taggedUser = u }
 
+    // MARK: — Reactions
+    func toggleReaction(_ message: Message, emoji: String) async {
+        guard message.id >= 0 else { return }
+        _ = try? await APIClient.shared.toggleReaction(messageId: message.id, emoji: emoji)
+        await loadMessages()
+    }
+
+    // MARK: — Reply
+    func message(withId id: Int) -> Message? {
+        state.messages.first { $0.id == id }
+    }
+
+    func setReplyTarget(_ message: Message?) {
+        state.replyTarget = message
+        if message != nil { state.forwardTarget = nil }
+    }
+
+    // MARK: — Edit (sender-only)
+    func startEdit(_ message: Message) {
+        guard message.sender == state.currentUsername, message.id >= 0, message.isDeleted != true else { return }
+        state.editingMessage = message
+        state.replyTarget = nil
+    }
+
+    func cancelEdit() { state.editingMessage = nil }
+
+    func submitEdit(_ newText: String) async {
+        guard let editing = state.editingMessage else { return }
+        let plaintext = newText.trimmingCharacters(in: .whitespaces)
+        guard !plaintext.isEmpty else { return }
+        await MainActor.run { state.editingMessage = nil }
+        do {
+            var recipients = Set<String>()
+            if let gid = groupId {
+                recipients = Set(state.groupMembers.map { $0.username })
+                recipients.insert(state.currentUsername)
+                _ = gid
+            } else {
+                recipients = [partnerUsername, state.currentUsername]
+            }
+            var deviceKeys = [String: String]()
+            for u in recipients {
+                if let resp: UserDevicesResponse = try? await APIClient.shared.get("/users/\(u)/devices") {
+                    for d in resp.devices where !d.public_key.isEmpty {
+                        deviceKeys[d.device_uuid] = d.public_key
+                    }
+                }
+            }
+            guard !deviceKeys.isEmpty else { throw URLError(.badServerResponse) }
+            let (ciphertext, encKeysMap, iv) = try EncryptionManager.shared.encryptGroupMessage(plaintext, memberPublicKeys: deviceKeys)
+            let encKeysJson = String(data: try JSONEncoder().encode(encKeysMap), encoding: .utf8)
+            let decoys = ["hey are you free tonight", "what are you up to later", "just wanted to check in with you"]
+            try await APIClient.shared.editMessage(
+                messageId: editing.id,
+                ciphertext: ciphertext,
+                encryptedKey: encKeysJson,
+                iv: iv,
+                decoyContent: decoys.randomElement()
+            )
+            await loadMessages()
+        } catch {
+            await MainActor.run { state.error = error.localizedDescription }
+        }
+    }
+
+    // MARK: — Delete (soft delete, sender-only)
+    func deleteMessage(_ message: Message) async {
+        guard message.id >= 0 else { return }
+        do {
+            try await APIClient.shared.deleteMessage(messageId: message.id)
+            await loadMessages()
+        } catch {
+            await MainActor.run { state.error = error.localizedDescription }
+        }
+    }
+
+    // MARK: — Pin
+    func togglePin(_ message: Message) async {
+        guard message.id >= 0 else { return }
+        do {
+            if message.isPinned == true {
+                try await APIClient.shared.unpinMessage(messageId: message.id)
+            } else {
+                try await APIClient.shared.pinMessage(messageId: message.id)
+            }
+            await loadMessages()
+            await loadPinnedMessages()
+        } catch {
+            await MainActor.run { state.error = error.localizedDescription }
+        }
+    }
+
+    func loadPinnedMessages() async {
+        do {
+            let pinned: [PinnedMessage]
+            if let gid = groupId {
+                pinned = try await APIClient.shared.getPinnedMessages(groupId: gid)
+            } else {
+                pinned = try await APIClient.shared.getPinnedMessages(username: partnerUsername)
+            }
+            await MainActor.run { state.pinnedMessages = pinned }
+        } catch {
+            // Non-fatal — pinned banner just stays empty.
+        }
+    }
+
+    // MARK: — Star (personal, not shared with the other participant)
+    func toggleStar(_ message: Message) async {
+        guard message.id >= 0 else { return }
+        let isStarred = state.starredMessageIds.contains(message.id)
+        do {
+            if isStarred {
+                try await APIClient.shared.unstarMessage(messageId: message.id)
+                state.starredMessageIds.remove(message.id)
+            } else {
+                try await APIClient.shared.starMessage(messageId: message.id)
+                state.starredMessageIds.insert(message.id)
+            }
+        } catch {
+            await MainActor.run { state.error = error.localizedDescription }
+        }
+    }
+
+    func loadStarredIds() async {
+        guard let starred = try? await APIClient.shared.getStarredMessages() else { return }
+        let ids = Set(starred.map { $0.id })
+        await MainActor.run { state.starredMessageIds = ids }
+    }
+
+    // MARK: — Forward
+    func setForwardTarget(_ message: Message?) {
+        guard message?.isDeleted != true else { return }
+        state.forwardTarget = message
+        if message != nil { state.replyTarget = nil }
+    }
+
+    /// Immediate forward to a different conversation, chosen from the "Forward to…"
+    /// picker — re-sends the already-decrypted plaintext via the normal encrypted
+    /// send path (content stays E2EE end to end), tagged forwarded_from_message_id
+    /// for the UI label only. `groupMemberUsernames` is required when forwarding to
+    /// a group, so the AES key can be wrapped for every member's devices.
+    func forwardMessage(_ message: Message, toUsername: String? = nil, toGroupId: Int? = nil, groupMemberUsernames: [String] = []) async throws {
+        guard let plaintext = message.content, message.isDeleted != true, !plaintext.isEmpty else {
+            throw URLError(.cannotDecodeContentData)
+        }
+        let me = state.currentUsername
+        var recipients = Set<String>()
+        if toGroupId != nil {
+            recipients = Set(groupMemberUsernames)
+            recipients.insert(me)
+        } else if let user = toUsername {
+            recipients = [user, me]
+        }
+        var deviceKeys = [String: String]()
+        for u in recipients {
+            if let resp: UserDevicesResponse = try? await APIClient.shared.get("/users/\(u)/devices") {
+                for d in resp.devices where !d.public_key.isEmpty {
+                    deviceKeys[d.device_uuid] = d.public_key
+                }
+            }
+        }
+        guard !deviceKeys.isEmpty else { throw URLError(.badServerResponse) }
+        let (ciphertext, encKeysMap, iv) = try EncryptionManager.shared.encryptGroupMessage(plaintext, memberPublicKeys: deviceKeys)
+        let encKeysJson = String(data: try JSONEncoder().encode(encKeysMap), encoding: .utf8)
+        let decoys = ["hey are you free tonight", "what are you up to later", "just wanted to check in with you"]
+
+        if let gid = toGroupId {
+            let req = SendGroupMessageRequest(
+                groupId: gid, message: ciphertext, addressedToUsername: nil,
+                encryptedKey: encKeysJson, iv: iv, decoyContent: decoys.randomElement(),
+                forwardedFromMessageId: message.id
+            )
+            try await APIClient.shared.postVoid("/messages/group/send", body: req)
+        } else if let user = toUsername {
+            let req = SendDmRequest(
+                username: user, message: ciphertext,
+                encryptedKey: encKeysJson, iv: iv, decoyContent: decoys.randomElement(),
+                forwardedFromMessageId: message.id
+            )
+            try await APIClient.shared.postVoid("/messages/send", body: req)
+        }
+        await MainActor.run { state.forwardTarget = nil }
+    }
+
     // MARK: — WS
     private func subscribeToWS() {
         WebSocketManager.shared.events
@@ -353,6 +575,12 @@ class ChatViewModel: ObservableObject {
                 case .newMedia:
                     if self.groupId == nil {
                         Task { await self.loadMedia() }
+                    }
+                case .messageUpdated(_, let updatedGroupId):
+                    let inThisChat = (self.groupId != nil && updatedGroupId == self.groupId)
+                        || (self.groupId == nil && updatedGroupId == nil)
+                    if inThisChat {
+                        Task { await self.loadMessages(); await self.loadPinnedMessages() }
                     }
                 default: break
                 }

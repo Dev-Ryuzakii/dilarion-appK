@@ -27,6 +27,9 @@ struct ChatView: View {
     @State private var selectedPhotoItem: PhotosPickerItem? = nil
     @State private var viewerImage: ViewerImage? = nil
     @State private var showWhiteboard = false
+    @State private var showPinnedList = false
+    @State private var forwardCandidate: Message? = nil
+    @State private var actionMessage: Message? = nil
 
     private var displayName: String { groupId != nil ? (groupName ?? "Group") : username }
 
@@ -50,6 +53,26 @@ struct ChatView: View {
                         .padding(.vertical, 8)
                         .background(Color.dilarionRed.opacity(0.1))
                     }
+                }
+
+                // Pinned messages banner
+                if vm.state.showPinnedBanner {
+                    Button { showPinnedList = true } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "pin.fill")
+                                .font(.system(size: 12))
+                            Text(vm.state.pinnedMessages.count == 1 ? "1 pinned message" : "\(vm.state.pinnedMessages.count) pinned messages")
+                                .font(.system(size: 12, weight: .medium))
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 11))
+                        }
+                        .foregroundColor(.textPrimary)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(Color.surfaceWhite)
+                    }
+                    Divider()
                 }
 
                 // Messages
@@ -91,6 +114,28 @@ struct ChatView: View {
                     .background(Color.surfaceWhite.opacity(0.8))
                 }
 
+                // Reply / edit context bar
+                if let editing = vm.state.editingMessage {
+                    ComposeContextBar(
+                        icon: "pencil",
+                        label: "Editing message",
+                        snippet: editing.content ?? "",
+                        tint: .dilarionRed
+                    ) {
+                        vm.cancelEdit()
+                        inputText = ""
+                    }
+                } else if let replying = vm.state.replyTarget {
+                    ComposeContextBar(
+                        icon: "arrowshape.turn.up.left.fill",
+                        label: "Replying to \(replying.sender ?? "")",
+                        snippet: replying.content ?? "",
+                        tint: Color(hex: 0xA78BFA)
+                    ) {
+                        vm.setReplyTarget(nil)
+                    }
+                }
+
                 // Input area
                 if vm.state.isRecording {
                     RecordingRow(
@@ -109,7 +154,11 @@ struct ChatView: View {
                             guard !text.isEmpty else { return }
                             inputText = ""
                             vm.setMentionQuery(nil)
-                            Task { await vm.sendMessage(text) }
+                            if vm.state.editingMessage != nil {
+                                Task { await vm.submitEdit(text) }
+                            } else {
+                                Task { await vm.sendMessage(text) }
+                            }
                         },
                         onStartRecording: { vm.startRecording() },
                         onTyping: { vm.sendTyping(isTyping: !inputText.isEmpty) },
@@ -125,6 +174,23 @@ struct ChatView: View {
                         onClearTag: { vm.setTaggedUser(nil) }
                     )
                 }
+            }
+
+            if let msg = actionMessage {
+                MessageActionOverlay(
+                    message: msg,
+                    isMine: msg.sender == vm.state.currentUsername,
+                    isStarred: vm.state.starredMessageIds.contains(msg.id),
+                    onDismiss: { withAnimation(.spring(response: 0.3)) { actionMessage = nil } },
+                    onReact: { emoji in Task { await vm.toggleReaction(msg, emoji: emoji) } },
+                    onReply: { vm.setReplyTarget(msg) },
+                    onForward: { forwardCandidate = msg },
+                    onEdit: { inputText = msg.content ?? ""; vm.startEdit(msg) },
+                    onTogglePin: { Task { await vm.togglePin(msg) } },
+                    onToggleStar: { Task { await vm.toggleStar(msg) } },
+                    onDelete: { Task { await vm.deleteMessage(msg) } }
+                )
+                .zIndex(1)
             }
         }
         .navigationTitle("")
@@ -214,6 +280,21 @@ struct ChatView: View {
                 viewerImage = nil
             }
         }
+        .sheet(isPresented: $showPinnedList) {
+            PinnedMessagesSheet(vm: vm)
+        }
+        .sheet(item: $forwardCandidate) { message in
+            ForwardPickerSheet(message: message) { targetUsername, targetGroupId, memberUsernames in
+                Task {
+                    do {
+                        try await vm.forwardMessage(message, toUsername: targetUsername, toGroupId: targetGroupId, groupMemberUsernames: memberUsernames)
+                    } catch {
+                        vm.state.error = error.localizedDescription
+                    }
+                }
+                forwardCandidate = nil
+            }
+        }
     }
 
     @ViewBuilder
@@ -226,7 +307,11 @@ struct ChatView: View {
                 isMine: isMine,
                 isUnlocked: vm.state.isUnlocked,
                 isGroup: groupId != nil,
-                onTapLocked: { showUnlockDialog = true }
+                replyPreview: msg.replyToMessageId.flatMap { vm.message(withId: $0) },
+                isStarred: vm.state.starredMessageIds.contains(msg.id),
+                onTapLocked: { showUnlockDialog = true },
+                onReact: { emoji in Task { await vm.toggleReaction(msg, emoji: emoji) } },
+                onLongPress: { withAnimation(.spring(response: 0.3)) { actionMessage = msg } }
             )
             .id(item.id)
             .task {
@@ -294,10 +379,15 @@ struct MessageBubbleView: View {
     let isMine: Bool
     let isUnlocked: Bool
     let isGroup: Bool
+    var replyPreview: Message? = nil
+    var isStarred: Bool = false
     let onTapLocked: () -> Void
+    var onReact: (String) -> Void = { _ in }
+    var onLongPress: () -> Void = {}
 
     private var isPrivateTagged: Bool { message.contentType == "private_tagged" }
     private var isEncrypted: Bool { message.contentType == "encrypted" }
+    private var isDeleted: Bool { message.isDeleted == true }
     private var hasRecipient: Bool {
         !(message.recipient ?? "").isEmpty && message.recipient != "group"
     }
@@ -352,7 +442,16 @@ struct MessageBubbleView: View {
 
                     // Bubble
                     VStack(alignment: .leading, spacing: 4) {
-                        if isPrivateTagged {
+                        if isDeleted {
+                            HStack(spacing: 6) {
+                                Image(systemName: "trash")
+                                    .font(.system(size: 11))
+                                Text("This message was deleted")
+                                    .font(.system(size: 13))
+                                    .italic()
+                            }
+                            .foregroundColor(.textSecondary)
+                        } else if isPrivateTagged {
                             HStack(spacing: 6) {
                                 Image(systemName: "lock.fill")
                                     .font(.system(size: 12))
@@ -366,13 +465,42 @@ struct MessageBubbleView: View {
                                 .font(.system(size: 14))
                                 .foregroundColor(.textPrimary.opacity(0.65))
                         } else {
+                            if let quoted = replyPreview {
+                                QuotedReplyPreview(message: quoted, isUnlocked: isUnlocked)
+                            }
+                            if message.forwardedFromMessageId != nil {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "arrowshape.turn.up.right.fill")
+                                        .font(.system(size: 10))
+                                    Text("Forwarded")
+                                        .font(.system(size: 11, weight: .medium))
+                                        .italic()
+                                }
+                                .foregroundColor(.textSecondary)
+                            }
                             Text(message.content ?? message.encryptedContent ?? "")
                                 .font(.system(size: 14))
                                 .foregroundColor(.textPrimary)
                         }
 
-                        // Timestamp + read receipt
+                        // Timestamp + edited flag + read receipt
                         HStack(spacing: 3) {
+                            if message.isEdited == true && !isDeleted {
+                                Text("edited")
+                                    .font(.system(size: 10))
+                                    .italic()
+                                    .foregroundColor(.textSecondary)
+                            }
+                            if isStarred {
+                                Image(systemName: "star.fill")
+                                    .font(.system(size: 9))
+                                    .foregroundColor(.textSecondary)
+                            }
+                            if message.isPinned == true {
+                                Image(systemName: "pin.fill")
+                                    .font(.system(size: 9))
+                                    .foregroundColor(.textSecondary)
+                            }
                             Text(formatTimestamp(message.timestamp ?? ""))
                                 .font(.system(size: 11))
                                 .foregroundColor(.textSecondary)
@@ -405,12 +533,108 @@ struct MessageBubbleView: View {
                     .onTapGesture {
                         if isEncrypted && !isUnlocked { onTapLocked() }
                     }
+                    .onLongPressGesture(minimumDuration: 0.35) {
+                        guard !isDeleted && isUnlocked else { return }
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        onLongPress()
+                    }
+
+                    // Reaction chips
+                    if let reactions = message.reactions, !reactions.isEmpty, !isDeleted {
+                        HStack(spacing: 4) {
+                            ForEach(reactions) { r in
+                                Button { onReact(r.emoji) } label: {
+                                    HStack(spacing: 3) {
+                                        Text(r.emoji).font(.system(size: 12))
+                                        Text("\(r.count)").font(.system(size: 10, weight: .semibold))
+                                    }
+                                    .padding(.horizontal, 7)
+                                    .padding(.vertical, 3)
+                                    .background(r.reactedByMe ? Color.dilarionRed.opacity(0.15) : Color.borderGrey.opacity(0.5))
+                                    .overlay(
+                                        Capsule().stroke(r.reactedByMe ? Color.dilarionRed : .clear, lineWidth: 1)
+                                    )
+                                    .clipShape(Capsule())
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
                 }
 
                 if !isMine { Spacer(minLength: 60) }
             }
         }
         .frame(maxWidth: .infinity, alignment: isMine ? .trailing : .leading)
+    }
+}
+
+// MARK: — Quoted reply preview (shown inside a bubble that replies to another message)
+struct QuotedReplyPreview: View {
+    let message: Message
+    let isUnlocked: Bool
+
+    private var snippet: String {
+        if message.isDeleted == true { return "Message deleted" }
+        // Keep the decoy illusion intact in the quoted snippet too — never
+        // surface raw ciphertext just because the reply target isn't unlocked.
+        if message.contentType == "encrypted" && !isUnlocked { return decoyFor(id: message.id) }
+        return message.content ?? "…"
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Rectangle()
+                .fill(Color.dilarionRed.opacity(0.6))
+                .frame(width: 3)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(message.sender ?? "")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.dilarionRed)
+                Text(snippet)
+                    .font(.system(size: 12))
+                    .foregroundColor(.textSecondary)
+                    .lineLimit(1)
+            }
+        }
+        .padding(6)
+        .background(Color.borderGrey.opacity(0.35))
+        .cornerRadius(6)
+    }
+}
+
+// MARK: — Reply/edit context bar above the input area
+struct ComposeContextBar: View {
+    let icon: String
+    let label: String
+    let snippet: String
+    let tint: Color
+    let onCancel: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.system(size: 13))
+                .foregroundColor(tint)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(label)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(tint)
+                Text(snippet)
+                    .font(.system(size: 12))
+                    .foregroundColor(.textSecondary)
+                    .lineLimit(1)
+            }
+            Spacer()
+            Button(action: onCancel) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 12))
+                    .foregroundColor(.textSecondary)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.surfaceWhite)
     }
 }
 

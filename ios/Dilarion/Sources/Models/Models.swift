@@ -18,13 +18,30 @@ struct LoginResponse: Codable {
     }
 }
 
+// MARK: - Chat collaboration: reactions, edit, delete, pin, star, reply, forward, mentions
+// Mirrors desktop (services/api.ts) and backend aa528fd — content stays E2EE end to
+// end, mentions/reply/forward are cleartext metadata only, never message content.
+struct MessageReaction: Codable, Identifiable {
+    let emoji: String
+    let count: Int
+    let reactedByMe: Bool
+
+    var id: String { emoji }
+
+    enum CodingKeys: String, CodingKey {
+        case emoji
+        case count
+        case reactedByMe = "reacted_by_me"
+    }
+}
+
 // MARK: - Messages
 struct Message: Codable, Identifiable {
     let id: Int
     let sender: String?
     let recipient: String?
     let groupId: Int?
-    let content: String?
+    var content: String?
     let encryptedContent: String?
     let decoyContent: String?
     let encryptedKey: String?
@@ -34,6 +51,13 @@ struct Message: Codable, Identifiable {
     let timestamp: String?
     var read: Bool
     let isPrivateTagged: Bool?
+    var reactions: [MessageReaction]? = nil
+    var replyToMessageId: Int? = nil
+    var forwardedFromMessageId: Int? = nil
+    var isEdited: Bool? = nil
+    var isDeleted: Bool? = nil
+    var isPinned: Bool? = nil
+    var mentions: [String]? = nil
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -50,7 +74,79 @@ struct Message: Codable, Identifiable {
         case timestamp
         case read
         case isPrivateTagged = "is_private_tagged"
+        case reactions
+        case replyToMessageId = "reply_to_message_id"
+        case forwardedFromMessageId = "forwarded_from_message_id"
+        case isEdited = "is_edited"
+        case isDeleted = "is_deleted"
+        case isPinned = "is_pinned"
+        case mentions
     }
+}
+
+// GET /messages/pinned?username=|group_id= returns a flat slim projection,
+// not a full Message row (no `read`, no `recipient`) — see backend
+// list_pinned_messages. Same ciphertext/key/iv shape so it decrypts the same way.
+struct PinnedMessage: Codable, Identifiable {
+    let id: Int
+    let sender: String?
+    let content: String?
+    let decoyContent: String?
+    let contentType: String?
+    let encryptedKey: String?
+    let iv: String?
+    let timestamp: String?
+    let pinnedBy: String?
+    let pinnedAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, sender, content
+        case decoyContent = "decoy_content"
+        case contentType = "content_type"
+        case encryptedKey = "encrypted_key"
+        case iv, timestamp
+        case pinnedBy = "pinned_by"
+        case pinnedAt = "pinned_at"
+    }
+}
+
+struct PinnedMessagesResponse: Codable {
+    let messages: [PinnedMessage]
+    let count: Int?
+}
+
+// GET /messages/starred — same slim shape, spans every conversation; see
+// backend list_starred_messages.
+struct StarredMessageItem: Codable, Identifiable {
+    let id: Int
+    let sender: String?
+    let content: String?
+    let decoyContent: String?
+    let contentType: String?
+    let encryptedKey: String?
+    let iv: String?
+    let timestamp: String?
+    let groupId: Int?
+    let groupName: String?
+    let recipient: String?
+    let starredAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, sender, content
+        case decoyContent = "decoy_content"
+        case contentType = "content_type"
+        case encryptedKey = "encrypted_key"
+        case iv, timestamp
+        case groupId = "group_id"
+        case groupName = "group_name"
+        case recipient
+        case starredAt = "starred_at"
+    }
+}
+
+struct StarredMessagesResponse: Codable {
+    let messages: [StarredMessageItem]
+    let count: Int?
 }
 
 // Wrapper — GET /messages/inbox returns { messages: [...], count: N }
@@ -72,6 +168,9 @@ struct SendDmRequest: Codable {
     let encryptedKey: String?
     let iv: String?
     let decoyContent: String?
+    var replyToMessageId: Int? = nil
+    var forwardedFromMessageId: Int? = nil
+    var mentions: [String]? = nil
 
     enum CodingKeys: String, CodingKey {
         case username
@@ -79,6 +178,9 @@ struct SendDmRequest: Codable {
         case encryptedKey = "encrypted_key"
         case iv
         case decoyContent = "decoy_content"
+        case replyToMessageId = "reply_to_message_id"
+        case forwardedFromMessageId = "forwarded_from_message_id"
+        case mentions
     }
 }
 
@@ -90,6 +192,9 @@ struct SendGroupMessageRequest: Codable {
     let encryptedKey: String?
     let iv: String?
     let decoyContent: String?
+    var replyToMessageId: Int? = nil
+    var forwardedFromMessageId: Int? = nil
+    var mentions: [String]? = nil
 
     enum CodingKeys: String, CodingKey {
         case groupId = "group_id"
@@ -98,6 +203,9 @@ struct SendGroupMessageRequest: Codable {
         case encryptedKey = "encrypted_key"
         case iv
         case decoyContent = "decoy_content"
+        case replyToMessageId = "reply_to_message_id"
+        case forwardedFromMessageId = "forwarded_from_message_id"
+        case mentions
     }
 }
 

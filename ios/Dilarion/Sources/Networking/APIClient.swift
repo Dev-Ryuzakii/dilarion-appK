@@ -94,6 +94,19 @@ class APIClient {
         try validate(response, data)
     }
 
+    func putVoid<B: Encodable>(_ path: String, body: B) async throws {
+        let bodyData = try JSONEncoder().encode(body)
+        guard let req = makeRequest(path: path, method: "PUT", body: bodyData) else { throw APIError.invalidURL }
+        let (data, response) = try await URLSession.shared.data(for: req)
+        try validate(response, data)
+    }
+
+    func deleteVoid(_ path: String) async throws {
+        guard let req = makeRequest(path: path, method: "DELETE") else { throw APIError.invalidURL }
+        let (data, response) = try await URLSession.shared.data(for: req)
+        try validate(response, data)
+    }
+
     func postMultipart<T: Decodable>(
         _ path: String,
         parameters: [String: String],
