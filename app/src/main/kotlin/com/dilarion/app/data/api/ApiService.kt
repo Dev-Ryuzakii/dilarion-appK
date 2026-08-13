@@ -325,6 +325,13 @@ interface ApiService {
         @Path("id") meetingId: Int,
     ): Response<com.google.gson.JsonObject>
 
+    @GET("meetings/calendar")
+    suspend fun getMeetingCalendar(
+        @Header("Authorization") bearer: String,
+        @Query("start") start: String,
+        @Query("end") end: String,
+    ): Response<com.dilarion.app.data.model.CalendarResponse>
+
     // ─── Whiteboard ──────────────────────────────────────────────────────────
 
     @POST("whiteboard/stroke")

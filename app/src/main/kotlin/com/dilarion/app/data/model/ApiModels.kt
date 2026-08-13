@@ -337,6 +337,25 @@ data class MeetingJoinRequest(
     @SerializedName("join_code") val joinCode: String,
 )
 
+data class CalendarOccurrence(
+    @SerializedName("meeting_id") val meetingId: Int,
+    val title: String? = null,
+    @SerializedName("occurrence_start") val occurrenceStart: String,
+    @SerializedName("occurrence_end") val occurrenceEnd: String,
+    @SerializedName("duration_minutes") val durationMinutes: Int = 60,
+    val recurrence: String? = null,
+    val status: String,
+    @SerializedName("join_code") val joinCode: String,
+    @SerializedName("creator_username") val creatorUsername: String,
+    @SerializedName("group_id") val groupId: Int? = null,
+    @SerializedName("waiting_room_enabled") val waitingRoomEnabled: Boolean = false,
+)
+
+data class CalendarResponse(
+    val occurrences: List<CalendarOccurrence> = emptyList(),
+    val count: Int = 0,
+)
+
 // ─── Whiteboard ──────────────────────────────────────────────────────────────
 // Ephemeral for v1 — strokes relay live via the existing WS push pattern.
 // Exactly one of username/groupId/conferenceId identifies the target.

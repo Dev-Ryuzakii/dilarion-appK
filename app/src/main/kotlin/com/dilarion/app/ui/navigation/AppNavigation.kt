@@ -129,6 +129,9 @@ fun AppNavigation(pendingIncomingCall: IncomingCallData? = null) {
                 onMeetings = {
                     navController.navigate(Screen.Meetings.route)
                 },
+                onJoinMeeting = { joinCode, title ->
+                    navController.navigate(Screen.Lobby.route(mode = "join", joinCode = joinCode, title = title))
+                },
                 onSettings = {
                     navController.navigate(Screen.Settings.route)
                 },
