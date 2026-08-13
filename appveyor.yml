@@ -1,0 +1,28 @@
+image: Visual Studio 2022
+
+environment:
+  TAURI_SIGNING_PRIVATE_KEY: ''
+
+install:
+  - ps: Install-Product node 20 x64
+
+build_script:
+  - cmd: >-
+      curl -sSf -o rustup-init.exe https://win.rustup.rs/x86_64 &&
+      rustup-init.exe -y --default-toolchain stable &&
+      set PATH=%USERPROFILE%\.cargo\bin;%PATH% &&
+      cd desktop &&
+      npm install &&
+      npm run tauri build
+
+artifacts:
+  - path: desktop\src-tauri\target\release\bundle\msi\*.msi
+    name: msi
+  - path: desktop\src-tauri\target\release\bundle\nsis\*.exe
+    name: nsis-exe
+
+# Manual "New Build" from the AppVeyor dashboard also works — this just
+# controls automatic triggers on push.
+branches:
+  only:
+    - main
