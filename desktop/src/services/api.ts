@@ -772,6 +772,29 @@ export async function getUpcomingMeetings(token: string): Promise<MeetingSummary
   return body.meetings ?? [];
 }
 
+export interface CalendarOccurrence {
+  meeting_id: number;
+  title: string | null;
+  occurrence_start: string;
+  occurrence_end: string;
+  duration_minutes: number;
+  recurrence: string | null;
+  status: 'upcoming' | 'live' | 'ended' | 'cancelled';
+  join_code: string;
+  creator_username: string;
+  group_id: number | null;
+  waiting_room_enabled: boolean;
+}
+
+export async function getMeetingCalendar(token: string, start: string, end: string): Promise<CalendarOccurrence[]> {
+  const res = await fetch(`${BASE}/meetings/calendar?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error(`Failed to load calendar (${res.status})`);
+  const body = await res.json();
+  return body.occurrences ?? [];
+}
+
 export async function joinMeetingByCode(
   token: string,
   joinCode: string,

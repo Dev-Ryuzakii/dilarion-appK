@@ -24,6 +24,7 @@ import {
   joinMeetingByCode,
   cancelMeeting,
   MeetingSummary,
+  CalendarOccurrence,
 } from '../services/api';
 import { Keypair, loadKeypair, saveKeypair, clearKeypair, parseExportedKey } from '../services/keys';
 import ChatPanel from './ChatPanel';
@@ -33,6 +34,7 @@ import GalleryView from '../components/GalleryView';
 import MeetingLobby from '../components/MeetingLobby';
 import WaitingForHostScreen from '../components/WaitingForHostScreen';
 import { fmtRange } from '../components/MeetingCard';
+import CalendarView from '../components/CalendarView';
 import {
   PhoneIncomingIcon,
   PhoneOutgoingIcon,
@@ -47,7 +49,7 @@ interface Props {
   onLogout: () => void;
 }
 
-type Tab = 'chats' | 'groups' | 'meetings' | 'calls' | 'settings';
+type Tab = 'chats' | 'groups' | 'meetings' | 'calendar' | 'calls' | 'settings';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -136,6 +138,15 @@ function MeetingsTabIcon({ active }: { active: boolean }) {
   return (
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={active ? 'var(--accent)' : '#4b5563'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M23 7l-7 5 7 5V7z" /><rect x="1" y="5" width="15" height="14" rx="2" />
+    </svg>
+  );
+}
+
+function CalendarTabIcon({ active }: { active: boolean }) {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={active ? 'var(--accent)' : '#4b5563'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="4" width="18" height="18" rx="2" />
+      <line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" />
     </svg>
   );
 }
@@ -1476,6 +1487,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
       chats: 'Chats',
       groups: 'Groups',
       meetings: 'Meetings',
+      calendar: 'Calendar',
       calls: 'Calls',
       settings: 'Settings',
     };
@@ -1784,6 +1796,25 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
       );
     }
 
+    if (activeTab === 'calendar') {
+      return (
+        <CalendarView
+          token={token}
+          onJoinMeeting={(occ: CalendarOccurrence) => joinScheduledMeeting({
+            id: occ.meeting_id,
+            title: occ.title,
+            scheduled_at: occ.occurrence_start,
+            duration_minutes: occ.duration_minutes,
+            status: occ.status,
+            join_code: occ.join_code,
+            creator_username: occ.creator_username,
+            group_id: occ.group_id,
+            waiting_room_enabled: occ.waiting_room_enabled,
+          })}
+        />
+      );
+    }
+
     if (activeTab === 'calls') {
       const selectedCall = calls.find(c => c.id === selectedCallId) ?? null;
       return <CallDetailPanel call={selectedCall} />;
@@ -1833,6 +1864,13 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
           title="Meetings"
         >
           <MeetingsTabIcon active={activeTab === 'meetings'} />
+        </button>
+        <button
+          style={{ ...hs.tabBtn, ...(activeTab === 'calendar' ? hs.tabBtnActive : {}) }}
+          onClick={() => switchTab('calendar')}
+          title="Calendar"
+        >
+          <CalendarTabIcon active={activeTab === 'calendar'} />
         </button>
         <button
           style={{ ...hs.tabBtn, ...(activeTab === 'calls' ? hs.tabBtnActive : {}) }}
