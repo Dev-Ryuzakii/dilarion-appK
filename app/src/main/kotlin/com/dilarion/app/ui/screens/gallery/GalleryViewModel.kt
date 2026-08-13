@@ -161,7 +161,11 @@ class GalleryViewModel @Inject constructor(
                 )
                 val body = resp.body() ?: throw IllegalStateException("Failed to get video token")
 
-                val r = LiveKit.create(context, RoomOptions(), LiveKitOverrides())
+                // Both default to false in the SDK — unlike desktop (which passes
+                // {adaptiveStream:true, dynacast:true} explicitly), so without this
+                // Android never downgrades subscriptions on bad bandwidth and never
+                // pauses unwatched layers server-side.
+                val r = LiveKit.create(context, RoomOptions(adaptiveStream = true, dynacast = true), LiveKitOverrides())
                 room = r
 
                 viewModelScope.launch {
