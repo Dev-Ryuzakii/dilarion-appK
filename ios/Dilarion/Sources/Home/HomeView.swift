@@ -123,13 +123,13 @@ struct HomeView: View {
         .sheet(isPresented: $showNewMeeting) {
             NewMeetingSheet(onStart: { invitees in
                 showNewMeeting = false
-                CallViewModel.shared.startStandaloneConference(invitees: invitees)
+                MeetingViewModel.shared.presentLobby(.instant(invitees: invitees))
             })
         }
         .sheet(isPresented: $showMeetings) {
             MeetingsSheet(onJoin: { joinCode in
                 showMeetings = false
-                CallViewModel.shared.joinScheduledMeeting(joinCode: joinCode)
+                MeetingViewModel.shared.presentLobby(.join(joinCode: joinCode))
             })
         }
         .confirmationDialog("Log out", isPresented: $showLogoutDialog, titleVisibility: .visible) {
@@ -614,10 +614,9 @@ struct NewMeetingSheet: View {
     }
 }
 
-/// Upcoming-meetings list + a schedule form. Joining hooks into the SAME
-/// CallViewModel.shared instant meetings already use — see
-/// CallViewModel.joinScheduledMeeting, which mirrors startStandaloneConference
-/// exactly, just sourced from a join response instead of a fresh create.
+/// Upcoming-meetings list + a schedule form. Joining hands the join code to
+/// MeetingViewModel.presentLobby(.join(...)), the same LiveKit gallery flow
+/// instant meetings use — see MeetingViewModel.joinByCode.
 struct MeetingsSheet: View {
     let onJoin: (String) -> Void
     @Environment(\.dismiss) var dismiss
@@ -625,6 +624,7 @@ struct MeetingsSheet: View {
     @State private var loading = true
     @State private var errorText: String? = nil
     @State private var showForm = false
+    @State private var showCalendar = false
 
     var body: some View {
         NavigationStack {
@@ -688,6 +688,14 @@ struct MeetingsSheet: View {
                     }
                     .foregroundColor(.dilarionRed)
                 }
+                if !showForm {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button { showCalendar = true } label: {
+                            Image(systemName: "calendar")
+                        }
+                        .foregroundColor(.dilarionRed)
+                    }
+                }
             }
             .task {
                 loading = true
@@ -698,6 +706,9 @@ struct MeetingsSheet: View {
                 }
                 loading = false
             }
+        }
+        .sheet(isPresented: $showCalendar) {
+            MeetingCalendarView(onJoin: onJoin)
         }
     }
 }

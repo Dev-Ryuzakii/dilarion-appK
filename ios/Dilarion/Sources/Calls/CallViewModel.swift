@@ -29,22 +29,14 @@ struct CallUiState {
     var error: String? = nil
 }
 
-struct ConferenceUiState {
-    var conferenceId: Int? = nil
-    var participants: [String] = []
-    var isActive: Bool = false
-    var mutedParticipants: Set<String> = []
-}
-
 @MainActor
 class CallViewModel: ObservableObject {
     static let shared = CallViewModel()
-    
+
     @Published var uiState = CallUiState()
     @Published var localVideoTrack: RTCVideoTrack? = nil
     @Published var remoteVideoTrack: RTCVideoTrack? = nil
-    @Published var conferenceState = ConferenceUiState()
-    
+
     private var cancellables = Set<AnyCancellable>()
     private var timerSubscription: AnyCancellable? = nil
     private var pendingCandidates: [RTCIceCandidate] = []
@@ -129,84 +121,6 @@ class CallViewModel: ObservableObject {
         }
     }
     
-    /// Starts a fresh meeting with no prior 1:1 call — call_id is omitted, which
-    /// the backend already treats as "standalone conference". Mirrors the mic-
-    /// before-signaling ordering used elsewhere: media must be up before an
-    /// invitee accepts, or the peer connection they build has no inbound track
-    /// from us.
-    func startStandaloneConference(invitees: [String]) {
-        guard !invitees.isEmpty else { return }
-        uiState = CallUiState(state: .connected, peerUsername: invitees.first ?? "", callType: .voice)
-        conferenceState = ConferenceUiState(participants: invitees, isActive: false)
-        observeWsEvents()
-
-        Task {
-            do {
-                WebRTCManager.shared.initialize()
-                WebRTCManager.shared.startLocalStream(withVideo: false)
-
-                let confId = try await APIClient.shared.createConference(callId: nil)
-                await MainActor.run {
-                    self.conferenceState.conferenceId = confId
-                    self.conferenceState.isActive = true
-                }
-                self.startTimer()
-
-                for username in invitees {
-                    try? await APIClient.shared.conferenceInvite(conferenceId: confId, username: username)
-                }
-            } catch {
-                await MainActor.run {
-                    self.uiState.error = error.localizedDescription
-                    self.uiState.state = .ended
-                }
-            }
-        }
-    }
-
-    /// Joins a scheduled meeting by code. joinMeeting returns {conferenceId,
-    /// participants} in the exact shape createConference+invite does, so this
-    /// mirrors startStandaloneConference — the only difference is the
-    /// conference already exists (or gets created on our behalf as the first
-    /// joiner) instead of being created fresh here.
-    func joinScheduledMeeting(joinCode: String) {
-        uiState = CallUiState(state: .connected, peerUsername: "", callType: .voice)
-        conferenceState = ConferenceUiState(isActive: false)
-        observeWsEvents()
-
-        Task {
-            do {
-                WebRTCManager.shared.initialize()
-                WebRTCManager.shared.startLocalStream(withVideo: false)
-
-                let resp = try await APIClient.shared.joinMeeting(joinCode: joinCode)
-                await MainActor.run {
-                    self.uiState.peerUsername = resp.participants.first ?? ""
-                    self.conferenceState = ConferenceUiState(
-                        conferenceId: resp.conference_id,
-                        participants: resp.participants,
-                        isActive: true
-                    )
-                }
-                self.startTimer()
-            } catch {
-                await MainActor.run {
-                    self.uiState.error = error.localizedDescription
-                    self.uiState.state = .ended
-                }
-            }
-        }
-    }
-
-    private func sendConferenceIceCandidate(confId: Int, to: String, candidate: RTCIceCandidate) async {
-        let iceCand = WebRTCIceCandidate(
-            sdpMid: candidate.sdpMid ?? "",
-            sdpMLineIndex: Int(candidate.sdpMLineIndex),
-            candidate: candidate.sdp
-        )
-        try? await APIClient.shared.conferenceSignalIce(conferenceId: confId, to: to, candidate: iceCand)
-    }
-
     func setIncoming(incoming: IncomingCallData) {
         remoteDescSet = false
         pendingRemoteCandidates.removeAll()
@@ -338,15 +252,10 @@ class CallViewModel: ObservableObject {
                 case .callSignal(let json):
                     let type = json["type"] as? String ?? ""
 
-                    // Conference events key off conference_id, not call_id — must be
-                    // handled before the 1:1 callId guard below, which would otherwise
-                    // silently drop every one of them (they never carry a call_id).
-                    if type == "conference_invite" || type == "conference_peer_connect"
-                        || type == "conference_signal" || type == "conference_participant_left" {
-                        self.handleConferenceSignal(json, type: type)
-                        return
-                    }
-
+                    // Group-video conference events (conference_invite, waiting-room,
+                    // recording, in-meeting chat, etc.) are handled by MeetingViewModel's
+                    // own subscription — group video runs entirely through LiveKit now,
+                    // not this 1:1 mesh path. Only call_id-keyed 1:1 signaling continues here.
                     let callId = json["call_id"] as? Int ?? (json["data"] as? [String: Any])?["call_id"] as? Int
                     if callId != self.uiState.callId { return }
 
@@ -393,96 +302,6 @@ class CallViewModel: ObservableObject {
             }
             .store(in: &cancellables)
     }
-
-    /// Mirrors desktop CallModal.tsx's conference_peer_connect/conference_signal
-    /// handling. Ignores events for a conference that isn't the one we're in —
-    /// a stray invite/signal for something else should never touch our state.
-    private func handleConferenceSignal(_ json: [String: Any], type: String) {
-        switch type {
-        case "conference_invite":
-            // Only note it — joining happens after the invitee accepts elsewhere
-            // (master token gate). Connecting here would open the mic on a call
-            // nobody has agreed to yet.
-            break
-
-        case "conference_peer_connect":
-            guard let data = json["data"] as? [String: Any],
-                  let confId = data["conference_id"] as? Int,
-                  confId == conferenceState.conferenceId,
-                  let peer = data["peer_username"] as? String else { return }
-            let role = data["role"] as? String ?? "offer"
-
-            WebRTCManager.shared.createConferencePeer(
-                username: peer,
-                onIce: { [weak self] peerUser, candidate in
-                    guard let self = self else { return }
-                    Task { await self.sendConferenceIceCandidate(confId: confId, to: peerUser, candidate: candidate) }
-                },
-                onRemoteAudioTrack: { _ in }
-            )
-            if role == "offer" {
-                Task {
-                    if let offerSdp = try? await WebRTCManager.shared.createConferenceOffer(username: peer) {
-                        try? await APIClient.shared.conferenceSignalOffer(conferenceId: confId, to: peer, sdp: offerSdp)
-                    }
-                }
-            }
-
-        case "conference_signal":
-            guard let data = json["data"] as? [String: Any],
-                  let confId = data["conference_id"] as? Int,
-                  confId == conferenceState.conferenceId,
-                  let fromUser = data["from"] as? String,
-                  let signalType = data["signal_type"] as? String else { return }
-            let signalData = data["data"] as? [String: Any] ?? [:]
-
-            // Defensive: create the peer if conference_peer_connect hasn't arrived
-            // yet, matching desktop's `confPeersRef.get(from) || createConferencePeer(...)`.
-            WebRTCManager.shared.createConferencePeer(
-                username: fromUser,
-                onIce: { [weak self] peerUser, candidate in
-                    guard let self = self else { return }
-                    Task { await self.sendConferenceIceCandidate(confId: confId, to: peerUser, candidate: candidate) }
-                },
-                onRemoteAudioTrack: { _ in }
-            )
-
-            switch signalType {
-            case "offer":
-                guard let sdp = signalData["sdp"] as? String else { return }
-                Task {
-                    if let answerSdp = try? await WebRTCManager.shared.handleConferenceOffer(username: fromUser, sdp: sdp) {
-                        try? await APIClient.shared.conferenceSignalAnswer(conferenceId: confId, to: fromUser, sdp: answerSdp)
-                    }
-                }
-            case "answer":
-                guard let sdp = signalData["sdp"] as? String else { return }
-                Task { try? await WebRTCManager.shared.handleConferenceAnswer(username: fromUser, sdp: sdp) }
-            case "ice_candidate":
-                guard let sdpMid = signalData["sdpMid"] as? String,
-                      let sdpMLineIndex = signalData["sdpMLineIndex"] as? Int32,
-                      let candidateStr = signalData["candidate"] as? String else { return }
-                WebRTCManager.shared.addConferenceIceCandidate(
-                    username: fromUser, sdpMid: sdpMid, sdpMLineIndex: sdpMLineIndex, candidate: candidateStr
-                )
-            case "media_state":
-                let muted = signalData["muted"] as? Bool ?? false
-                if muted { conferenceState.mutedParticipants.insert(fromUser) }
-                else { conferenceState.mutedParticipants.remove(fromUser) }
-            default:
-                break
-            }
-
-        case "conference_participant_left":
-            guard let data = json["data"] as? [String: Any], let username = data["username"] as? String else { return }
-            WebRTCManager.shared.closeConferencePeer(username: username)
-            conferenceState.participants.removeAll { $0 == username }
-
-        default:
-            break
-        }
-    }
-
 
     private func sendIceCandidate(peerUsername: String, candidate: RTCIceCandidate) async {
         guard let callId = uiState.callId else {

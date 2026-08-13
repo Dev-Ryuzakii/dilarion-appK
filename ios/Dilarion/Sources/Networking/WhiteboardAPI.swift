@@ -18,26 +18,30 @@ struct WhiteboardStroke: Encodable {
 private struct WhiteboardStrokeRequest: Encodable {
     let username: String?
     let group_id: Int?
+    let conference_id: Int?
     let stroke: WhiteboardStroke
 }
 
 private struct WhiteboardClearRequest: Encodable {
     let username: String?
     let group_id: Int?
+    let conference_id: Int?
 }
 
 extension APIClient {
-    func sendWhiteboardStroke(username: String?, groupId: Int?, stroke: WhiteboardStroke) async throws {
+    /// Exactly one of username/groupId/conferenceId scopes the target — the third
+    /// (in-meeting) case matches desktop/Android's meeting-only whiteboard entry point.
+    func sendWhiteboardStroke(username: String?, groupId: Int?, conferenceId: Int? = nil, stroke: WhiteboardStroke) async throws {
         try await postVoid(
             "/whiteboard/stroke",
-            body: WhiteboardStrokeRequest(username: username, group_id: groupId, stroke: stroke)
+            body: WhiteboardStrokeRequest(username: username, group_id: groupId, conference_id: conferenceId, stroke: stroke)
         )
     }
 
-    func sendWhiteboardClear(username: String?, groupId: Int?) async throws {
+    func sendWhiteboardClear(username: String?, groupId: Int?, conferenceId: Int? = nil) async throws {
         try await postVoid(
             "/whiteboard/clear",
-            body: WhiteboardClearRequest(username: username, group_id: groupId)
+            body: WhiteboardClearRequest(username: username, group_id: groupId, conference_id: conferenceId)
         )
     }
 }

@@ -10,6 +10,10 @@ enum WSEvent {
     case newMedia
     case connected
     case disconnected
+    // Covers message_reaction_updated / message_edited / message_deleted /
+    // message_pinned / message_unpinned — all carry just enough to know which
+    // conversation to refresh; content itself never travels over these.
+    case messageUpdated(messageId: Int, groupId: Int?)
 }
 
 class WebSocketManager: ObservableObject {
@@ -98,13 +102,20 @@ class WebSocketManager: ObservableObject {
             NotificationManager.shared.notifyNewMedia(from: json["sender_username"] as? String)
             events.send(.newMedia)
         case "call_answer", "call_ice", "call_ended",
-             "conference_invite", "conference_peer_connect", "conference_signal", "conference_participant_left":
+             "conference_invite", "conference_peer_connect", "conference_signal", "conference_participant_left",
+             "conference_admitted", "conference_denied", "conference_join_request",
+             "conference_recording_started", "conference_recording_stopped", "new_conference_message":
             if type == "call_ended" {
                 NotificationManager.shared.cancelCallNotification()
             }
             events.send(.callSignal(json))
         case "whiteboard_stroke", "whiteboard_clear":
             events.send(.whiteboardEvent(json))
+        case "message_reaction_updated", "message_edited", "message_deleted", "message_pinned", "message_unpinned":
+            let payload = json["data"].flatMap { $0 as? [String: Any] } ?? json
+            if let messageId = payload["message_id"] as? Int {
+                events.send(.messageUpdated(messageId: messageId, groupId: payload["group_id"] as? Int))
+            }
         default:
             break
         }

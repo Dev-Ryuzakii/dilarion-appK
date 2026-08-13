@@ -43,6 +43,7 @@ private struct MeetingJoinRequest: Encodable {
 
 struct MeetingJoinResponse: Decodable {
     let conference_id: Int
+    let status: String
     let participants: [String]
 }
 

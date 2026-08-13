@@ -16,6 +16,8 @@ targets:
     dependencies:
       - package: WebRTC
         product: WebRTC
+      - package: LiveKit
+        product: LiveKit
     # Debug/Release point at production; Staging points at the test VPS
     # (testdilarion.eibstratoc.com) so testers can run a separate build
     # without touching what's already on production users' devices.
@@ -42,10 +44,15 @@ targets:
       TARGETED_DEVICE_FAMILY: 1
       GENERATE_INFOPLIST_FILE: false
       ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+      DEVELOPMENT_TEAM: 5297W9L44K
+      CODE_SIGN_STYLE: Automatic
 packages:
   WebRTC:
     url: https://github.com/stasel/WebRTC.git
     from: 125.0.0
+  LiveKit:
+    url: https://github.com/livekit/client-sdk-swift.git
+    from: 2.0.0
 schemes:
   Dilarion:
     build:

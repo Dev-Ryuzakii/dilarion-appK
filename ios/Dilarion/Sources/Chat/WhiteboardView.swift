@@ -28,6 +28,7 @@ private func colorFromHex(_ hex: String) -> Color {
 struct WhiteboardView: View {
     let username: String?
     let groupId: Int?
+    var conferenceId: Int? = nil
 
     @Environment(\.dismiss) private var dismiss
     @State private var segments: [UiSegment] = []
@@ -73,7 +74,7 @@ struct WhiteboardView: View {
                                 segments.append(UiSegment(x0: nx0, y0: ny0, x1: nx1, y1: ny1, color: colorFromHex(selectedHex), width: 4))
                                 Task {
                                     try? await APIClient.shared.sendWhiteboardStroke(
-                                        username: username, groupId: groupId,
+                                        username: username, groupId: groupId, conferenceId: conferenceId,
                                         stroke: WhiteboardStroke(x0: nx0, y0: ny0, x1: nx1, y1: ny1, color: selectedHex, width: 4)
                                     )
                                 }
@@ -92,7 +93,7 @@ struct WhiteboardView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Clear") {
                         segments = []
-                        Task { try? await APIClient.shared.sendWhiteboardClear(username: username, groupId: groupId) }
+                        Task { try? await APIClient.shared.sendWhiteboardClear(username: username, groupId: groupId, conferenceId: conferenceId) }
                     }
                 }
             }
@@ -108,7 +109,15 @@ struct WhiteboardView: View {
                 let type = json["type"] as? String
                 let data = json["data"] as? [String: Any]
                 let msgGroupId = data?["group_id"] as? Int
-                let matches = groupId != nil ? msgGroupId == groupId : msgGroupId == nil
+                let msgConferenceId = data?["conference_id"] as? Int
+                let matches: Bool
+                if let conferenceId {
+                    matches = msgConferenceId == conferenceId
+                } else if let groupId {
+                    matches = msgGroupId == groupId
+                } else {
+                    matches = msgGroupId == nil && msgConferenceId == nil
+                }
                 guard matches else { return }
                 switch type {
                 case "whiteboard_stroke":

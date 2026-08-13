@@ -23,6 +23,7 @@ struct RootView: View {
     @EnvironmentObject var appState: AppState
     @StateObject private var splashVM = SplashViewModel()
     @ObservedObject private var callVM = CallViewModel.shared
+    @ObservedObject private var meetingVM = MeetingViewModel.shared
 
     var body: some View {
         SwiftUI.Group {
@@ -44,6 +45,12 @@ struct RootView: View {
             CallScreen(vm: callVM, masterToken: masterToken) {
                 callVM.resetToIdle()
             }
+        }
+        .fullScreenCover(isPresented: Binding(
+            get: { meetingVM.phase != .idle },
+            set: { if !$0 { meetingVM.reset() } }
+        )) {
+            MeetingRootView()
         }
     }
 }
