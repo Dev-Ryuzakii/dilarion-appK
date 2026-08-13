@@ -28,6 +28,7 @@ import { presenceService, WsMessage } from '../services/presence';
 import { LockIcon, PaperclipIcon as PaperclipIconSvg } from '../components/Icons';
 import MediaBubble, { DocumentBubble } from '../components/MediaBubble';
 import MeetingCard, { JoinMeetingHandler } from '../components/MeetingCard';
+import { MessageMenuTrigger, MessageReactionPills } from '../components/MessageMenu';
 
 interface Props {
   token: string;
@@ -153,9 +154,10 @@ interface EncryptedBubbleProps {
   masterToken: string | null;
   onDecrypt: (masterToken: string, messageId: number) => Promise<string>;
   onMasterTokenSaved: (t: string) => void;
+  onRevealed?: (text: string) => void;
 }
 
-function EncryptedBubble({ token, messageId, decoyContent, masterToken, onDecrypt, onMasterTokenSaved }: EncryptedBubbleProps) {
+function EncryptedBubble({ token, messageId, decoyContent, masterToken, onDecrypt, onMasterTokenSaved, onRevealed }: EncryptedBubbleProps) {
   const [decryptedContent, setDecryptedContent] = useState<string | null>(null);
   const [showing, setShowing] = useState(false);
   const [inputVisible, setInputVisible] = useState(false);
@@ -190,6 +192,7 @@ function EncryptedBubble({ token, messageId, decoyContent, masterToken, onDecryp
       const content = await onDecrypt(mToken, messageId);
       onMasterTokenSaved(mToken);
       setDecryptedContent(content);
+      onRevealed?.(content);
       setShowing(true);
       setInputVisible(false);
       setInputValue('');
@@ -280,68 +283,6 @@ function PrivateTagBubble({ recipient }: { recipient: string }) {
 
 // ── Message bubble ─────────────────────────────────────────────────────────────
 
-const REACTION_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
-
-function ReactionPills({ reactions, onToggle }: { reactions: ChatMessage['reactions']; onToggle: (emoji: string) => void }) {
-  if (!reactions || reactions.length === 0) return null;
-  return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
-      {reactions.map(r => (
-        <button
-          key={r.emoji}
-          onClick={() => onToggle(r.emoji)}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 3, fontSize: '0.72rem',
-            background: r.reacted_by_me ? 'var(--accent)' : 'var(--bg-card)',
-            border: '1px solid var(--border-color)', borderRadius: 12,
-            padding: '1px 7px', cursor: 'pointer', color: r.reacted_by_me ? '#fff' : 'var(--text-secondary)',
-          }}
-        >
-          <span>{r.emoji}</span><span>{r.count}</span>
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function HoverActions({
-  isMine, onReact, onReply, onForward, onPinToggle, onStarToggle, onEdit, onDelete, isPinned, isStarred,
-}: {
-  isMine: boolean;
-  onReact: (emoji: string) => void;
-  onReply: () => void;
-  onForward: () => void;
-  onPinToggle: () => void;
-  onStarToggle: () => void;
-  onEdit?: () => void;
-  onDelete?: () => void;
-  isPinned: boolean;
-  isStarred: boolean;
-}) {
-  const [showPicker, setShowPicker] = useState(false);
-  const btn: React.CSSProperties = {
-    background: 'transparent', border: 'none', cursor: 'pointer', padding: 3,
-    color: 'var(--text-muted)', fontSize: '0.85rem', borderRadius: 4,
-  };
-  return (
-    <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 1, background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 8, padding: 2 }}>
-      <button style={btn} title="React" onClick={() => setShowPicker(v => !v)}>😀</button>
-      {showPicker && (
-        <div style={{ position: 'absolute', bottom: '100%', marginBottom: 4, left: 0, background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 10, padding: 6, display: 'flex', gap: 4, zIndex: 20, boxShadow: '0 4px 16px rgba(0,0,0,0.3)' }}>
-          {REACTION_EMOJIS.map(e => (
-            <button key={e} style={{ ...btn, fontSize: '1.1rem' }} onClick={() => { onReact(e); setShowPicker(false); }}>{e}</button>
-          ))}
-        </div>
-      )}
-      <button style={btn} title="Reply" onClick={onReply}>↩</button>
-      <button style={btn} title="Forward" onClick={onForward}>➡</button>
-      <button style={{ ...btn, color: isPinned ? 'var(--accent)' : 'var(--text-muted)' }} title={isPinned ? 'Unpin' : 'Pin'} onClick={onPinToggle}>📌</button>
-      <button style={{ ...btn, color: isStarred ? '#f59e0b' : 'var(--text-muted)' }} title={isStarred ? 'Unstar' : 'Star'} onClick={onStarToggle}>{isStarred ? '⭐' : '☆'}</button>
-      {isMine && onEdit && <button style={btn} title="Edit" onClick={onEdit}>✏️</button>}
-      {isMine && onDelete && <button style={{ ...btn, color: '#ef4444' }} title="Delete" onClick={onDelete}>🗑</button>}
-    </div>
-  );
-}
 
 interface GroupMsgBubbleProps {
   msg: ChatMessage;
@@ -373,6 +314,20 @@ function GroupMsgBubble({
   const hasRecipient = msg.recipient && msg.recipient !== 'group';
   const isForMe = hasRecipient && msg.recipient === myUsername;
   const [hovered, setHovered] = useState(false);
+  const [revealedText, setRevealedText] = useState<string | null>(null);
+  const [showInfo, setShowInfo] = useState(false);
+  const [copyHint, setCopyHint] = useState<string | null>(null);
+
+  function handleCopy() {
+    const text = revealedText ?? (isEncrypted(ct) ? null : msg.content);
+    if (!text) {
+      setCopyHint('Unlock the message first');
+    } else {
+      navigator.clipboard.writeText(text).catch(() => {});
+      setCopyHint('Copied');
+    }
+    setTimeout(() => setCopyHint(null), 1500);
+  }
 
   if (msg.is_deleted) {
     return (
@@ -398,6 +353,7 @@ function GroupMsgBubble({
         masterToken={masterToken}
         onDecrypt={onDecrypt}
         onMasterTokenSaved={onMasterTokenSaved}
+        onRevealed={setRevealedText}
       />
     );
   } else if (isDocument(ct)) {
@@ -436,12 +392,14 @@ function GroupMsgBubble({
       }}
     >
       {hovered && (
-        <div style={{ position: 'absolute', top: -34, [isMine ? 'right' : 'left']: 0, zIndex: 15 } as React.CSSProperties}>
-          <HoverActions
+        <div style={{ position: 'absolute', top: -10, [isMine ? 'right' : 'left']: -10, zIndex: 15 } as React.CSSProperties}>
+          <MessageMenuTrigger
             isMine={isMine}
             onReact={onReact}
             onReply={onReply}
             onForward={onForward}
+            onCopy={handleCopy}
+            onInfo={() => setShowInfo(v => !v)}
             onPinToggle={onPinToggle}
             onStarToggle={onStarToggle}
             onEdit={isMine ? onEdit : undefined}
@@ -449,6 +407,24 @@ function GroupMsgBubble({
             isPinned={!!msg.is_pinned}
             isStarred={isStarred}
           />
+        </div>
+      )}
+
+      {copyHint && (
+        <div style={{ position: 'absolute', top: -30, [isMine ? 'right' : 'left']: 0, zIndex: 16, background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 6, padding: '2px 8px', fontSize: '0.7rem', color: 'var(--text-secondary)' } as React.CSSProperties}>
+          {copyHint}
+        </div>
+      )}
+
+      {showInfo && (
+        <div style={{
+          position: 'absolute', top: '100%', marginTop: 4, [isMine ? 'right' : 'left']: 0, zIndex: 20,
+          background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 8,
+          padding: 10, fontSize: '0.72rem', color: 'var(--text-secondary)', minWidth: 160, boxShadow: '0 6px 18px rgba(0,0,0,0.35)',
+        } as React.CSSProperties}>
+          <div>Sent: {new Date(msg.timestamp).toLocaleString()}</div>
+          {msg.is_edited && <div>Edited</div>}
+          <button onClick={() => setShowInfo(false)} style={{ marginTop: 6, background: 'transparent', border: 'none', color: 'var(--accent)', cursor: 'pointer', fontSize: '0.7rem', padding: 0 }}>Close</button>
         </div>
       )}
 
@@ -494,7 +470,7 @@ function GroupMsgBubble({
         {body}
       </div>
 
-      <ReactionPills reactions={msg.reactions} onToggle={onReact} />
+      <MessageReactionPills reactions={msg.reactions} onToggle={onReact} />
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 3, marginTop: 3 }}>
         {msg.is_pinned && <span title="Pinned" style={{ fontSize: '0.7rem' }}>📌</span>}
