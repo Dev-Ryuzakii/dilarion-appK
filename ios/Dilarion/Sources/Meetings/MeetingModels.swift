@@ -61,6 +61,25 @@ private struct RecordingStatusResponse: Decodable {
     let status: String
 }
 
+// Meeting invite/status shown inline in a chat/group thread — content_type is
+// "meeting", not "encrypted" (a system notice, same non-E2E precedent as
+// group admin announcements), so it renders unlocked and always visible with
+// an immediate Join action. Mirrors desktop (MeetingCard.tsx) and Android.
+struct MeetingCardPayload: Decodable {
+    let kind: String // "instant" | "scheduled"
+    let conference_id: Int?
+    let meeting_id: Int?
+    let join_code: String?
+    let title: String?
+    let scheduled_at: String?
+    let duration_minutes: Int?
+
+    static func parse(_ content: String?) -> MeetingCardPayload? {
+        guard let content, let data = content.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode(MeetingCardPayload.self, from: data)
+    }
+}
+
 extension APIClient {
     func getLiveKitToken(conferenceId: Int, displayName: String?) async throws -> LiveKitTokenResponse {
         var path = "/calls/conference/\(conferenceId)/livekit-token"

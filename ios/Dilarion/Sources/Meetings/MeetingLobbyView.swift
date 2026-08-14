@@ -14,6 +14,18 @@ struct MeetingLobbyView: View {
     @State private var camOn = false
     @State private var displayName = KeychainHelper.shared.read(key: "username") ?? ""
     @State private var previewTrack: LocalVideoTrack? = nil
+    @State private var masterTokenInput = ""
+    @State private var acceptError: String? = nil
+    @State private var accepting = false
+
+    private var invitedBy: String? {
+        if case .acceptInvite(_, let by) = kind, !by.isEmpty { return by }
+        return nil
+    }
+    private var isAcceptInvite: Bool {
+        if case .acceptInvite = kind { return true }
+        return false
+    }
 
     var body: some View {
         ZStack {
@@ -41,6 +53,26 @@ struct MeetingLobbyView: View {
                 }
                 .frame(height: 280)
                 .padding(.horizontal, 24)
+
+                if case .acceptInvite = kind {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(invitedBy.map { "\($0) invited you to a meeting" } ?? "You were invited to a meeting")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(.white.opacity(0.8))
+                        SecureField("Master token", text: $masterTokenInput)
+                            .textFieldStyle(.plain)
+                            .foregroundColor(.white)
+                            .padding(14)
+                            .background(Color.white.opacity(0.08))
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                        if let acceptError {
+                            Text(acceptError)
+                                .font(.system(size: 12))
+                                .foregroundColor(.dilarionRed)
+                        }
+                    }
+                    .padding(.horizontal, 24)
+                }
 
                 TextField("Display name", text: $displayName)
                     .textFieldStyle(.plain)
@@ -85,7 +117,7 @@ struct MeetingLobbyView: View {
                 Button {
                     joinTapped()
                 } label: {
-                    if vm.phase == .connecting {
+                    if vm.phase == .connecting || accepting {
                         ProgressView().tint(.white)
                             .frame(maxWidth: .infinity)
                             .frame(height: 52)
@@ -99,7 +131,7 @@ struct MeetingLobbyView: View {
                 }
                 .background(Color.dilarionRed)
                 .clipShape(RoundedRectangle(cornerRadius: 14))
-                .disabled(vm.phase == .connecting)
+                .disabled(vm.phase == .connecting || accepting || (isAcceptInvite && masterTokenInput.isEmpty))
                 .padding(.horizontal, 24)
 
                 Button("Cancel") { teardownPreview(); onCancel() }
@@ -112,14 +144,25 @@ struct MeetingLobbyView: View {
     }
 
     private func joinTapped() {
-        // Stop the lobby's own preview capture before handing off to the Room's
-        // publish path — both would otherwise briefly hold the camera at once.
-        teardownPreview()
         switch kind {
         case .instant(let invitees):
+            teardownPreview()
             vm.startInstantMeeting(invitees: invitees, displayName: displayName, initialMicOn: micOn, initialCamOn: camOn)
         case .join(let joinCode):
+            teardownPreview()
             vm.joinByCode(joinCode, displayName: displayName, initialMicOn: micOn, initialCamOn: camOn)
+        case .acceptInvite(let conferenceId, _):
+            acceptError = nil
+            accepting = true
+            Task {
+                let ok = await vm.acceptInvite(conferenceId: conferenceId, masterToken: masterTokenInput, displayName: displayName, initialMicOn: micOn, initialCamOn: camOn)
+                accepting = false
+                if ok {
+                    teardownPreview()
+                } else {
+                    acceptError = "Incorrect master token"
+                }
+            }
         }
     }
 

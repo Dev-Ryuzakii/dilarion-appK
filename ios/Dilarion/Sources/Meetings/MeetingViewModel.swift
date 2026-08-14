@@ -34,6 +34,21 @@ struct FloatingReaction: Identifiable {
 enum MeetingLobbyKind: Equatable {
     case instant(invitees: [String])
     case join(joinCode: String)
+    // Someone added us to an in-progress instant meeting (a meeting card's
+    // "Join" in chat, kind: instant, no join_code — just a conference_id).
+    // Needs the master-token accept gate before anything connects: opening a
+    // mic just because someone invited us isn't okay without that proof.
+    case acceptInvite(conferenceId: Int, invitedBy: String)
+}
+
+// Pure client-side bookkeeping — "rejoin" needs no backend concept, just
+// remembering the last meeting we successfully entered so its entry point
+// (join code or conference id) can be replayed. Persisted so it survives the
+// app being backgrounded/relaunched while the meeting is still going.
+struct RejoinableMeeting: Codable, Equatable {
+    let title: String
+    let joinCode: String?
+    let conferenceId: Int?
 }
 
 enum MeetingPhase: Equatable {
@@ -61,18 +76,57 @@ final class MeetingViewModel: NSObject, ObservableObject {
     @Published var recordingError: String? = nil
     @Published var floatingReactions: [FloatingReaction] = []
     @Published var unreadChatCount = 0
+    @Published var rejoinable: RejoinableMeeting? = nil
+    // Surfaces the whiteboard to the whole room the moment one participant
+    // opens it — like a screen share appearing for everyone, not something
+    // each person has to separately tap in to discover.
+    @Published var isWhiteboardActive = false
+    @Published var whiteboardOpenedBy: String? = nil
+    @Published var isMinimized = false
 
     static let reactionEmojis = ["👍", "❤️", "😂", "👏", "🎉", "😮"]
+    private static let rejoinDefaultsKey = "dilarion.lastMeeting"
 
     private(set) var conferenceId: Int? = nil
     private var pendingDisplayName: String? = nil
+    private var pendingTitle: String? = nil
+    private var pendingJoinCode: String? = nil
     private var room: Room? = nil
     private var cancellables = Set<AnyCancellable>()
     private var myUsername: String { KeychainHelper.shared.read(key: "username") ?? "" }
 
     private override init() {
         super.init()
+        if let data = UserDefaults.standard.data(forKey: Self.rejoinDefaultsKey) {
+            rejoinable = try? JSONDecoder().decode(RejoinableMeeting.self, from: data)
+        }
         subscribeToWS()
+    }
+
+    private func saveRejoinable(title: String, joinCode: String?, conferenceId: Int?) {
+        let entry = RejoinableMeeting(title: title, joinCode: joinCode, conferenceId: conferenceId)
+        rejoinable = entry
+        if let data = try? JSONEncoder().encode(entry) {
+            UserDefaults.standard.set(data, forKey: Self.rejoinDefaultsKey)
+        }
+    }
+
+    func clearRejoinable() {
+        rejoinable = nil
+        UserDefaults.standard.removeObject(forKey: Self.rejoinDefaultsKey)
+    }
+
+    /// From the Meetings landing page's "Rejoin" card — replays whichever
+    /// entry point the meeting actually has. If the meeting's genuinely over
+    /// by now this just fails gracefully into .ended, same as any other join.
+    func rejoin() {
+        guard let saved = rejoinable else { return }
+        if let joinCode = saved.joinCode {
+            joinByCode(joinCode, displayName: nil, initialMicOn: isMicOn, initialCamOn: isCamOn)
+        } else if let confId = saved.conferenceId {
+            phase = .connecting
+            Task { await enterGallery(conferenceId: confId, displayName: nil) }
+        }
     }
 
     // MARK: - Entry points
@@ -86,6 +140,8 @@ final class MeetingViewModel: NSObject, ObservableObject {
     func startInstantMeeting(invitees: [String], displayName: String? = nil, initialMicOn: Bool = true, initialCamOn: Bool = false) {
         isMicOn = initialMicOn
         isCamOn = initialCamOn
+        pendingTitle = "Instant meeting"
+        pendingJoinCode = nil
         phase = .connecting
         Task {
             do {
@@ -101,9 +157,11 @@ final class MeetingViewModel: NSObject, ObservableObject {
     }
 
     /// Scheduled meeting via join code — branches on the returned status.
-    func joinByCode(_ joinCode: String, displayName: String? = nil, initialMicOn: Bool = true, initialCamOn: Bool = false) {
+    func joinByCode(_ joinCode: String, title: String? = nil, displayName: String? = nil, initialMicOn: Bool = true, initialCamOn: Bool = false) {
         isMicOn = initialMicOn
         isCamOn = initialCamOn
+        pendingTitle = title ?? "Scheduled meeting"
+        pendingJoinCode = joinCode
         phase = .connecting
         self.pendingDisplayName = displayName
         Task {
@@ -119,6 +177,27 @@ final class MeetingViewModel: NSObject, ObservableObject {
                 phase = .ended(error.localizedDescription)
             }
         }
+    }
+
+    /// Someone invited us to an in-progress instant meeting (a meeting card's
+    /// Join, kind: instant). Requires the master token — proves the owner is
+    /// accepting, mirrors how answering a 1:1 call works. No join code exists
+    /// for this path, so rejoin later replays the conference id directly.
+    func acceptInvite(conferenceId: Int, masterToken: String, displayName: String? = nil, initialMicOn: Bool = true, initialCamOn: Bool = false) async -> Bool {
+        do {
+            _ = try await APIClient.shared.conferenceAccept(conferenceId: conferenceId, masterToken: masterToken)
+        } catch {
+            // Stay on the same lobby screen — the caller shows the error inline
+            // and lets the user retry the token, same as a wrong 1:1 call answer.
+            return false
+        }
+        isMicOn = initialMicOn
+        isCamOn = initialCamOn
+        pendingTitle = "Instant meeting"
+        pendingJoinCode = nil
+        phase = .connecting
+        await enterGallery(conferenceId: conferenceId, displayName: displayName)
+        return true
     }
 
     // MARK: - Room connect
@@ -156,6 +235,7 @@ final class MeetingViewModel: NSObject, ObservableObject {
             for p in r.remoteParticipants.values {
                 upsertTile(from: p, isLocal: false)
             }
+            saveRejoinable(title: pendingTitle ?? "Meeting", joinCode: pendingJoinCode, conferenceId: conferenceId)
             phase = .active
         } catch {
             phase = .ended(error.localizedDescription)
@@ -196,6 +276,20 @@ final class MeetingViewModel: NSObject, ObservableObject {
         isRecording = false
         floatingReactions = []
         unreadChatCount = 0
+        isWhiteboardActive = false
+        whiteboardOpenedBy = nil
+        isMinimized = false
+    }
+
+    /// Toolbar "Whiteboard" tap — announces to the room (mirrors setting
+    /// isScreenSharing when publishing a screen-share track) and marks it
+    /// active locally too, since the sender is excluded from their own
+    /// broadcast (_whiteboard_targets never includes sender_id).
+    func openWhiteboard() {
+        isWhiteboardActive = true
+        whiteboardOpenedBy = myUsername
+        guard let confId = conferenceId else { return }
+        Task { try? await APIClient.shared.openWhiteboard(conferenceId: confId) }
     }
 
     // MARK: - Local media controls
@@ -332,7 +426,18 @@ final class MeetingViewModel: NSObject, ObservableObject {
         WebSocketManager.shared.events
             .receive(on: DispatchQueue.main)
             .sink { [weak self] event in
-                guard let self, case .callSignal(let json) = event else { return }
+                guard let self else { return }
+
+                if case .whiteboardEvent(let json) = event {
+                    guard json["type"] as? String == "whiteboard_opened" else { return }
+                    let data = json["data"] as? [String: Any] ?? json
+                    guard let confId = self.conferenceId, (data["conference_id"] as? Int) == confId else { return }
+                    self.isWhiteboardActive = true
+                    self.whiteboardOpenedBy = data["from"] as? String
+                    return
+                }
+
+                guard case .callSignal(let json) = event else { return }
                 let type = json["type"] as? String ?? ""
                 let data = json["data"] as? [String: Any] ?? json
                 guard let confId = self.conferenceId, (data["conference_id"] as? Int) == confId else { return }

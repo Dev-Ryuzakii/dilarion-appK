@@ -36,6 +36,9 @@ struct MeetingGalleryView: View {
 
             VStack(spacing: 0) {
                 topBar
+                if vm.isWhiteboardActive && !showWhiteboard {
+                    whiteboardBanner
+                }
                 galleryBody
                 bottomBar
             }
@@ -97,8 +100,16 @@ struct MeetingGalleryView: View {
                 }
                 .disabled(vm.recordingBusy)
             }
-            Button { showWhiteboard = true } label: {
-                Image(systemName: "scribble").foregroundColor(.white)
+            Button { vm.openWhiteboard(); showWhiteboard = true } label: {
+                ZStack(alignment: .topTrailing) {
+                    Image(systemName: "scribble").foregroundColor(.white)
+                    if vm.isWhiteboardActive {
+                        Circle().fill(Color.green).frame(width: 7, height: 7).offset(x: 5, y: -3)
+                    }
+                }
+            }
+            Button { onMinimize() } label: {
+                Image(systemName: "chevron.down").foregroundColor(.white)
             }
             Button { showChat = true } label: {
                 ZStack(alignment: .topTrailing) {
@@ -130,6 +141,31 @@ struct MeetingGalleryView: View {
         } message: {
             Text(vm.recordingError ?? "")
         }
+    }
+
+    // Surfaces automatically for the whole room the moment anyone opens the
+    // whiteboard — same spirit as a screen share just appearing, not
+    // something each person has to separately go looking for.
+    private var whiteboardBanner: some View {
+        Button { showWhiteboard = true } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "scribble").font(.system(size: 12))
+                Text(vm.whiteboardOpenedBy.map { "\($0) opened the whiteboard" } ?? "Whiteboard is active")
+                    .font(.system(size: 12, weight: .medium))
+                Spacer()
+                Text("View").font(.system(size: 12, weight: .semibold))
+                Image(systemName: "chevron.right").font(.system(size: 10))
+            }
+            .foregroundColor(.white)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .background(Color.green.opacity(0.25))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func onMinimize() {
+        vm.isMinimized = true
     }
 
     // MARK: - Gallery body

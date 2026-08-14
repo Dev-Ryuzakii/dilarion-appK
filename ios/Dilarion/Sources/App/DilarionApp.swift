@@ -46,10 +46,12 @@ struct RootView: View {
                 callVM.resetToIdle()
             }
         }
-        .fullScreenCover(isPresented: Binding(
-            get: { meetingVM.phase != .idle },
-            set: { if !$0 { meetingVM.reset() } }
-        )) {
+        // Not a fullScreenCover: minimizing needs the rest of the app to stay
+        // interactive underneath (Google Meet-style floating bubble) while the
+        // LiveKit room stays connected in the background. MeetingRootView
+        // renders EmptyView() while idle, so there's nothing here to block
+        // touches the rest of the time.
+        .overlay(alignment: meetingVM.isMinimized ? .bottomTrailing : .topLeading) {
             MeetingRootView()
         }
     }

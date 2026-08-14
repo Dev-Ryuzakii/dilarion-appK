@@ -6,6 +6,11 @@ import Combine
 // /messages/conference/send), not a simplified scheme. Mirrors desktop
 // (MeetingChatPanel.tsx) and Android (MeetingChatViewModel.kt). The WS event
 // `new_conference_message` carries no content — it's just a "go refetch" nudge.
+//
+// Same tap-to-reveal model as regular DM/group chat: having a master token
+// saved does NOT auto-decrypt everything. Each bubble stays a decoy until
+// tapped; the token is asked for once per session, then each further tap
+// reveals just that message for 30s before it re-locks.
 struct MeetingChatPanel: View {
     let conferenceId: Int
 
@@ -13,7 +18,11 @@ struct MeetingChatPanel: View {
     @State private var messages: [ConferenceChatMessage] = []
     @State private var decrypted: [Int: String] = [:]
     @State private var inputText = ""
-    @State private var isUnlocked = !(KeychainHelper.shared.read(key: "master_token") ?? "").isEmpty
+    @State private var isMasterTokenVerified = false
+    @State private var revealedIds: Set<Int> = []
+    @State private var showUnlockDialog = false
+    @State private var pendingRevealId: Int? = nil
+    @State private var unlockError: String? = nil
     @State private var isSending = false
     @State private var error: String? = nil
     @State private var cancellables = Set<AnyCancellable>()
@@ -65,6 +74,24 @@ struct MeetingChatPanel: View {
             .alert("Error", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
                 Button("OK") { error = nil }
             } message: { Text(error ?? "") }
+            .sheet(isPresented: $showUnlockDialog) {
+                UnlockDialogSheet(error: unlockError) { token in
+                    guard let saved = KeychainHelper.shared.read(key: "master_token"), !saved.isEmpty, token == saved else {
+                        unlockError = "Incorrect master token"
+                        return
+                    }
+                    isMasterTokenVerified = true
+                    decryptAll()
+                    showUnlockDialog = false
+                    unlockError = nil
+                    if let pending = pendingRevealId {
+                        reveal(pending)
+                        pendingRevealId = nil
+                    }
+                } onDismiss: {
+                    showUnlockDialog = false; unlockError = nil; pendingRevealId = nil
+                }
+            }
         }
         .task { await load() }
         .onAppear(perform: subscribeToWS)
@@ -83,12 +110,29 @@ struct MeetingChatPanel: View {
                 .padding(.horizontal, 12).padding(.vertical, 8)
                 .background(isMine ? Color.chatBubbleSelf : Color.chatBubbleOther)
                 .clipShape(RoundedRectangle(cornerRadius: 14))
+                .onTapGesture {
+                    guard !revealedIds.contains(msg.id) else { return }
+                    if isMasterTokenVerified {
+                        reveal(msg.id)
+                    } else {
+                        pendingRevealId = msg.id
+                        showUnlockDialog = true
+                    }
+                }
         }
         .frame(maxWidth: .infinity, alignment: isMine ? .trailing : .leading)
     }
 
+    private func reveal(_ messageId: Int) {
+        revealedIds.insert(messageId)
+        Task {
+            try? await Task.sleep(nanoseconds: 30 * 1_000_000_000)
+            revealedIds.remove(messageId)
+        }
+    }
+
     private func displayText(for msg: ConferenceChatMessage) -> String {
-        guard isUnlocked else { return msg.decoy_content ?? "" }
+        guard revealedIds.contains(msg.id) else { return msg.decoy_content ?? "" }
         return decrypted[msg.id] ?? "[Decryption Failed]"
     }
 
@@ -98,7 +142,7 @@ struct MeetingChatPanel: View {
     }
 
     private func decryptAll() {
-        guard isUnlocked else { return }
+        guard isMasterTokenVerified else { return }
         for msg in messages where decrypted[msg.id] == nil {
             if let plain = MessageDecryption.decrypt(content: msg.content, encryptedKey: msg.encrypted_key, iv: msg.iv) {
                 decrypted[msg.id] = plain

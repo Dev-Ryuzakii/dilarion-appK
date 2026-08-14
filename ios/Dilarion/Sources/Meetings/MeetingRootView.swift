@@ -11,7 +11,7 @@ struct MeetingRootView: View {
         SwiftUI.Group {
             switch vm.phase {
             case .idle:
-                Color.clear
+                EmptyView()
             case .lobby(let kind):
                 MeetingLobbyView(kind: kind, onCancel: { vm.phase = .idle })
             case .connecting:
@@ -23,7 +23,11 @@ struct MeetingRootView: View {
             case .waitingForHost:
                 WaitingForHostView(onCancel: { vm.leave() })
             case .active:
-                MeetingGalleryView(onDismiss: { vm.reset() })
+                if vm.isMinimized {
+                    MinimizedMeetingBubble()
+                } else {
+                    MeetingGalleryView(onDismiss: { vm.reset() })
+                }
             case .ended(let message):
                 MeetingEndedView(message: message) { vm.reset() }
             }

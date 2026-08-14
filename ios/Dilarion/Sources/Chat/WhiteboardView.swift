@@ -1,10 +1,14 @@
 import SwiftUI
 import Combine
 
-// Ephemeral shared canvas — strokes relay live via WS (POST /whiteboard/stroke
-// -> ws_manager push), nothing is persisted, so this always opens blank.
-// Coordinates are normalized to 0..1 so different screen sizes still align.
-// Mirrors desktop (WhiteboardModal.tsx) and Android (WhiteboardScreen.kt).
+// Strokes relay live via WS (POST /whiteboard/stroke -> ws_manager push).
+// For DM/group targets nothing is persisted, so it always opens blank. The
+// in-meeting (conferenceId) target is different: the backend keeps the
+// current stroke list for the conference's lifetime, so opening it (even
+// late, or reopening after closing) fetches history and shows the shared
+// canvas as it currently stands — a real shared surface, not a blank slate
+// per viewer. Coordinates are normalized to 0..1 so different screen sizes
+// still align. Mirrors desktop (WhiteboardModal.tsx) and Android (WhiteboardScreen.kt).
 
 private struct UiSegment: Identifiable {
     let id = UUID()
@@ -98,7 +102,18 @@ struct WhiteboardView: View {
                 }
             }
         }
-        .onAppear(perform: subscribeToWS)
+        .onAppear {
+            subscribeToWS()
+            Task { await loadHistory() }
+        }
+    }
+
+    private func loadHistory() async {
+        guard let conferenceId else { return }
+        guard let strokes = try? await APIClient.shared.getWhiteboardHistory(conferenceId: conferenceId) else { return }
+        segments = strokes.map {
+            UiSegment(x0: $0.x0, y0: $0.y0, x1: $0.x1, y1: $0.y1, color: colorFromHex($0.color), width: $0.width)
+        }
     }
 
     private func subscribeToWS() {

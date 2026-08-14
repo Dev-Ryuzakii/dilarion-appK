@@ -17,8 +17,7 @@ struct HomeView: View {
     @State private var selectedTab: HomeTab = .chats
     @State private var showLogoutDialog = false
     @State private var showNewChat = false
-    @State private var showNewMeeting = false
-    @State private var showMeetings = false
+    @State private var showMeetingsLanding = false
     @State private var navigateTo: String? = nil
     @State private var navigateToGroup: Group? = nil
 
@@ -75,11 +74,7 @@ struct HomeView: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     HStack(spacing: 4) {
-                        Button { showMeetings = true } label: {
-                            Image(systemName: "calendar")
-                                .foregroundColor(.white)
-                        }
-                        Button { showNewMeeting = true } label: {
+                        Button { showMeetingsLanding = true } label: {
                             Image(systemName: "video")
                                 .foregroundColor(.white)
                         }
@@ -120,17 +115,15 @@ struct HomeView: View {
                 navigateTo = peer
             })
         }
-        .sheet(isPresented: $showNewMeeting) {
-            NewMeetingSheet(onStart: { invitees in
-                showNewMeeting = false
-                MeetingViewModel.shared.presentLobby(.instant(invitees: invitees))
-            })
-        }
-        .sheet(isPresented: $showMeetings) {
-            MeetingsSheet(onJoin: { joinCode in
-                showMeetings = false
-                MeetingViewModel.shared.presentLobby(.join(joinCode: joinCode))
-            })
+        .sheet(isPresented: $showMeetingsLanding) {
+            MeetingsLandingSheet(
+                onJoinByCode: { joinCode in
+                    MeetingViewModel.shared.presentLobby(.join(joinCode: joinCode))
+                },
+                onStartInstant: { invitees in
+                    MeetingViewModel.shared.presentLobby(.instant(invitees: invitees))
+                }
+            )
         }
         .confirmationDialog("Log out", isPresented: $showLogoutDialog, titleVisibility: .visible) {
             Button("Log out", role: .destructive) {
