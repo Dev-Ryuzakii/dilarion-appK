@@ -952,6 +952,25 @@ export async function sendWhiteboardClear(token: string, target: WhiteboardTarge
   }).catch(() => {});
 }
 
+// Announces the whiteboard to everyone in the meeting the moment it's shared/
+// stopped — surfaces it for the room the way starting/stopping a screen share
+// does, instead of each participant needing to separately open it themselves.
+export async function sendWhiteboardOpen(token: string, conferenceId: number): Promise<void> {
+  await fetch(`${BASE}/whiteboard/open`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ conference_id: conferenceId }),
+  }).catch(() => {});
+}
+
+export async function sendWhiteboardClose(token: string, conferenceId: number): Promise<void> {
+  await fetch(`${BASE}/whiteboard/close`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ conference_id: conferenceId }),
+  }).catch(() => {});
+}
+
 // ── Master token ───────────────────────────────────────────────────────────────
 
 export async function confirmMasterToken(token: string, masterToken: string): Promise<boolean> {
@@ -972,16 +991,87 @@ export async function confirmMasterToken(token: string, masterToken: string): Pr
   return true;
 }
 
-export async function createMasterToken(token: string, masterToken: string): Promise<void> {
+export async function createMasterToken(token: string, masterToken: string, twoFaPassword?: string): Promise<void> {
   const res = await fetch(`${BASE}/mastertoken/create`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify({ mastertoken: masterToken }),
+    body: JSON.stringify({ mastertoken: masterToken, two_fa_password: twoFaPassword || null }),
   });
-  if (!res.ok) throw new Error('Failed to create master token');
+  if (!res.ok) {
+    let detail = 'Failed to create master token';
+    try { const b = await res.json(); detail = b.detail || detail; } catch {}
+    throw new Error(detail);
+  }
+}
+
+// ── Master-token 2FA ─────────────────────────────────────────────────────────
+
+export async function getMasterToken2FAStatus(token: string): Promise<boolean> {
+  const res = await fetch(`${BASE}/mastertoken/2fa/status`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error('Failed to fetch 2FA status');
+  const body = await res.json();
+  return !!body.enabled;
+}
+
+export async function enableMasterToken2FA(token: string, masterToken: string, twoFaPassword: string): Promise<void> {
+  const res = await fetch(`${BASE}/mastertoken/2fa/enable`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ mastertoken: masterToken, two_fa_password: twoFaPassword }),
+  });
+  if (!res.ok) {
+    let detail = 'Failed to enable 2FA';
+    try { const b = await res.json(); detail = b.detail || detail; } catch {}
+    throw new Error(detail);
+  }
+}
+
+export async function disableMasterToken2FA(token: string, twoFaPassword: string): Promise<void> {
+  const res = await fetch(`${BASE}/mastertoken/2fa/disable`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ two_fa_password: twoFaPassword }),
+  });
+  if (!res.ok) {
+    let detail = 'Failed to disable 2FA';
+    try { const b = await res.json(); detail = b.detail || detail; } catch {}
+    throw new Error(detail);
+  }
+}
+
+// ── Account deletion requests ────────────────────────────────────────────────
+
+export interface AccountDeletionStatus {
+  status: 'pending' | 'approved' | 'denied' | null;
+  request_id?: number;
+  requested_at?: string;
+  processed_at?: string;
+}
+
+export async function requestAccountDeletion(token: string, reason?: string): Promise<void> {
+  const res = await fetch(`${BASE}/account/delete-request`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ reason: reason || null }),
+  });
+  if (!res.ok) {
+    let detail = 'Failed to submit deletion request';
+    try { const b = await res.json(); detail = b.detail || detail; } catch {}
+    throw new Error(detail);
+  }
+}
+
+export async function getMyAccountDeletionStatus(token: string): Promise<AccountDeletionStatus> {
+  const res = await fetch(`${BASE}/account/delete-request/status`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error('Failed to fetch deletion request status');
+  return res.json();
 }
 
 // ── Chat collaboration: reactions, edit, delete, pin, star ─────────────────────

@@ -4,6 +4,7 @@ import {
   getLiveKitToken, getIceServers, getUsers, conferenceInvite as apiConferenceInvite, Contact,
   getWaitingRoom, admitFromWaitingRoom, denyFromWaitingRoom, WaitingParticipant,
   startConferenceRecording, stopConferenceRecording,
+  sendWhiteboardOpen, sendWhiteboardClose,
 } from '../services/api';
 import { presenceService, WsMessage } from '../services/presence';
 import WhiteboardModal from './WhiteboardModal';
@@ -47,6 +48,9 @@ export default function GalleryView({
   myUsername,
   masterToken,
   onMasterTokenSaved,
+  minimized = false,
+  onMinimize,
+  onMaximize,
 }: {
   token: string;
   conferenceId: number;
@@ -57,6 +61,9 @@ export default function GalleryView({
   myUsername: string;
   masterToken: string | null;
   onMasterTokenSaved: (t: string) => void;
+  minimized?: boolean;
+  onMinimize?: () => void;
+  onMaximize?: () => void;
 }) {
   const roomRef = useRef<Room | null>(null);
   const [tiles, setTiles] = useState<Record<string, Tile>>({});
@@ -78,6 +85,11 @@ export default function GalleryView({
 
   const [showParticipants, setShowParticipants] = useState(false);
   const [showWhiteboard, setShowWhiteboard] = useState(false);
+  // Who's presenting the whiteboard to the room — null means nobody. Sharing
+  // it announces + auto-opens it for everyone, and stopping auto-closes it
+  // for everyone, matching screen share's semantics rather than a plain
+  // "each person opens it themselves" toggle.
+  const [whiteboardOwner, setWhiteboardOwner] = useState<string | null>(null);
   const [showChat, setShowChat] = useState(false);
   const [allUsers, setAllUsers] = useState<Contact[]>([]);
   const [addSearch, setAddSearch] = useState('');
@@ -267,6 +279,16 @@ export default function GalleryView({
         if (msg.data?.conference_id === conferenceId) setRecording(true);
       } else if (msg.type === 'conference_recording_stopped') {
         if (msg.data?.conference_id === conferenceId) setRecording(false);
+      } else if (msg.type === 'whiteboard_opened') {
+        const data = msg.data || {};
+        if (data.conference_id !== conferenceId) return;
+        setWhiteboardOwner(data.from);
+        setShowWhiteboard(true);
+      } else if (msg.type === 'whiteboard_closed') {
+        const data = msg.data || {};
+        if (data.conference_id !== conferenceId) return;
+        setWhiteboardOwner(null);
+        setShowWhiteboard(false);
       }
     };
     presenceService.addListener(onMsg);
@@ -336,6 +358,26 @@ export default function GalleryView({
     }
   }
 
+  function toggleWhiteboard() {
+    if (showWhiteboard) {
+      // Only the presenter stopping actually ends it for the room — a viewer
+      // closing their own window just leaves the view, same as no longer
+      // looking at someone else's shared screen.
+      if (whiteboardOwner === myUsername) {
+        sendWhiteboardClose(token, conferenceId);
+        setWhiteboardOwner(null);
+      }
+      setShowWhiteboard(false);
+    } else if (!whiteboardOwner) {
+      sendWhiteboardOpen(token, conferenceId);
+      setWhiteboardOwner(myUsername);
+      setShowWhiteboard(true);
+    } else {
+      // Someone else is already sharing — just view it.
+      setShowWhiteboard(true);
+    }
+  }
+
   function sendReaction(emoji: string) {
     const room = roomRef.current;
     if (!room) return;
@@ -377,6 +419,32 @@ export default function GalleryView({
   const invitable = allUsers.filter(
     u => !inCallNames.has(u.username) && u.username.toLowerCase().includes(addSearch.toLowerCase()),
   );
+
+  // Minimized: floating mini-pill bottom-right, same pattern as 1:1 CallModal
+  // — the LiveKit room stays connected in the background (this is the same
+  // component instance, its connect effect never re-runs), just nothing here
+  // renders the video tiles while collapsed.
+  if (minimized) {
+    return (
+      <div style={miniPillStyle}>
+        <div style={miniAvatarStyle}>{tileList.length}</div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ color: '#f1f5f9', fontWeight: 700, fontSize: '0.85rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {connecting ? 'Connecting…' : 'In meeting'}
+          </div>
+          <div style={{ color: '#22c55e', fontSize: '0.72rem', marginTop: 2 }}>
+            {tileList.length} participant{tileList.length !== 1 ? 's' : ''}
+          </div>
+        </div>
+        <button onClick={onMaximize} style={miniBtnStyle} title="Expand">
+          <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="#fff" strokeWidth={2} strokeLinecap="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
+        </button>
+        <button onClick={leave} style={{ ...miniBtnStyle, background: '#ef4444' }} title="Leave meeting">
+          <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="#fff" strokeWidth={2} strokeLinecap="round"><path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07"/><line x1="2" y1="2" x2="22" y2="22" stroke="#fff" strokeWidth="2"/></svg>
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div style={{
@@ -428,10 +496,21 @@ export default function GalleryView({
             style={{ background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: 8, color: '#fff', width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
           ><ChatIcon /></button>
           <button
-            onClick={() => setShowWhiteboard(true)}
-            title="Whiteboard"
-            style={{ background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: 8, color: '#fff', width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+            onClick={toggleWhiteboard}
+            title={
+              whiteboardOwner === myUsername ? 'Stop sharing whiteboard'
+              : whiteboardOwner ? `${whiteboardOwner} is sharing the whiteboard`
+              : 'Share whiteboard'
+            }
+            style={{ background: whiteboardOwner ? 'rgba(109,94,252,0.35)' : 'rgba(255,255,255,0.1)', border: 'none', borderRadius: 8, color: '#fff', width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
           ><WhiteboardIcon /></button>
+          {onMinimize && (
+            <button
+              onClick={onMinimize}
+              title="Minimize"
+              style={{ background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: 8, color: '#fff', width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+            ><MinimizeIcon /></button>
+          )}
           <button
             onClick={leave}
             title="Close"
@@ -553,7 +632,12 @@ export default function GalleryView({
       )}
 
       {showWhiteboard && (
-        <WhiteboardModal token={token} target={{ conferenceId }} onClose={() => setShowWhiteboard(false)} />
+        <WhiteboardModal
+          token={token}
+          target={{ conferenceId }}
+          sharedByLabel={whiteboardOwner === myUsername ? 'You are sharing' : whiteboardOwner ? `${whiteboardOwner} is sharing` : undefined}
+          onClose={toggleWhiteboard}
+        />
       )}
 
       {showChat && (
@@ -723,6 +807,22 @@ function TileCard({
   );
 }
 
+const miniPillStyle: React.CSSProperties = {
+  position: 'fixed', bottom: 24, right: 24, zIndex: 2000,
+  display: 'flex', alignItems: 'center', gap: 10,
+  background: '#111827', border: '1px solid #1f2937', borderRadius: 40,
+  padding: '10px 14px', boxShadow: '0 8px 32px rgba(0,0,0,0.7)',
+  minWidth: 220, maxWidth: 320, cursor: 'default',
+};
+const miniAvatarStyle: React.CSSProperties = {
+  width: 36, height: 36, borderRadius: '50%', background: '#6d5efc', color: '#fff',
+  display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: '0.8rem', flexShrink: 0,
+};
+const miniBtnStyle: React.CSSProperties = {
+  width: 30, height: 30, borderRadius: '50%', background: '#374151', border: 'none', cursor: 'pointer',
+  display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+};
+
 function ctrlBtnStyle(active: boolean): React.CSSProperties {
   return {
     background: active ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.05)',
@@ -809,6 +909,13 @@ function CloseIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+    </svg>
+  );
+}
+function MinimizeIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M8 3v3a2 2 0 0 1-2 2H3M21 8h-3a2 2 0 0 1-2-2V3M3 16h3a2 2 0 0 1 2 2v3M16 21v-3a2 2 0 0 1 2-2h3"/>
     </svg>
   );
 }

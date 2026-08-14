@@ -11,10 +11,12 @@ import { presenceService, WsMessage } from '../services/presence';
 export default function WhiteboardModal({
   token,
   target,
+  sharedByLabel,
   onClose,
 }: {
   token: string;
   target: WhiteboardTarget;
+  sharedByLabel?: string;
   onClose: () => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -144,6 +146,9 @@ export default function WhiteboardModal({
                 borderRadius: 8, color: 'var(--text-primary)', fontSize: '0.78rem', padding: '5px 10px', cursor: 'pointer',
               }}
             >Clear</button>
+            {sharedByLabel && (
+              <span style={{ marginLeft: 10, fontSize: '0.72rem', color: 'var(--text-muted)' }}>{sharedByLabel}</span>
+            )}
           </div>
           <button
             onClick={onClose}

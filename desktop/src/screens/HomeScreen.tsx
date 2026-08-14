@@ -9,6 +9,12 @@ import {
   getUsers,
   confirmMasterToken,
   createMasterToken,
+  getMasterToken2FAStatus,
+  enableMasterToken2FA,
+  disableMasterToken2FA,
+  requestAccountDeletion,
+  getMyAccountDeletionStatus,
+  AccountDeletionStatus,
   performCallAction,
   getPublicKey,
   updatePublicKey,
@@ -552,6 +558,76 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
   const [createError, setCreateError] = useState<string | null>(null);
   const [createSuccess, setCreateSuccess] = useState(false);
   const [showCreateSection, setShowCreateSection] = useState(false);
+  const [create2FAInput, setCreate2FAInput] = useState('');
+
+  const [twoFaEnabled, setTwoFaEnabled] = useState(false);
+  const [twoFaLoading, setTwoFaLoading] = useState(false);
+  const [twoFaError, setTwoFaError] = useState<string | null>(null);
+  const [showEnable2FA, setShowEnable2FA] = useState(false);
+  const [enable2FAMasterToken, setEnable2FAMasterToken] = useState('');
+  const [enable2FAPassword, setEnable2FAPassword] = useState('');
+  const [showDisable2FA, setShowDisable2FA] = useState(false);
+  const [disable2FAPassword, setDisable2FAPassword] = useState('');
+
+  const [deletionStatus, setDeletionStatus] = useState<AccountDeletionStatus | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleteReason, setDeleteReason] = useState('');
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  useEffect(() => {
+    getMasterToken2FAStatus(token).then(setTwoFaEnabled).catch(() => {});
+    getMyAccountDeletionStatus(token).then(setDeletionStatus).catch(() => {});
+  }, [token]);
+
+  async function handleEnable2FA() {
+    if (!enable2FAMasterToken.trim() || enable2FAPassword.trim().length < 6) return;
+    setTwoFaLoading(true);
+    setTwoFaError(null);
+    try {
+      await enableMasterToken2FA(token, enable2FAMasterToken.trim(), enable2FAPassword.trim());
+      setTwoFaEnabled(true);
+      setShowEnable2FA(false);
+      setEnable2FAMasterToken('');
+      setEnable2FAPassword('');
+    } catch (err: any) {
+      setTwoFaError(err?.message || 'Failed to enable 2FA');
+    } finally {
+      setTwoFaLoading(false);
+    }
+  }
+
+  async function handleDisable2FA() {
+    if (!disable2FAPassword.trim()) return;
+    setTwoFaLoading(true);
+    setTwoFaError(null);
+    try {
+      await disableMasterToken2FA(token, disable2FAPassword.trim());
+      setTwoFaEnabled(false);
+      setShowDisable2FA(false);
+      setDisable2FAPassword('');
+    } catch (err: any) {
+      setTwoFaError(err?.message || 'Failed to disable 2FA');
+    } finally {
+      setTwoFaLoading(false);
+    }
+  }
+
+  async function handleRequestDeletion() {
+    setDeleteLoading(true);
+    setDeleteError(null);
+    try {
+      await requestAccountDeletion(token, deleteReason.trim() || undefined);
+      const status = await getMyAccountDeletionStatus(token);
+      setDeletionStatus(status);
+      setShowDeleteConfirm(false);
+      setDeleteReason('');
+    } catch (err: any) {
+      setDeleteError(err?.message || 'Failed to submit request');
+    } finally {
+      setDeleteLoading(false);
+    }
+  }
 
   async function handleVerify() {
     const trimmed = verifyInput.trim();
@@ -582,11 +658,12 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
     setCreateError(null);
     setCreateSuccess(false);
     try {
-      await createMasterToken(token, trimmed);
+      await createMasterToken(token, trimmed, twoFaEnabled ? create2FAInput.trim() : undefined);
       setCreateSuccess(true);
       setCreateInput('');
-    } catch {
-      setCreateError('Failed to create master token');
+      setCreate2FAInput('');
+    } catch (err: any) {
+      setCreateError(err?.message || 'Failed to create master token');
     } finally {
       setCreateLoading(false);
     }
@@ -813,12 +890,22 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
                 </div>
                 <button
                   onClick={handleCreate}
-                  disabled={createLoading || !createInput.trim()}
+                  disabled={createLoading || !createInput.trim() || (twoFaEnabled && !create2FAInput.trim())}
                   style={{ background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border-color)', borderRadius: 8, padding: '8px 16px', fontSize: '0.82rem', fontWeight: 600, cursor: createLoading ? 'wait' : 'pointer', opacity: createLoading ? 0.7 : 1, fontFamily: 'inherit' }}
                 >
                   {createLoading ? '...' : 'Create'}
                 </button>
               </div>
+              {twoFaEnabled && (
+                <input
+                  type="password"
+                  placeholder="2FA password"
+                  value={create2FAInput}
+                  onChange={e => setCreate2FAInput(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') handleCreate(); }}
+                  style={inputStyle}
+                />
+              )}
               {createError && <span style={{ fontSize: '0.75rem', color: '#ef4444' }}>{createError}</span>}
               {createSuccess && <span style={{ fontSize: '0.75rem', color: '#25d366' }}>Master token created successfully.</span>}
             </div>
@@ -826,8 +913,160 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
         </div>
       </div>
 
+      {/* Master-token 2FA section */}
+      <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 12, padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Master Token 2FA</div>
+        <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 8, padding: '10px 14px' }}>
+          <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+            Requires a second password to create or replace your master token, so a stolen login session alone can't reset it.
+          </span>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ width: 8, height: 8, borderRadius: '50%', background: twoFaEnabled ? '#25d366' : '#6b7280', flexShrink: 0 }} />
+          <span style={{ fontSize: '0.85rem', color: twoFaEnabled ? '#25d366' : 'var(--text-muted)' }}>
+            {twoFaEnabled ? '2FA enabled' : '2FA disabled'}
+          </span>
+        </div>
+
+        {!twoFaEnabled && !showEnable2FA && (
+          <button
+            onClick={() => setShowEnable2FA(true)}
+            style={{ alignSelf: 'flex-start', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 16px', fontSize: '0.82rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}
+          >
+            Enable 2FA
+          </button>
+        )}
+
+        {!twoFaEnabled && showEnable2FA && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <input
+              type="password"
+              placeholder="Current master token"
+              value={enable2FAMasterToken}
+              onChange={e => setEnable2FAMasterToken(e.target.value)}
+              style={inputStyle}
+            />
+            <input
+              type="password"
+              placeholder="New 2FA password (min 6 chars)"
+              value={enable2FAPassword}
+              onChange={e => setEnable2FAPassword(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') handleEnable2FA(); }}
+              style={inputStyle}
+            />
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                onClick={handleEnable2FA}
+                disabled={twoFaLoading || !enable2FAMasterToken.trim() || enable2FAPassword.trim().length < 6}
+                style={{ background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 16px', fontSize: '0.82rem', fontWeight: 600, cursor: twoFaLoading ? 'wait' : 'pointer', opacity: twoFaLoading ? 0.7 : 1, fontFamily: 'inherit' }}
+              >
+                {twoFaLoading ? '...' : 'Confirm'}
+              </button>
+              <button
+                onClick={() => { setShowEnable2FA(false); setTwoFaError(null); }}
+                style={{ background: 'transparent', color: 'var(--text-muted)', border: '1px solid var(--border-color)', borderRadius: 8, padding: '8px 16px', fontSize: '0.82rem', cursor: 'pointer', fontFamily: 'inherit' }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
+        {twoFaEnabled && !showDisable2FA && (
+          <button
+            onClick={() => setShowDisable2FA(true)}
+            style={{ alignSelf: 'flex-start', background: 'transparent', border: '1px solid var(--accent)', color: 'var(--accent)', borderRadius: 8, padding: '6px 14px', fontSize: '0.8rem', cursor: 'pointer', fontFamily: 'inherit' }}
+          >
+            Disable 2FA
+          </button>
+        )}
+
+        {twoFaEnabled && showDisable2FA && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <input
+              type="password"
+              placeholder="Current 2FA password"
+              value={disable2FAPassword}
+              onChange={e => setDisable2FAPassword(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') handleDisable2FA(); }}
+              style={inputStyle}
+            />
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                onClick={handleDisable2FA}
+                disabled={twoFaLoading || !disable2FAPassword.trim()}
+                style={{ background: '#ef4444', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 16px', fontSize: '0.82rem', fontWeight: 600, cursor: twoFaLoading ? 'wait' : 'pointer', opacity: twoFaLoading ? 0.7 : 1, fontFamily: 'inherit' }}
+              >
+                {twoFaLoading ? '...' : 'Confirm'}
+              </button>
+              <button
+                onClick={() => { setShowDisable2FA(false); setTwoFaError(null); }}
+                style={{ background: 'transparent', color: 'var(--text-muted)', border: '1px solid var(--border-color)', borderRadius: 8, padding: '8px 16px', fontSize: '0.82rem', cursor: 'pointer', fontFamily: 'inherit' }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
+        {twoFaError && <span style={{ fontSize: '0.75rem', color: '#ef4444' }}>{twoFaError}</span>}
+      </div>
+
       {/* Encryption key section */}
       <EncryptionKeySection token={token} username={username} />
+
+      {/* Danger zone: account deletion request */}
+      <div style={{ background: 'var(--bg-panel)', border: '1px solid #ef4444', borderRadius: 12, padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#ef4444', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Danger Zone</div>
+
+        {deletionStatus && deletionStatus.status ? (
+          <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 8, padding: '10px 14px' }}>
+            <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
+              {deletionStatus.status === 'pending' && 'Your account deletion request is pending admin review.'}
+              {deletionStatus.status === 'approved' && 'Your account deletion request was approved.'}
+              {deletionStatus.status === 'denied' && 'Your account deletion request was denied. You can request again below.'}
+            </span>
+          </div>
+        ) : null}
+
+        {(!deletionStatus?.status || deletionStatus.status === 'denied') && !showDeleteConfirm && (
+          <button
+            onClick={() => setShowDeleteConfirm(true)}
+            style={{ alignSelf: 'flex-start', background: 'transparent', border: '1px solid #ef4444', color: '#ef4444', borderRadius: 8, padding: '8px 16px', fontSize: '0.82rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}
+          >
+            Request Account Deletion
+          </button>
+        )}
+
+        {showDeleteConfirm && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <textarea
+              placeholder="Reason (optional)"
+              value={deleteReason}
+              onChange={e => setDeleteReason(e.target.value)}
+              rows={3}
+              style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit' }}
+            />
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                onClick={handleRequestDeletion}
+                disabled={deleteLoading}
+                style={{ background: '#ef4444', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 16px', fontSize: '0.82rem', fontWeight: 600, cursor: deleteLoading ? 'wait' : 'pointer', opacity: deleteLoading ? 0.7 : 1, fontFamily: 'inherit' }}
+              >
+                {deleteLoading ? '...' : 'Submit Request'}
+              </button>
+              <button
+                onClick={() => { setShowDeleteConfirm(false); setDeleteError(null); }}
+                style={{ background: 'transparent', color: 'var(--text-muted)', border: '1px solid var(--border-color)', borderRadius: 8, padding: '8px 16px', fontSize: '0.82rem', cursor: 'pointer', fontFamily: 'inherit' }}
+              >
+                Cancel
+              </button>
+            </div>
+            {deleteError && <span style={{ fontSize: '0.75rem', color: '#ef4444' }}>{deleteError}</span>}
+          </div>
+        )}
+      </div>
 
       {/* Logout */}
       <div style={{ marginTop: 'auto' }}>
@@ -1049,6 +1288,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
   } | null>(null);
   // LiveKit gallery-view group call — separate from the mesh-based activeCall above.
   const [activeGalleryCall, setActiveGalleryCall] = useState<{ conferenceId: number; initialMicOn?: boolean; initialCamOn?: boolean; displayName?: string } | null>(null);
+  const [galleryMinimized, setGalleryMinimized] = useState(false);
   // Device-setup lobby shown before actually connecting to a group call.
   const [meetingLobby, setMeetingLobby] = useState<
     { kind: 'instant' } | { kind: 'join'; joinCode: string; title: string | null } | null
@@ -1965,7 +2205,10 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
           myUsername={username}
           masterToken={masterToken}
           onMasterTokenSaved={setMasterToken}
-          onClose={() => setActiveGalleryCall(null)}
+          onClose={() => { setActiveGalleryCall(null); setGalleryMinimized(false); }}
+          minimized={galleryMinimized}
+          onMinimize={() => setGalleryMinimized(true)}
+          onMaximize={() => setGalleryMinimized(false)}
         />
       )}
 
