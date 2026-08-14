@@ -101,15 +101,19 @@ class WebSocketManager: ObservableObject {
             AudioManager.shared.playNotificationSound()
             NotificationManager.shared.notifyNewMedia(from: json["sender_username"] as? String)
             events.send(.newMedia)
-        case "call_answer", "call_ice", "call_ended",
+        case "call_status_update", "ice_candidate",
              "conference_invite", "conference_peer_connect", "conference_signal", "conference_participant_left",
              "conference_admitted", "conference_denied", "conference_join_request",
              "conference_recording_started", "conference_recording_stopped", "new_conference_message":
-            if type == "call_ended" {
-                NotificationManager.shared.cancelCallNotification()
+            if type == "call_status_update" {
+                let data = json["data"] as? [String: Any] ?? json
+                let status = data["status"] as? String ?? ""
+                if ["end", "decline", "declined", "missed", "busy"].contains(status) {
+                    NotificationManager.shared.cancelCallNotification()
+                }
             }
             events.send(.callSignal(json))
-        case "whiteboard_stroke", "whiteboard_clear":
+        case "whiteboard_stroke", "whiteboard_clear", "whiteboard_opened":
             events.send(.whiteboardEvent(json))
         case "message_reaction_updated", "message_edited", "message_deleted", "message_pinned", "message_unpinned":
             let payload = json["data"].flatMap { $0 as? [String: Any] } ?? json

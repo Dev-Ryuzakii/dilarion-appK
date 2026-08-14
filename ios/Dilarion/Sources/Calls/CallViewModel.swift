@@ -260,24 +260,44 @@ class CallViewModel: ObservableObject {
                     if callId != self.uiState.callId { return }
 
                     switch type {
-                    case "call_answer":
+                    // Every post-invite status change (ringing, accepted, ended,
+                    // declined, missed, busy) rides this one event type with a
+                    // `status` field — matches the backend's actual contract
+                    // (CallService.update_call_status), not separate per-status
+                    // event names. Android: CallViewModel.kt's "call_status_update"
+                    // handling is the reference for this mapping.
+                    case "call_status_update":
                         let data = json["data"] as? [String: Any] ?? json
-                        if let answerSdp = data["answer_sdp"] as? String {
-                            Task {
-                                try? await WebRTCManager.shared.handleAnswer(answerSdp)
-                                await MainActor.run {
-                                    self.stopRingtoneLoop()
-                                    self.remoteDescSet = true
-                                    for cand in self.pendingRemoteCandidates {
-                                        WebRTCManager.shared.addIceCandidate(cand.sdpMid, cand.sdpMLineIndex, cand.candidate)
+                        let status = data["status"] as? String ?? ""
+                        switch status {
+                        case "calling", "ringing":
+                            if self.uiState.state == .calling {
+                                self.uiState.state = .ringing
+                            }
+                        case "accept", "accepted":
+                            if let answerSdp = data["answer_sdp"] as? String {
+                                Task {
+                                    try? await WebRTCManager.shared.handleAnswer(answerSdp)
+                                    await MainActor.run {
+                                        self.stopRingtoneLoop()
+                                        self.remoteDescSet = true
+                                        for cand in self.pendingRemoteCandidates {
+                                            WebRTCManager.shared.addIceCandidate(cand.sdpMid, cand.sdpMLineIndex, cand.candidate)
+                                        }
+                                        self.pendingRemoteCandidates.removeAll()
+                                        self.uiState.state = .connected
+                                        self.startTimer()
                                     }
-                                    self.pendingRemoteCandidates.removeAll()
-                                    self.uiState.state = .connected
-                                    self.startTimer()
                                 }
                             }
+                        case "end", "decline", "declined", "missed", "busy":
+                            self.stopRingtoneLoop()
+                            self.timerSubscription?.cancel()
+                            self.uiState.state = .ended
+                        default:
+                            break
                         }
-                    case "call_ice":
+                    case "ice_candidate":
                         let data = json["data"] as? [String: Any] ?? json
                         if let candidateObj = data["candidate"] as? [String: Any],
                            let sdpMid = candidateObj["sdpMid"] as? String,
@@ -289,10 +309,6 @@ class CallViewModel: ObservableObject {
                                 WebRTCManager.shared.addIceCandidate(sdpMid, sdpMLineIndex, candidateStr)
                             }
                         }
-                    case "call_ended":
-                        self.stopRingtoneLoop()
-                        self.timerSubscription?.cancel()
-                        self.uiState.state = .ended
                     default:
                         break
                     }
