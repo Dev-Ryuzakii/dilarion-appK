@@ -173,6 +173,36 @@ interface ApiService {
         @Body request: MasterTokenRequest,
     ): Response<Unit>
 
+    @GET("mastertoken/2fa/status")
+    suspend fun getMasterToken2FAStatus(
+        @Header("Authorization") bearer: String,
+    ): Response<MasterToken2FAStatusResponse>
+
+    @POST("mastertoken/2fa/enable")
+    suspend fun enableMasterToken2FA(
+        @Header("Authorization") bearer: String,
+        @Body request: MasterToken2FAEnableRequest,
+    ): Response<Unit>
+
+    @POST("mastertoken/2fa/disable")
+    suspend fun disableMasterToken2FA(
+        @Header("Authorization") bearer: String,
+        @Body request: MasterToken2FADisableRequest,
+    ): Response<Unit>
+
+    // ─── Account deletion requests ───────────────────────────────────────────────
+
+    @POST("account/delete-request")
+    suspend fun requestAccountDeletion(
+        @Header("Authorization") bearer: String,
+        @Body request: AccountDeletionRequestCreate,
+    ): Response<com.google.gson.JsonObject>
+
+    @GET("account/delete-request/status")
+    suspend fun getMyAccountDeletionStatus(
+        @Header("Authorization") bearer: String,
+    ): Response<AccountDeletionStatusResponse>
+
     // ─── Users ─────────────────────────────────────────────────────────────────
 
     @GET("users")
@@ -344,6 +374,20 @@ interface ApiService {
     suspend fun whiteboardClear(
         @Header("Authorization") bearer: String,
         @Body body: com.dilarion.app.data.model.WhiteboardClearRequest,
+    ): Response<com.google.gson.JsonObject>
+
+    // Announces the whiteboard to everyone in the meeting the moment it's
+    // shared/stopped — surfaces it for the room the way screen share does.
+    @POST("whiteboard/open")
+    suspend fun whiteboardOpen(
+        @Header("Authorization") bearer: String,
+        @Body body: com.dilarion.app.data.model.WhiteboardOpenRequest,
+    ): Response<com.google.gson.JsonObject>
+
+    @POST("whiteboard/close")
+    suspend fun whiteboardClose(
+        @Header("Authorization") bearer: String,
+        @Body body: com.dilarion.app.data.model.WhiteboardOpenRequest,
     ): Response<com.google.gson.JsonObject>
 
     // ─── Media ─────────────────────────────────────────────────────────────────

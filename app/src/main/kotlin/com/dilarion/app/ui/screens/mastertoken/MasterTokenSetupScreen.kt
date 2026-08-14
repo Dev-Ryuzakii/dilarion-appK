@@ -9,6 +9,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
@@ -116,6 +117,7 @@ fun MasterTokenSetupScreen(
                 if (uiState.step == MasterTokenUiState.Step.CREATE) {
                     CreateStep(
                         isLoading = uiState.isLoading,
+                        twoFaRequired = uiState.twoFaRequired,
                         onCreate = viewModel::create,
                     )
                 } else {
@@ -131,9 +133,10 @@ fun MasterTokenSetupScreen(
 }
 
 @Composable
-private fun CreateStep(isLoading: Boolean, onCreate: (String) -> Unit) {
+private fun CreateStep(isLoading: Boolean, twoFaRequired: Boolean, onCreate: (String, String?) -> Unit) {
     var token by remember { mutableStateOf("") }
     var visible by remember { mutableStateOf(false) }
+    var twoFaPassword by remember { mutableStateOf("") }
 
     Column(
         modifier = Modifier.padding(24.dp),
@@ -160,6 +163,21 @@ private fun CreateStep(isLoading: Boolean, onCreate: (String) -> Unit) {
             colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = DilarionRed),
         )
 
+        if (twoFaRequired) {
+            OutlinedTextField(
+                value = twoFaPassword,
+                onValueChange = { twoFaPassword = it },
+                label = { Text("2FA Password") },
+                leadingIcon = { Icon(Icons.Default.Shield, null, tint = DilarionRed) },
+                visualTransformation = PasswordVisualTransformation(),
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = DilarionRed),
+            )
+        }
+
         // Requirements card
         Surface(
             color = DilarionRed.copy(alpha = 0.06f),
@@ -180,8 +198,8 @@ private fun CreateStep(isLoading: Boolean, onCreate: (String) -> Unit) {
         }
 
         Button(
-            onClick = { onCreate(token) },
-            enabled = token.isNotBlank() && !isLoading,
+            onClick = { onCreate(token, twoFaPassword.takeIf { twoFaRequired }) },
+            enabled = token.isNotBlank() && !isLoading && (!twoFaRequired || twoFaPassword.isNotBlank()),
             modifier = Modifier.fillMaxWidth().height(52.dp),
             shape = RoundedCornerShape(14.dp),
             colors = ButtonDefaults.buttonColors(containerColor = DilarionRed),

@@ -4,6 +4,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -44,9 +45,17 @@ fun WhiteboardScreen(
     username: String?,
     groupId: Int?,
     conferenceId: Int? = null,
+    startedByMe: Boolean = false,
     onBack: () -> Unit,
     viewModel: WhiteboardViewModel = hiltViewModel(),
 ) {
+    // Only the presenter leaving actually ends the share for the room (mirrors
+    // desktop) — a viewer backing out just leaves their own view.
+    fun handleBack() {
+        if (startedByMe && conferenceId != null) viewModel.sendClose(conferenceId)
+        onBack()
+    }
+    BackHandler(onBack = ::handleBack)
     var segments by remember { mutableStateOf(listOf<UiSegment>()) }
     var selectedColorHex by remember { mutableStateOf(PALETTE[0].first) }
     var selectedColor by remember { mutableStateOf(PALETTE[0].second) }
@@ -89,9 +98,16 @@ fun WhiteboardScreen(
         topBar = {
             TopAppBar(
                 navigationIcon = {
-                    IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Back", tint = SurfaceWhite) }
+                    IconButton(onClick = ::handleBack) { Icon(Icons.Default.ArrowBack, "Back", tint = SurfaceWhite) }
                 },
-                title = { Text("Whiteboard", color = SurfaceWhite, style = MaterialTheme.typography.titleMedium) },
+                title = {
+                    Column {
+                        Text("Whiteboard", color = SurfaceWhite, style = MaterialTheme.typography.titleMedium)
+                        if (startedByMe) {
+                            Text("You are sharing", color = SurfaceWhite.copy(alpha = 0.75f), style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                },
                 actions = {
                     TextButton(onClick = {
                         segments = emptyList()

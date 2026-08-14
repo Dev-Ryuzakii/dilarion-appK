@@ -1,13 +1,16 @@
 package com.dilarion.app
 
 import android.Manifest
+import android.app.PictureInPictureParams
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
+import android.util.Rational
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -16,6 +19,7 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.dilarion.app.data.model.IncomingCallData
 import com.dilarion.app.services.NotificationHelper
+import com.dilarion.app.ui.components.PipController
 import com.dilarion.app.ui.navigation.AppNavigation
 import com.dilarion.app.ui.theme.DilarionTheme
 import dagger.hilt.android.AndroidEntryPoint
@@ -27,6 +31,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        PipController.enter = { enterMeetingPip() }
         // Show over lock screen for incoming calls
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
             setShowWhenLocked(true)
@@ -51,6 +56,27 @@ class MainActivity : ComponentActivity() {
                 AppNavigation(pendingIncomingCall = pendingIncomingCall)
             }
         }
+    }
+
+    // Home button / recents while a meeting is on screen — same "minimize like
+    // Google Meet" behavior as the explicit minimize button, just triggered by
+    // the system gesture instead of a tap.
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (PipController.meetingActive.value) enterMeetingPip()
+    }
+
+    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        PipController.isInPip.value = isInPictureInPictureMode
+    }
+
+    private fun enterMeetingPip() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val params = PictureInPictureParams.Builder()
+            .setAspectRatio(Rational(16, 9))
+            .build()
+        runCatching { enterPictureInPictureMode(params) }
     }
 
     override fun onNewIntent(intent: Intent) {

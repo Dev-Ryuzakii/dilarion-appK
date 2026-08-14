@@ -199,6 +199,37 @@ data class UsersResponse(
 
 data class MasterTokenRequest(
     val mastertoken: String,
+    @SerializedName("two_fa_password") val twoFaPassword: String? = null,
+)
+
+// ─── Master-token 2FA ───────────────────────────────────────────────────────
+// A second, separate secret required to create/replace the master token, so a
+// stolen session token alone can't silently reset it. Never used for decryption.
+
+data class MasterToken2FAStatusResponse(
+    val enabled: Boolean = false,
+)
+
+data class MasterToken2FAEnableRequest(
+    val mastertoken: String,
+    @SerializedName("two_fa_password") val twoFaPassword: String,
+)
+
+data class MasterToken2FADisableRequest(
+    @SerializedName("two_fa_password") val twoFaPassword: String,
+)
+
+// ─── Account deletion requests ───────────────────────────────────────────────
+
+data class AccountDeletionRequestCreate(
+    val reason: String? = null,
+)
+
+data class AccountDeletionStatusResponse(
+    val status: String? = null,
+    @SerializedName("request_id") val requestId: Int? = null,
+    @SerializedName("requested_at") val requestedAt: String? = null,
+    @SerializedName("processed_at") val processedAt: String? = null,
 )
 
 // ─── Presence ─────────────────────────────────────────────────────────────────
@@ -377,6 +408,10 @@ data class WhiteboardClearRequest(
     val username: String? = null,
     @SerializedName("group_id") val groupId: Int? = null,
     @SerializedName("conference_id") val conferenceId: Int? = null,
+)
+
+data class WhiteboardOpenRequest(
+    @SerializedName("conference_id") val conferenceId: Int,
 )
 
 data class MeetingJoinResponse(

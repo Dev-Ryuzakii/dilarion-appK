@@ -3,6 +3,7 @@ package com.dilarion.app.ui.screens.mastertoken
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.dilarion.app.data.api.ApiService
+import com.dilarion.app.data.api.parseErrorDetail
 import com.dilarion.app.data.model.MasterTokenRequest
 import com.dilarion.app.security.SessionManager
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -17,6 +18,7 @@ data class MasterTokenUiState(
     val isLoading: Boolean = false,
     val error: String? = null,
     val success: Boolean = false,
+    val twoFaRequired: Boolean = false,
 ) {
     enum class Step { CREATE, CONFIRM }
 }
@@ -32,14 +34,29 @@ class MasterTokenSetupViewModel @Inject constructor(
 
     private var pendingToken: String = ""
 
-    fun create(token: String) {
+    init {
+        viewModelScope.launch {
+            val bearer = bearer() ?: return@launch
+            runCatching { apiService.getMasterToken2FAStatus(bearer) }
+                .onSuccess { resp ->
+                    if (resp.isSuccessful) {
+                        _uiState.value = _uiState.value.copy(twoFaRequired = resp.body()?.enabled ?: false)
+                    }
+                }
+        }
+    }
+
+    fun create(token: String, twoFaPassword: String? = null) {
         val err = validate(token)
         if (err != null) { _uiState.value = _uiState.value.copy(error = err); return }
         viewModelScope.launch {
             val bearer = bearer() ?: return@launch
             _uiState.value = _uiState.value.copy(isLoading = true, error = null)
             runCatching {
-                apiService.createMasterToken(bearer, MasterTokenRequest(token))
+                val resp = apiService.createMasterToken(bearer, MasterTokenRequest(token, twoFaPassword))
+                if (!resp.isSuccessful) {
+                    throw IllegalStateException(resp.errorBody().parseErrorDetail("Failed to create master token (${resp.code()})"))
+                }
                 pendingToken = token
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,
@@ -60,7 +77,10 @@ class MasterTokenSetupViewModel @Inject constructor(
             val bearer = bearer() ?: return@launch
             _uiState.value = _uiState.value.copy(isLoading = true, error = null)
             runCatching {
-                apiService.confirmMasterToken(bearer, MasterTokenRequest(token))
+                val resp = apiService.confirmMasterToken(bearer, MasterTokenRequest(token))
+                if (!resp.isSuccessful) {
+                    throw IllegalStateException(resp.errorBody().parseErrorDetail("Failed to confirm master token (${resp.code()})"))
+                }
                 sessionManager.saveMasterToken(token)
                 _uiState.value = _uiState.value.copy(isLoading = false, success = true)
             }.onFailure { e ->

@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.dilarion.app.data.api.ApiService
 import com.dilarion.app.data.model.UserInfo
 import com.dilarion.app.data.model.WaitingParticipant
+import com.dilarion.app.data.model.WhiteboardOpenRequest
 import com.dilarion.app.security.SessionManager
 import com.dilarion.app.services.PresenceService
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -47,6 +48,11 @@ data class GalleryUiState(
     val addError: String? = null,
     val waiting: List<WaitingParticipant> = emptyList(),
     val admitting: Int? = null,
+    val myUsername: String = "",
+    // Who's presenting the whiteboard to the room — null means nobody. Sharing
+    // announces + auto-surfaces it for everyone, stopping hides it for
+    // everyone, matching screen share's semantics.
+    val whiteboardOwner: String? = null,
 )
 
 /**
@@ -69,18 +75,56 @@ class GalleryViewModel @Inject constructor(
     var room: Room? = null
         private set
 
+    private var currentConferenceId: Int = 0
+
     init {
+        viewModelScope.launch {
+            val me = sessionManager.username.first() ?: ""
+            _uiState.value = _uiState.value.copy(myUsername = me)
+        }
         // Host-only in practice — the backend 403s admit/deny for non-hosts.
         viewModelScope.launch {
             presenceService.events.collect { msg ->
-                if (msg.type != "conference_join_request") return@collect
-                val data = msg.data ?: return@collect
-                val uid = data.get("user_id")?.takeIf { !it.isJsonNull }?.asInt ?: return@collect
-                val uname = data.get("username")?.takeIf { !it.isJsonNull }?.asString ?: return@collect
-                if (_uiState.value.waiting.none { it.userId == uid }) {
-                    _uiState.value = _uiState.value.copy(waiting = _uiState.value.waiting + WaitingParticipant(uid, uname))
+                when (msg.type) {
+                    "conference_join_request" -> {
+                        val data = msg.data ?: return@collect
+                        val uid = data.get("user_id")?.takeIf { !it.isJsonNull }?.asInt ?: return@collect
+                        val uname = data.get("username")?.takeIf { !it.isJsonNull }?.asString ?: return@collect
+                        if (_uiState.value.waiting.none { it.userId == uid }) {
+                            _uiState.value = _uiState.value.copy(waiting = _uiState.value.waiting + WaitingParticipant(uid, uname))
+                        }
+                    }
+                    "whiteboard_opened" -> {
+                        val data = msg.data ?: return@collect
+                        val confId = data.get("conference_id")?.takeIf { !it.isJsonNull }?.asInt ?: return@collect
+                        if (confId != currentConferenceId) return@collect
+                        val from = data.get("from")?.takeIf { !it.isJsonNull }?.asString ?: return@collect
+                        _uiState.value = _uiState.value.copy(whiteboardOwner = from)
+                    }
+                    "whiteboard_closed" -> {
+                        val data = msg.data ?: return@collect
+                        val confId = data.get("conference_id")?.takeIf { !it.isJsonNull }?.asInt ?: return@collect
+                        if (confId != currentConferenceId) return@collect
+                        _uiState.value = _uiState.value.copy(whiteboardOwner = null)
+                    }
                 }
             }
+        }
+    }
+
+    fun shareWhiteboard(conferenceId: Int) {
+        viewModelScope.launch {
+            val token = sessionManager.sessionToken.first() ?: return@launch
+            runCatching { apiService.whiteboardOpen("Bearer $token", WhiteboardOpenRequest(conferenceId)) }
+            _uiState.value = _uiState.value.copy(whiteboardOwner = _uiState.value.myUsername)
+        }
+    }
+
+    fun stopSharingWhiteboard(conferenceId: Int) {
+        viewModelScope.launch {
+            val token = sessionManager.sessionToken.first() ?: return@launch
+            runCatching { apiService.whiteboardClose("Bearer $token", WhiteboardOpenRequest(conferenceId)) }
+            _uiState.value = _uiState.value.copy(whiteboardOwner = null)
         }
     }
 
@@ -149,6 +193,7 @@ class GalleryViewModel @Inject constructor(
     }
 
     fun connect(conferenceId: Int, initialMicOn: Boolean = true, initialCamOn: Boolean = true, displayName: String? = null) {
+        currentConferenceId = conferenceId
         _uiState.value = _uiState.value.copy(micOn = initialMicOn, camOn = initialCamOn)
         loadWaitingRoom(conferenceId)
         viewModelScope.launch {

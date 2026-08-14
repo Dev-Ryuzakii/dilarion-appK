@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.dilarion.app.data.api.ApiService
 import com.dilarion.app.data.model.WhiteboardClearRequest
+import com.dilarion.app.data.model.WhiteboardOpenRequest
 import com.dilarion.app.data.model.WhiteboardStroke
 import com.dilarion.app.data.model.WhiteboardStrokeRequest
 import com.dilarion.app.security.SessionManager
@@ -38,6 +39,15 @@ class WhiteboardViewModel @Inject constructor(
             val token = sessionManager.sessionToken.first() ?: return@launch
             runCatching {
                 apiService.whiteboardClear("Bearer $token", WhiteboardClearRequest(username, groupId, conferenceId))
+            }
+        }
+    }
+
+    fun sendClose(conferenceId: Int) {
+        viewModelScope.launch {
+            val token = sessionManager.sessionToken.first() ?: return@launch
+            runCatching {
+                apiService.whiteboardClose("Bearer $token", WhiteboardOpenRequest(conferenceId))
             }
         }
     }

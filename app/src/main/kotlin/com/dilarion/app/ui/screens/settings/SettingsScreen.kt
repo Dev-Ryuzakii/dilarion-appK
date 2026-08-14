@@ -7,12 +7,14 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.ExitToApp
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -20,6 +22,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.collectAsState
@@ -37,6 +41,13 @@ fun SettingsScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     var showLogoutDialog by remember { mutableStateOf(false) }
+    var showEnable2FA by remember { mutableStateOf(false) }
+    var enable2FAMasterToken by remember { mutableStateOf("") }
+    var enable2FAPassword by remember { mutableStateOf("") }
+    var showDisable2FA by remember { mutableStateOf(false) }
+    var disable2FAPassword by remember { mutableStateOf("") }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+    var deleteReason by remember { mutableStateOf("") }
 
     if (showLogoutDialog) {
         AlertDialog(
@@ -143,6 +154,121 @@ fun SettingsScreen(
 
             Spacer(Modifier.height(12.dp))
 
+            // ── Master token 2FA section ──────────────────────────────────────
+            SettingsSectionHeader("Master Token 2FA")
+
+            SettingsCard {
+                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Shield, null, tint = DilarionRed, modifier = Modifier.size(22.dp))
+                        Spacer(Modifier.width(16.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                if (uiState.twoFaEnabled) "2FA enabled" else "2FA disabled",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium,
+                            )
+                            Text(
+                                "Requires a second password to create or reset your master token",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextSecondary,
+                            )
+                        }
+                    }
+
+                    if (!uiState.twoFaEnabled && !showEnable2FA) {
+                        Spacer(Modifier.height(10.dp))
+                        TextButton(onClick = { showEnable2FA = true }) { Text("Enable 2FA", color = DilarionRed) }
+                    }
+
+                    if (!uiState.twoFaEnabled && showEnable2FA) {
+                        Spacer(Modifier.height(10.dp))
+                        OutlinedTextField(
+                            value = enable2FAMasterToken,
+                            onValueChange = { enable2FAMasterToken = it },
+                            label = { Text("Current master token") },
+                            singleLine = true,
+                            visualTransformation = PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = DilarionRed),
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = enable2FAPassword,
+                            onValueChange = { enable2FAPassword = it },
+                            label = { Text("New 2FA password (min 6 chars)") },
+                            singleLine = true,
+                            visualTransformation = PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = DilarionRed),
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Row {
+                            Button(
+                                onClick = { viewModel.enableTwoFa(enable2FAMasterToken, enable2FAPassword) },
+                                enabled = !uiState.twoFaLoading && enable2FAMasterToken.isNotBlank() && enable2FAPassword.length >= 6,
+                                colors = ButtonDefaults.buttonColors(containerColor = DilarionRed),
+                            ) {
+                                if (uiState.twoFaLoading) CircularProgressIndicator(Modifier.size(16.dp), color = SurfaceWhite, strokeWidth = 2.dp)
+                                else Text("Confirm")
+                            }
+                            Spacer(Modifier.width(8.dp))
+                            TextButton(onClick = {
+                                showEnable2FA = false
+                                enable2FAMasterToken = ""
+                                enable2FAPassword = ""
+                                viewModel.clearTwoFaError()
+                            }) { Text("Cancel") }
+                        }
+                    }
+
+                    if (uiState.twoFaEnabled && !showDisable2FA) {
+                        Spacer(Modifier.height(10.dp))
+                        TextButton(onClick = { showDisable2FA = true }) { Text("Disable 2FA", color = TextSecondary) }
+                    }
+
+                    if (uiState.twoFaEnabled && showDisable2FA) {
+                        Spacer(Modifier.height(10.dp))
+                        OutlinedTextField(
+                            value = disable2FAPassword,
+                            onValueChange = { disable2FAPassword = it },
+                            label = { Text("Current 2FA password") },
+                            singleLine = true,
+                            visualTransformation = PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = DilarionRed),
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Row {
+                            Button(
+                                onClick = { viewModel.disableTwoFa(disable2FAPassword) },
+                                enabled = !uiState.twoFaLoading && disable2FAPassword.isNotBlank(),
+                                colors = ButtonDefaults.buttonColors(containerColor = DilarionRed),
+                            ) {
+                                if (uiState.twoFaLoading) CircularProgressIndicator(Modifier.size(16.dp), color = SurfaceWhite, strokeWidth = 2.dp)
+                                else Text("Confirm")
+                            }
+                            Spacer(Modifier.width(8.dp))
+                            TextButton(onClick = {
+                                showDisable2FA = false
+                                disable2FAPassword = ""
+                                viewModel.clearTwoFaError()
+                            }) { Text("Cancel") }
+                        }
+                    }
+
+                    uiState.twoFaError?.let { err ->
+                        Spacer(Modifier.height(6.dp))
+                        Text(err, style = MaterialTheme.typography.bodySmall, color = DilarionRed)
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+
             // ── Linked devices section ────────────────────────────────────────
             SettingsSectionHeader("Devices")
 
@@ -198,6 +324,86 @@ fun SettingsScreen(
                         style = MaterialTheme.typography.bodyLarge,
                         fontWeight = FontWeight.Medium,
                     )
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            // ── Danger zone: account deletion request ───────────────────────────
+            SettingsSectionHeader("Danger Zone")
+
+            SettingsCard {
+                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+                    when (uiState.deletionStatus) {
+                        "pending" -> Text(
+                            "Your account deletion request is pending admin review.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondary,
+                        )
+                        "approved" -> Text(
+                            "Your account deletion request was approved.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondary,
+                        )
+                        "denied" -> Text(
+                            "Your previous request was denied. You can request again below.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondary,
+                        )
+                        else -> {}
+                    }
+
+                    if (uiState.deletionStatus == null || uiState.deletionStatus == "denied") {
+                        if (!showDeleteConfirm) {
+                            if (uiState.deletionStatus == "denied") Spacer(Modifier.height(10.dp))
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { showDeleteConfirm = true },
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(Icons.Default.Warning, null, tint = DilarionRed, modifier = Modifier.size(22.dp))
+                                Spacer(Modifier.width(16.dp))
+                                Text(
+                                    "Request Account Deletion",
+                                    color = DilarionRed,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    fontWeight = FontWeight.Medium,
+                                )
+                            }
+                        } else {
+                            Spacer(Modifier.height(10.dp))
+                            OutlinedTextField(
+                                value = deleteReason,
+                                onValueChange = { deleteReason = it },
+                                label = { Text("Reason (optional)") },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = DilarionRed),
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            Row {
+                                Button(
+                                    onClick = { viewModel.requestAccountDeletion(deleteReason) },
+                                    enabled = !uiState.deletionLoading,
+                                    colors = ButtonDefaults.buttonColors(containerColor = DilarionRed),
+                                ) {
+                                    if (uiState.deletionLoading) CircularProgressIndicator(Modifier.size(16.dp), color = SurfaceWhite, strokeWidth = 2.dp)
+                                    else Text("Submit Request")
+                                }
+                                Spacer(Modifier.width(8.dp))
+                                TextButton(onClick = {
+                                    showDeleteConfirm = false
+                                    deleteReason = ""
+                                    viewModel.clearDeletionError()
+                                }) { Text("Cancel") }
+                            }
+                        }
+                    }
+
+                    uiState.deletionError?.let { err ->
+                        Spacer(Modifier.height(6.dp))
+                        Text(err, style = MaterialTheme.typography.bodySmall, color = DilarionRed)
+                    }
                 }
             }
 

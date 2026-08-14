@@ -305,7 +305,7 @@ fun AppNavigation(pendingIncomingCall: IncomingCallData? = null) {
                 displayName = backStack.arguments?.getString("displayName")
                     ?.let { java.net.URLDecoder.decode(it, "UTF-8") }?.takeIf { it.isNotEmpty() },
                 onClose = { navController.popBackStack() },
-                onOpenWhiteboard = { confId -> navController.navigate(Screen.Whiteboard.route(conferenceId = confId)) },
+                onOpenWhiteboard = { confId, startedByMe -> navController.navigate(Screen.Whiteboard.route(conferenceId = confId, startedByMe = startedByMe)) },
             )
         }
 
@@ -315,15 +315,18 @@ fun AppNavigation(pendingIncomingCall: IncomingCallData? = null) {
                 navArgument("username") { type = NavType.StringType; defaultValue = "" },
                 navArgument("groupId") { type = NavType.IntType; defaultValue = -1 },
                 navArgument("conferenceId") { type = NavType.IntType; defaultValue = -1 },
+                navArgument("startedByMe") { type = NavType.BoolType; defaultValue = false },
             ),
         ) { backStack ->
             val username = backStack.arguments?.getString("username")?.takeIf { it.isNotEmpty() }
             val groupIdArg = backStack.arguments?.getInt("groupId")?.takeIf { it >= 0 }
             val conferenceIdArg = backStack.arguments?.getInt("conferenceId")?.takeIf { it >= 0 }
+            val startedByMe = backStack.arguments?.getBoolean("startedByMe") ?: false
             WhiteboardScreen(
                 username = username,
                 groupId = groupIdArg,
                 conferenceId = conferenceIdArg,
+                startedByMe = startedByMe,
                 onBack = { navController.popBackStack() },
             )
         }

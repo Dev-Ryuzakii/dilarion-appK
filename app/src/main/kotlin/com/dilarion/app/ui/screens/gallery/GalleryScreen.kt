@@ -14,6 +14,7 @@ import androidx.compose.material.icons.filled.Draw
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.material.icons.filled.PictureInPictureAlt
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.VideocamOff
 import androidx.compose.material3.*
@@ -29,6 +30,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.dilarion.app.data.model.UserInfo
+import com.dilarion.app.ui.components.PipController
 import com.dilarion.app.ui.theme.DilarionRed
 import com.dilarion.app.ui.theme.SurfaceWhite
 import io.livekit.android.renderer.TextureViewRenderer
@@ -49,13 +51,31 @@ fun GalleryScreen(
     initialCamOn: Boolean = true,
     displayName: String? = null,
     onClose: () -> Unit,
-    onOpenWhiteboard: (Int) -> Unit = {},
+    onOpenWhiteboard: (Int, Boolean) -> Unit = { _, _ -> },
     viewModel: GalleryViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsState()
     var showChat by remember { mutableStateOf(false) }
+    val isInPip by PipController.isInPip
 
     LaunchedEffect(conferenceId) { viewModel.connect(conferenceId, initialMicOn, initialCamOn, displayName) }
+
+    DisposableEffect(Unit) {
+        PipController.meetingActive.value = true
+        onDispose { PipController.meetingActive.value = false }
+    }
+
+    // PiP: system has shrunk the window to a small floating overlay — show just
+    // the active tile, no chrome (toolbar/sheets don't make sense that small).
+    if (isInPip) {
+        Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+            val mainTile = state.tiles.firstOrNull { it.isSpeaking && !it.isLocal }
+                ?: state.tiles.firstOrNull { !it.isLocal }
+                ?: state.tiles.firstOrNull()
+            mainTile?.let { GalleryTileView(tile = it, room = viewModel.room) }
+        }
+        return
+    }
 
     if (showChat) {
         MeetingChatSheet(
@@ -84,8 +104,21 @@ fun GalleryScreen(
                     IconButton(onClick = { showChat = true }) {
                         Icon(Icons.Default.Chat, "Chat", tint = SurfaceWhite)
                     }
-                    IconButton(onClick = { onOpenWhiteboard(conferenceId) }) {
-                        Icon(Icons.Default.Draw, "Whiteboard", tint = SurfaceWhite)
+                    IconButton(onClick = {
+                        if (state.whiteboardOwner == null) {
+                            viewModel.shareWhiteboard(conferenceId)
+                            onOpenWhiteboard(conferenceId, true)
+                        } else {
+                            onOpenWhiteboard(conferenceId, state.whiteboardOwner == state.myUsername)
+                        }
+                    }) {
+                        Icon(
+                            Icons.Default.Draw, "Whiteboard",
+                            tint = if (state.whiteboardOwner != null) Color(0xFF6D5EFC) else SurfaceWhite,
+                        )
+                    }
+                    IconButton(onClick = { PipController.enter?.invoke() }) {
+                        Icon(Icons.Default.PictureInPictureAlt, "Minimize", tint = SurfaceWhite)
                     }
                     IconButton(onClick = { viewModel.leave(); onClose() }) {
                         Icon(Icons.Default.Close, "Close", tint = SurfaceWhite)
@@ -108,7 +141,21 @@ fun GalleryScreen(
             }
         },
     ) { padding ->
-        Box(modifier = Modifier.padding(padding).fillMaxSize()) {
+        Column(modifier = Modifier.padding(padding).fillMaxSize()) {
+            if (state.whiteboardOwner != null && state.whiteboardOwner != state.myUsername) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xFF6D5EFC).copy(alpha = 0.18f))
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("${state.whiteboardOwner} is sharing the whiteboard", color = SurfaceWhite, fontSize = 13.sp)
+                    TextButton(onClick = { onOpenWhiteboard(conferenceId, false) }) { Text("View", color = Color(0xFF6D5EFC)) }
+                }
+            }
+            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
             when {
                 state.connecting -> Text("Connecting…", color = SurfaceWhite, modifier = Modifier.align(Alignment.Center))
                 state.error != null -> Text(state.error ?: "", color = Color(0xFFEF4444), modifier = Modifier.align(Alignment.Center).padding(20.dp))
@@ -162,6 +209,7 @@ fun GalleryScreen(
                         }
                     }
                 }
+            }
             }
         }
     }
