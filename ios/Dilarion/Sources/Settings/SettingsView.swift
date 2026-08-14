@@ -104,8 +104,12 @@ struct SettingsViewFull: View {
                             .background(Color.surfaceWhite)
                         }
                         .buttonStyle(.plain)
+
+                        Divider().padding(.leading, 56)
+
+                        TwoFactorSettingsRow()
                     }
-                    
+
                     Spacer().frame(height: 20)
 
                     // Chat Section
@@ -304,25 +308,41 @@ struct SettingsViewFull: View {
 @MainActor
 class MasterTokenSetupViewModel: ObservableObject {
     enum Step { case create, confirm }
-    
+
     @Published var step: Step = .create
     @Published var isLoading = false
     @Published var error: String? = nil
     @Published var success = false
-    
+    // Whether /mastertoken/create will 403 without a two_fa_password —
+    // checked upfront so CreateStepView knows to show that field at all.
+    @Published var requires2FA = false
+
     private var pendingToken = ""
-    
-    func create(token: String) {
+
+    init() {
+        Task {
+            requires2FA = (try? await APIClient.shared.getMasterToken2FAStatus()) ?? false
+        }
+    }
+
+    func create(token: String, twoFaPassword: String) {
         if let err = validate(token) {
             self.error = err
             return
         }
+        if requires2FA && twoFaPassword.isEmpty {
+            self.error = "Enter your 2FA password"
+            return
+        }
         isLoading = true
         error = nil
-        
+
         Task {
             do {
-                try await APIClient.shared.postVoid("/mastertoken/create", body: MasterTokenRequest(masterToken: token))
+                try await APIClient.shared.postVoid(
+                    "/mastertoken/create",
+                    body: MasterTokenRequest(masterToken: token, twoFaPassword: requires2FA ? twoFaPassword : nil)
+                )
                 pendingToken = token
                 step = .confirm
             } catch {
@@ -471,14 +491,15 @@ struct CreateStepView: View {
     @ObservedObject var vm: MasterTokenSetupViewModel
     @Binding var token: String
     @Binding var showToken: Bool
-    
+    @State private var twoFaPassword = ""
+
     var body: some View {
         VStack(spacing: 20) {
             HStack {
                 Image(systemName: "key")
                     .foregroundColor(.dilarionRed)
                     .frame(width: 24)
-                
+
             SwiftUI.Group {
                 if showToken {
                     TextField("Master Token", text: $token)
@@ -488,7 +509,7 @@ struct CreateStepView: View {
             }
                 .autocapitalization(.none)
                 .autocorrectionDisabled()
-                
+
                 Button { showToken.toggle() } label: {
                     Image(systemName: showToken ? "eye.slash" : "eye")
                         .foregroundColor(.textSecondary)
@@ -501,7 +522,22 @@ struct CreateStepView: View {
                     .stroke(Color.borderGrey, lineWidth: 1.5)
             )
             .clipShape(RoundedRectangle(cornerRadius: 14))
-            
+
+            if vm.requires2FA {
+                HStack {
+                    Image(systemName: "lock.shield")
+                        .foregroundColor(.dilarionRed)
+                        .frame(width: 24)
+                    SecureField("2FA Password", text: $twoFaPassword)
+                        .autocapitalization(.none)
+                        .autocorrectionDisabled()
+                }
+                .padding(14)
+                .background(Color.backgroundGrey)
+                .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.borderGrey, lineWidth: 1.5))
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+            }
+
             // Requirements Tips
             VStack(alignment: .leading, spacing: 6) {
                 Text("Requirements:")
@@ -521,7 +557,7 @@ struct CreateStepView: View {
             .cornerRadius(12)
             
             Button {
-                vm.create(token: token)
+                vm.create(token: token, twoFaPassword: twoFaPassword)
             } label: {
                 ZStack {
                     if vm.isLoading {
@@ -537,7 +573,7 @@ struct CreateStepView: View {
                 .background(token.isEmpty ? Color.dilarionRed.opacity(0.5) : Color.dilarionRed)
                 .cornerRadius(14)
             }
-            .disabled(token.isEmpty || vm.isLoading)
+            .disabled(token.isEmpty || vm.isLoading || (vm.requires2FA && twoFaPassword.isEmpty))
         }
     }
 }
