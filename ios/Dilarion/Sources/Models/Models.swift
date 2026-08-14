@@ -461,8 +461,31 @@ struct IceCandidateRequest: Codable {
 // MARK: - Master Token
 struct MasterTokenRequest: Codable {
     let masterToken: String
+    // Required by /mastertoken/create only when the account has master-token
+    // 2FA enabled; ignored by /mastertoken/confirm.
+    var twoFaPassword: String? = nil
 
+    // Backend's MasterToken pydantic model field is `mastertoken` (one word,
+    // no underscore) — sending "master_token" 422s every time.
     enum CodingKeys: String, CodingKey {
-        case masterToken = "master_token"
+        case masterToken = "mastertoken"
+        case twoFaPassword = "two_fa_password"
     }
+}
+
+// MARK: - Master-token 2FA
+// A second secret required to create/replace the master token, so a stolen
+// session/bearer token alone can't silently reset it out from under the real
+// owner. Never involved in decrypting content — only gates /mastertoken/create.
+struct TwoFAStatusResponse: Decodable {
+    let enabled: Bool
+}
+
+struct Enable2FARequest: Encodable {
+    let mastertoken: String
+    let two_fa_password: String
+}
+
+struct Disable2FARequest: Encodable {
+    let two_fa_password: String
 }

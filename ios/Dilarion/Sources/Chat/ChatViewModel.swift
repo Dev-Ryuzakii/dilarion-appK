@@ -30,8 +30,26 @@ struct ChatUiState {
     var isRecording: Bool = false
     var recordingSeconds: Int = 0
     var isUploadingMedia: Bool = false
-    var isUnlocked: Bool = false
+    // Session-level: user has proven they know the master token. Gates
+    // decryption + whether a bubble tap needs the dialog or can reveal
+    // straight away — it does NOT mean every message is shown in plaintext,
+    // see `revealedMessageIds` for that.
+    var isMasterTokenVerified: Bool = false
+    // Per-message, temporary — which messages are currently displayed
+    // decrypted. Tapping a locked bubble reveals just that one; it auto-hides
+    // again after REVEAL_DURATION, same tap-to-reveal pattern as the meeting
+    // chat panel, instead of one global "unlock the whole conversation" flip.
+    var revealedMessageIds: Set<Int> = []
     var playingMediaId: String? = nil
+    // Documents: which media ids have been verified to view the real file —
+    // permanent for the session once granted (the real download is already a
+    // one-time server-side read, no need to also re-lock client-side).
+    var unlockedMediaIds: Set<String> = []
+    // In-memory only, never written to disk as a permanent file — see
+    // ChatViewModel.openDocument. Keyed the same as unlockedMediaIds/media ids.
+    var documentBytes: [String: Data] = [:]
+    var viewingDocumentMediaId: String? = nil
+    var documentError: String? = nil
     var mentionQuery: String? = nil
     var taggedUser: String? = nil
     var error: String? = nil
@@ -149,7 +167,7 @@ class ChatViewModel: ObservableObject {
                     decryptedMessages.append(msg)
                     continue
                 }
-                if state.isUnlocked, let content = msg.content, let encKey = msg.encryptedKey, let iv = msg.iv, let pk = privKeyB64, !pk.isEmpty {
+                if state.isMasterTokenVerified, let content = msg.content, let encKey = msg.encryptedKey, let iv = msg.iv, let pk = privKeyB64, !pk.isEmpty {
                     do {
                         var actualEncKey = encKey
                         if encKey.hasPrefix("{"), let data = encKey.data(using: .utf8), let map = try? JSONDecoder().decode([String: String].self, from: data) {
@@ -193,7 +211,7 @@ class ChatViewModel: ObservableObject {
     // stored filename (e.g. "40a98e3e-….jpg") — the media bubble already renders
     // the attachment, so hide these.
     private static let mediaFilenameRegex = try! NSRegularExpression(
-        pattern: #"^(upload_\d+|voice_[0-9a-fA-F-]+|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\.(jpg|jpeg|png|gif|heic|mp4|mov|m4a|wav|mp3)$"#
+        pattern: #"^(upload_\d+|voice_[0-9a-fA-F-]+|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\.(jpg|jpeg|png|gif|heic|mp4|mov|m4a|wav|mp3|pdf|doc|docx|xls|xlsx|ppt|pptx|txt|csv|zip)$"#
     )
 
     private func isMediaFilenameMessage(_ msg: Message) -> Bool {
@@ -330,20 +348,38 @@ class ChatViewModel: ObservableObject {
     }
 
     // MARK: — Unlock
-    func unlock(token: String) -> Bool {
+    // Awaits the re-decrypt so callers that reveal a specific message right
+    // after verifying never briefly flash raw ciphertext for it.
+    func unlock(token: String) async -> Bool {
         guard let masterToken = KeychainHelper.shared.read(key: "master_token"), !masterToken.isEmpty else {
-            // No saved token — save this one and unlock
+            // No saved token — save this one and verify
             KeychainHelper.shared.save(key: "master_token", value: token)
-            state.isUnlocked = true
-            Task { await loadMessages() }
+            state.isMasterTokenVerified = true
+            await loadMessages()
             return true
         }
         if token == masterToken {
-            state.isUnlocked = true
-            Task { await loadMessages() }
+            state.isMasterTokenVerified = true
+            await loadMessages()
             return true
         }
         return false
+    }
+
+    // MARK: — Per-message reveal (tap-to-reveal, auto-hides again)
+    private static let revealDurationSeconds: UInt64 = 30
+
+    func revealMessage(_ id: Int) {
+        guard id >= 0 else { return }
+        state.revealedMessageIds.insert(id)
+        Task {
+            try? await Task.sleep(nanoseconds: Self.revealDurationSeconds * 1_000_000_000)
+            state.revealedMessageIds.remove(id)
+        }
+    }
+
+    func hideMessage(_ id: Int) {
+        state.revealedMessageIds.remove(id)
     }
 
     func clearError() { state.error = nil }
@@ -606,6 +642,78 @@ class ChatViewModel: ObservableObject {
             await MainActor.run { state.error = error.localizedDescription }
         }
         await MainActor.run { state.isUploadingMedia = false }
+    }
+
+    /// Generic file attachment — gets a decoy document rather than the plain
+    /// lock gate images/voice notes use. `decoyKind` is nil for a group-chat
+    /// send when the user skips the picker (backend falls back to a default).
+    func sendDocument(data: Data, filename: String, mimeType: String, decoyKind: DecoyKind?) async {
+        await MainActor.run { state.isUploadingMedia = true }
+        do {
+            _ = try await APIClient.shared.uploadDocument(
+                recipient: groupId == nil ? partnerUsername : nil,
+                groupId: groupId,
+                fileData: data,
+                filename: filename,
+                mimeType: mimeType,
+                decoyKind: decoyKind
+            )
+            await loadMedia()
+        } catch {
+            await MainActor.run { state.error = error.localizedDescription }
+        }
+        await MainActor.run { state.isUploadingMedia = false }
+    }
+
+    /// Tapping a document bubble always opens *something* — the decoy while
+    /// locked, the real file once unlocked — so it must look identical either
+    /// way, matching desktop/Android. Real file bytes are cached in memory
+    /// only (`state.documentBytes`), never written to a permanent file;
+    /// PDFKit renders straight from Data. Non-PDF real files go through
+    /// QuickLook instead, which needs a file URL — DocumentViewerSheet writes
+    /// that to NSTemporaryDirectory (OS-purgeable scratch space, not user
+    /// storage) right before presenting and deletes it the moment the sheet
+    /// closes; nothing here persists across app launches.
+    func openDocument(mediaId: String) async {
+        let cacheKey = state.unlockedMediaIds.contains(mediaId) ? "real_\(mediaId)" : "decoy_\(mediaId)"
+        if state.documentBytes[cacheKey] != nil {
+            state.viewingDocumentMediaId = mediaId
+            return
+        }
+        state.documentError = nil
+        do {
+            let path = state.unlockedMediaIds.contains(mediaId) ? "/media/download/\(mediaId)" : "/media/decoy-file/\(mediaId)"
+            let data = try await APIClient.shared.getData(path)
+            state.documentBytes[cacheKey] = data
+            state.viewingDocumentMediaId = mediaId
+        } catch {
+            state.documentError = error.localizedDescription
+        }
+    }
+
+    func closeDocumentViewer() {
+        state.viewingDocumentMediaId = nil
+    }
+
+    func documentBytes(for mediaId: String) -> Data? {
+        let cacheKey = state.unlockedMediaIds.contains(mediaId) ? "real_\(mediaId)" : "decoy_\(mediaId)"
+        return state.documentBytes[cacheKey]
+    }
+
+    /// Reveals exactly one document — never the whole conversation. Local
+    /// compare against the saved master token, same as text messages; the
+    /// real download is already a one-time server-side read, so there's
+    /// nothing further to gate once this succeeds.
+    func unlockMedia(mediaId: String, token: String) -> Bool {
+        guard let saved = KeychainHelper.shared.read(key: "master_token"), !saved.isEmpty, token == saved else {
+            return false
+        }
+        state.unlockedMediaIds.insert(mediaId)
+        // Drop any cached decoy bytes for this item and open the real file
+        // straight away — matches revealing a locked text bubble.
+        state.documentBytes.removeValue(forKey: "decoy_\(mediaId)")
+        Task { await openDocument(mediaId: mediaId) }
+        return true
     }
 
     func startRecording() {

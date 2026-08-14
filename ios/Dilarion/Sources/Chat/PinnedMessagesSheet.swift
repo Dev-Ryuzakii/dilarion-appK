@@ -46,7 +46,7 @@ struct PinnedMessagesSheet: View {
     }
 
     private func decryptedText(for pinned: PinnedMessage) -> String {
-        guard vm.state.isUnlocked else { return pinned.decoyContent ?? "" }
+        guard vm.state.isMasterTokenVerified else { return pinned.decoyContent ?? "" }
         return MessageDecryption.decrypt(content: pinned.content, encryptedKey: pinned.encryptedKey, iv: pinned.iv)
             ?? "[Decryption Failed]"
     }

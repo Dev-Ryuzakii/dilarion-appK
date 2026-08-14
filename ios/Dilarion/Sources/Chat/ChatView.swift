@@ -1,13 +1,18 @@
 import SwiftUI
 import PhotosUI
 import AVFoundation
+import UniformTypeIdentifiers
+import PDFKit
+import QuickLook
 
-// Mirrors ChatScreen.kt exactly:
-// - Red top bar with avatar initial, name, lock icon, "end-to-end encrypted"
+// Mirrors ChatScreen.kt, with one deliberate iOS deviation: no global
+// "unlock the whole conversation" toggle. Decoy text shown per-message;
+// tapping a locked bubble reveals just that message for 30s (prompting for
+// the master token once per session, not once per tap) instead of decrypting
+// every message in the thread at once.
+// - Red top bar with avatar initial, name, "end-to-end encrypted"
 // - Chat background (pattern at 0.45 alpha)
-// - Decoy text shown when locked, real when unlocked
-// - Lock/unlock button in top bar
-// - Unlock dialog with master token field
+// - Unlock dialog with master token field, triggered by tapping a bubble
 // - Message bubbles: mine=green (#DCF8C6), other=white, rounded corners
 // - Timestamp + read receipt icons (Done / DoneAll)
 // - Date separators (Today / Yesterday / date)
@@ -30,6 +35,13 @@ struct ChatView: View {
     @State private var showPinnedList = false
     @State private var forwardCandidate: Message? = nil
     @State private var actionMessage: Message? = nil
+    @State private var pendingRevealMessageId: Int? = nil
+    @State private var pendingUnlockMediaId: String? = nil
+    @State private var pendingDocumentPick: Data? = nil
+    @State private var pendingDocumentFilename: String = ""
+    @State private var pendingDocumentMime: String = ""
+    @State private var showDocumentPicker = false
+    @State private var showDecoyKindPicker = false
 
     private var displayName: String { groupId != nil ? (groupName ?? "Group") : username }
 
@@ -39,22 +51,6 @@ struct ChatView: View {
             ChatBackground()
 
             VStack(spacing: 0) {
-                // Unlock banner
-                if !vm.state.isUnlocked && !vm.combinedItems().isEmpty {
-                    Button { showUnlockDialog = true } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "lock.fill")
-                                .font(.system(size: 12))
-                            Text("Tap to unlock messages with master token")
-                                .font(.system(size: 12, weight: .medium))
-                        }
-                        .foregroundColor(.dilarionRed)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                        .background(Color.dilarionRed.opacity(0.1))
-                    }
-                }
-
                 // Pinned messages banner
                 if vm.state.showPinnedBanner {
                     Button { showPinnedList = true } label: {
@@ -149,6 +145,7 @@ struct ChatView: View {
                         state: vm.state,
                         groupId: groupId,
                         selectedPhotoItem: $selectedPhotoItem,
+                        showDocumentPicker: $showDocumentPicker,
                         onSend: {
                             let text = inputText.trimmingCharacters(in: .whitespaces)
                             guard !text.isEmpty else { return }
@@ -230,13 +227,15 @@ struct ChatView: View {
                         Image(systemName: "phone")
                             .foregroundColor(.white)
                     }
+                    Button {
+                        CallViewModel.shared.startOutgoingCall(peerUsername: username, type: .video)
+                    } label: {
+                        Image(systemName: "video")
+                            .foregroundColor(.white)
+                    }
                 }
                 Button { showWhiteboard = true } label: {
                     Image(systemName: "scribble")
-                        .foregroundColor(.white)
-                }
-                Button { showUnlockDialog = !vm.state.isUnlocked } label: {
-                    Image(systemName: vm.state.isUnlocked ? "lock.open" : "lock")
                         .foregroundColor(.white)
                 }
             }
@@ -256,12 +255,52 @@ struct ChatView: View {
         }
         .sheet(isPresented: $showUnlockDialog) {
             UnlockDialogSheet(error: unlockError) { token in
-                let ok = vm.unlock(token: token)
-                if ok { showUnlockDialog = false; unlockError = nil }
-                else { unlockError = "Incorrect master token" }
+                if let pendingMedia = pendingUnlockMediaId {
+                    if vm.unlockMedia(mediaId: pendingMedia, token: token) {
+                        showUnlockDialog = false
+                        unlockError = nil
+                        pendingUnlockMediaId = nil
+                    } else {
+                        unlockError = "Incorrect master token"
+                    }
+                    return
+                }
+                Task {
+                    let ok = await vm.unlock(token: token)
+                    if ok {
+                        showUnlockDialog = false
+                        unlockError = nil
+                        if let pending = pendingRevealMessageId {
+                            vm.revealMessage(pending)
+                            pendingRevealMessageId = nil
+                        }
+                    } else {
+                        unlockError = "Incorrect master token"
+                    }
+                }
             } onDismiss: {
-                showUnlockDialog = false; unlockError = nil
+                showUnlockDialog = false; unlockError = nil; pendingRevealMessageId = nil; pendingUnlockMediaId = nil
             }
+        }
+        .sheet(isPresented: Binding(
+            get: { vm.state.viewingDocumentMediaId != nil },
+            set: { if !$0 { vm.closeDocumentViewer() } }
+        )) {
+            if let mediaId = vm.state.viewingDocumentMediaId {
+                DocumentViewerSheet(
+                    mediaId: mediaId,
+                    data: vm.documentBytes(for: mediaId),
+                    onDismiss: { vm.closeDocumentViewer() }
+                )
+            }
+        }
+        .alert("Error", isPresented: Binding(
+            get: { vm.state.documentError != nil },
+            set: { if !$0 { vm.state.documentError = nil } }
+        )) {
+            Button("OK") { vm.state.documentError = nil }
+        } message: {
+            Text(vm.state.documentError ?? "")
         }
         .onAppear {
             vm.initialize(username: username, groupId: groupId)
@@ -274,6 +313,27 @@ struct ChatView: View {
                 }
                 selectedPhotoItem = nil
             }
+        }
+        .fileImporter(isPresented: $showDocumentPicker, allowedContentTypes: [.item], allowsMultipleSelection: false) { result in
+            guard let url = try? result.get().first else { return }
+            let accessed = url.startAccessingSecurityScopedResource()
+            defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+            guard let data = try? Data(contentsOf: url) else { return }
+            pendingDocumentPick = data
+            pendingDocumentFilename = url.lastPathComponent
+            pendingDocumentMime = (try? url.resourceValues(forKeys: [.contentTypeKey]))?.contentType?.preferredMIMEType ?? "application/octet-stream"
+            showDecoyKindPicker = true
+        }
+        .confirmationDialog("Disguise this document as…", isPresented: $showDecoyKindPicker, titleVisibility: .visible) {
+            ForEach(DecoyKind.allCases, id: \.self) { kind in
+                Button(kind.label) {
+                    if let data = pendingDocumentPick {
+                        Task { await vm.sendDocument(data: data, filename: pendingDocumentFilename, mimeType: pendingDocumentMime, decoyKind: kind) }
+                    }
+                    pendingDocumentPick = nil
+                }
+            }
+            Button("Cancel", role: .cancel) { pendingDocumentPick = nil }
         }
         .fullScreenCover(item: $viewerImage) { image in
             FullScreenImageViewer(imagePath: image.path) {
@@ -300,16 +360,29 @@ struct ChatView: View {
     @ViewBuilder
     private func chatItemView(for item: ChatItem) -> some View {
         switch item {
+        case .textMessage(let msg) where msg.contentType == "meeting":
+            if let payload = MeetingCardPayload.parse(msg.content) {
+                MeetingCardBubbleView(payload: payload, senderUsername: msg.sender ?? "", isMine: msg.sender == vm.state.currentUsername) {
+                    joinFromMeetingCard(payload, invitedBy: msg.sender ?? "")
+                }
+                .id(item.id)
+            } else {
+                Text("📅 Meeting update")
+                    .font(.system(size: 13))
+                    .foregroundColor(.textSecondary)
+                    .id(item.id)
+            }
         case .textMessage(let msg):
             let isMine = msg.sender == vm.state.currentUsername
+            let isRevealed = vm.state.revealedMessageIds.contains(msg.id)
             MessageBubbleView(
                 message: msg,
                 isMine: isMine,
-                isUnlocked: vm.state.isUnlocked,
+                isUnlocked: isRevealed,
                 isGroup: groupId != nil,
                 replyPreview: msg.replyToMessageId.flatMap { vm.message(withId: $0) },
                 isStarred: vm.state.starredMessageIds.contains(msg.id),
-                onTapLocked: { showUnlockDialog = true },
+                onTapLocked: { revealOrPrompt(msg.id) },
                 onReact: { emoji in Task { await vm.toggleReaction(msg, emoji: emoji) } },
                 onLongPress: { withAnimation(.spring(response: 0.3)) { actionMessage = msg } }
             )
@@ -321,10 +394,20 @@ struct ChatView: View {
             }
         case .mediaMessage(let media):
             let isMine = media.sender == vm.state.currentUsername
+            if isDocumentMedia(media) {
+                DocumentBubbleView(
+                    media: media,
+                    isMine: isMine,
+                    isUnlocked: vm.state.unlockedMediaIds.contains(media.mediaId),
+                    onOpen: { Task { await vm.openDocument(mediaId: media.mediaId) } },
+                    onLockTap: { pendingUnlockMediaId = media.mediaId }
+                )
+                .id(item.id)
+            } else {
             MediaBubbleView(
                 media: media,
                 isMine: isMine,
-                isUnlocked: vm.state.isUnlocked,
+                isUnlocked: vm.state.isMasterTokenVerified,
                 localFilePaths: vm.state.localFilePaths,
                 playingMediaId: vm.state.playingMediaId,
                 onPlay: { mid, unlocked in
@@ -340,10 +423,44 @@ struct ChatView: View {
                     viewerImage = ViewerImage(path: path)
                 },
                 onTapLocked: {
+                    pendingRevealMessageId = nil
                     showUnlockDialog = true
                 }
             )
             .id(item.id)
+            }
+        }
+    }
+
+    private func isDocumentMedia(_ media: MediaItem) -> Bool {
+        let ct = media.contentType?.lowercased() ?? ""
+        let mt = media.mediaType.lowercased()
+        if mt == "voice" || ct.hasPrefix("audio/") || media.filename.hasSuffix(".m4a") || media.filename.hasSuffix(".wav") { return false }
+        if ct.hasPrefix("image/") || mt == "photo" { return false }
+        return ct.hasPrefix("application/") || ct.hasPrefix("media/") || mt == "raw" || mt == "document"
+    }
+
+    // Tapping a locked bubble: already proved you know the master token this
+    // session -> reveal that one message directly. First time -> prompt for
+    // it, then reveal the message that was tapped once it checks out.
+    private func revealOrPrompt(_ messageId: Int) {
+        if vm.state.isMasterTokenVerified {
+            vm.revealMessage(messageId)
+        } else {
+            pendingRevealMessageId = messageId
+            showUnlockDialog = true
+        }
+    }
+
+    // Instant meetings still need the master-token accept gate (opening a mic
+    // without consent isn't okay) — MeetingLobbyView handles that for
+    // .acceptInvite. Scheduled meetings join directly by code, same as
+    // anywhere else a join code is used.
+    private func joinFromMeetingCard(_ payload: MeetingCardPayload, invitedBy: String) {
+        if payload.kind == "instant", let conferenceId = payload.conference_id {
+            MeetingViewModel.shared.presentLobby(.acceptInvite(conferenceId: conferenceId, invitedBy: invitedBy))
+        } else if let joinCode = payload.join_code {
+            MeetingViewModel.shared.presentLobby(.join(joinCode: joinCode))
         }
     }
 
@@ -698,6 +815,7 @@ struct InputArea: View {
     let state: ChatUiState
     let groupId: Int?
     @Binding var selectedPhotoItem: PhotosPickerItem?
+    @Binding var showDocumentPicker: Bool
     let onSend: () -> Void
     let onStartRecording: () -> Void
     let onTyping: () -> Void
@@ -776,7 +894,14 @@ struct InputArea: View {
             HStack(alignment: .bottom, spacing: 8) {
                 // Attach (DM only)
                 if groupId == nil {
-                    PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
+                    Menu {
+                        PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
+                            Label("Photo", systemImage: "photo")
+                        }
+                        Button { showDocumentPicker = true } label: {
+                            Label("Document", systemImage: "doc")
+                        }
+                    } label: {
                         Image(systemName: "paperclip")
                             .font(.system(size: 20))
                             .foregroundColor(.textSecondary)
@@ -1139,6 +1264,215 @@ struct MediaBubbleView: View {
         let outFormatter = DateFormatter()
         outFormatter.dateFormat = "HH:mm"
         return outFormatter.string(from: date)
+    }
+}
+
+// MARK: — Meeting card bubble
+// Always-visible system notice (never encrypted, never a decoy) — matches
+// desktop (MeetingCard.tsx) and Android's equivalent.
+struct MeetingCardBubbleView: View {
+    let payload: MeetingCardPayload
+    let senderUsername: String
+    let isMine: Bool
+    let onJoin: () -> Void
+
+    private var isInstant: Bool { payload.kind == "instant" }
+    private var title: String { payload.title ?? (isInstant ? "Instant meeting" : "Scheduled meeting") }
+    private var subtitle: String {
+        if isInstant { return "Group video call" }
+        guard let scheduledAt = payload.scheduled_at, let duration = payload.duration_minutes,
+              let date = ISO8601DateFormatter().date(from: scheduledAt) else { return "" }
+        let end = date.addingTimeInterval(TimeInterval(duration * 60))
+        let df = DateFormatter(); df.dateStyle = .medium
+        let tf = DateFormatter(); tf.timeStyle = .short
+        return "\(df.string(from: date)) · \(tf.string(from: date)) – \(tf.string(from: end))"
+    }
+
+    var body: some View {
+        HStack {
+            if isMine { Spacer() }
+            HStack(spacing: 12) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10).fill(Color.dilarionRed)
+                    Image(systemName: "video.fill")
+                        .font(.system(size: 16))
+                        .foregroundColor(.white)
+                }
+                .frame(width: 38, height: 38)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundColor(.textPrimary)
+                    if !subtitle.isEmpty {
+                        Text(subtitle)
+                            .font(.system(size: 11))
+                            .foregroundColor(.textSecondary)
+                    }
+                }
+
+                Spacer(minLength: 8)
+
+                Button("Join", action: onJoin)
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 7)
+                    .background(Color.dilarionRed)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+            .padding(10)
+            .frame(minWidth: 240, maxWidth: 300)
+            .background(Color.surfaceWhite)
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            if !isMine { Spacer() }
+        }
+    }
+}
+
+// MARK: — Document bubble
+// A generic file attachment. Tapping it always opens *something* — the
+// generated decoy while locked, the real file once unlocked — so both must
+// look identical; nothing here may hint a decoy exists. The small lock icon
+// (matching the voice-note bubble) is the only way to trigger the
+// master-token dialog, kept separate from the open action itself. Mirrors
+// desktop (MediaBubble.tsx's DocumentBubble) and Android (ChatScreen.kt's
+// DocumentBubble).
+struct DocumentBubbleView: View {
+    let media: MediaItem
+    let isMine: Bool
+    let isUnlocked: Bool
+    let onOpen: () -> Void
+    let onLockTap: () -> Void
+
+    var body: some View {
+        HStack {
+            if isMine { Spacer() }
+            VStack(alignment: isMine ? .trailing : .leading, spacing: 4) {
+                if !isMine, let sender = media.sender {
+                    Text(sender)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(.textSecondary)
+                }
+                HStack(spacing: 8) {
+                    Button(action: onOpen) {
+                        Image(systemName: "doc.fill")
+                            .font(.system(size: 22))
+                            .foregroundColor(.dilarionRed)
+                            .frame(width: 36, height: 36)
+                    }
+                    Text("Tap to open")
+                        .font(.system(size: 13))
+                        .foregroundColor(.textSecondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if !isUnlocked {
+                        Button(action: onLockTap) {
+                            Image(systemName: "lock.fill")
+                                .font(.system(size: 13))
+                                .foregroundColor(.textSecondary)
+                                .frame(width: 28, height: 28)
+                        }
+                    }
+                }
+                .padding(8)
+                .frame(width: 220)
+                .background(isMine ? Color.dilarionRed.opacity(0.1) : Color.borderGrey.opacity(0.4))
+                .cornerRadius(16)
+
+                if let ts = media.timestamp {
+                    Text(formatTimestamp(ts))
+                        .font(.system(size: 9))
+                        .foregroundColor(.textSecondary)
+                }
+            }
+            if !isMine { Spacer() }
+        }
+    }
+}
+
+// Renders straight from in-memory Data — no permanent file for the common
+// (PDF) case. Non-PDF real files fall back to QuickLook, which needs a file
+// URL; that gets written to NSTemporaryDirectory right before presenting and
+// deleted the moment the sheet closes (see .onDisappear below) — OS-purgeable
+// scratch space, not a saved copy, same handling images/voice notes already get.
+struct DocumentViewerSheet: View {
+    let mediaId: String
+    let data: Data?
+    let onDismiss: () -> Void
+
+    @State private var tempFileURL: URL? = nil
+
+    var body: some View {
+        NavigationStack {
+            SwiftUI.Group {
+                if let data, let pdf = PDFDocument(data: data) {
+                    PDFKitView(document: pdf)
+                } else if let url = tempFileURL {
+                    QuickLookView(url: url)
+                } else if data != nil {
+                    ProgressView().onAppear { writeTempFileIfNeeded() }
+                } else {
+                    ProgressView()
+                }
+            }
+            .navigationTitle("Document")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Close") { onDismiss() }
+                }
+            }
+        }
+        .onDisappear {
+            if let tempFileURL {
+                try? FileManager.default.removeItem(at: tempFileURL)
+            }
+        }
+    }
+
+    private func writeTempFileIfNeeded() {
+        guard tempFileURL == nil, let data else { return }
+        let url = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("docpreview_\(UUID().uuidString)")
+        try? data.write(to: url)
+        tempFileURL = url
+    }
+}
+
+private struct PDFKitView: UIViewRepresentable {
+    let document: PDFDocument
+    func makeUIView(context: Context) -> PDFView {
+        let view = PDFView()
+        view.document = document
+        view.autoScales = true
+        return view
+    }
+    func updateUIView(_ uiView: PDFView, context: Context) {
+        uiView.document = document
+    }
+}
+
+private struct QuickLookView: UIViewControllerRepresentable {
+    let url: URL
+
+    func makeCoordinator() -> Coordinator { Coordinator(url: url) }
+
+    func makeUIViewController(context: Context) -> QLPreviewController {
+        let controller = QLPreviewController()
+        controller.dataSource = context.coordinator
+        return controller
+    }
+
+    func updateUIViewController(_ uiViewController: QLPreviewController, context: Context) {
+        uiViewController.reloadData()
+    }
+
+    class Coordinator: NSObject, QLPreviewControllerDataSource {
+        let url: URL
+        init(url: URL) { self.url = url }
+        func numberOfPreviewItems(in controller: QLPreviewController) -> Int { 1 }
+        func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> QLPreviewItem {
+            url as QLPreviewItem
+        }
     }
 }
 
