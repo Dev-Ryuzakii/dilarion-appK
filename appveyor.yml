@@ -16,7 +16,7 @@ build_script:
       set PATH=%USERPROFILE%\.cargo\bin;%PATH% &&
       cd desktop &&
       npm install &&
-      npm run tauri build
+      npm run tauri:test
 
 artifacts:
   - path: desktop\src-tauri\target\release\bundle\msi\*.msi
