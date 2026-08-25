@@ -6,6 +6,7 @@ import com.dilarion.app.data.model.IncomingCallData
 import com.dilarion.app.data.api.ApiService
 import com.dilarion.app.data.model.CallActionRequest
 import com.dilarion.app.security.SessionManager
+import com.dilarion.app.services.NotificationHelper
 import com.dilarion.app.services.PresenceService
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
@@ -22,6 +23,21 @@ data class ConferenceInviteData(
     val conferenceId: Int,
     val invitedBy: String,
     val existingParticipants: List<String>,
+)
+
+/** A call that rang here and was cancelled before it was answered. */
+data class MissedCallInfo(
+    val caller: String,
+    val callType: String,
+)
+
+/**
+ * Every call_status_update status meaning the call is over. "missed" is how the
+ * server reports a caller hanging up mid-ring; a client that watches only for
+ * "end"/"declined" keeps ringing after the other side has given up.
+ */
+val CALL_TERMINAL_STATUSES = setOf(
+    "end", "ended", "decline", "declined", "missed", "busy", "cancelled", "canceled",
 )
 
 data class MinimizedCallInfo(
@@ -46,6 +62,14 @@ class CallOverlayViewModel @Inject constructor(
     private val _minimizedCall = MutableStateFlow<MinimizedCallInfo?>(null)
     val minimizedCall: StateFlow<MinimizedCallInfo?> = _minimizedCall
 
+    /** A call that stopped ringing before we answered — offered as a call back. */
+    private val _missedCall = MutableStateFlow<MissedCallInfo?>(null)
+    val missedCall: StateFlow<MissedCallInfo?> = _missedCall
+
+    /** Conference id our current 1:1 call was upgraded into, if any. */
+    private val _conferenceUpgrade = MutableStateFlow<Int?>(null)
+    val conferenceUpgrade: StateFlow<Int?> = _conferenceUpgrade
+
     private var durationJob: Job? = null
 
     init {
@@ -59,6 +83,28 @@ class CallOverlayViewModel @Inject constructor(
                         val callType = data.get("call_type")?.asString ?: "voice"
                         val offerSdp = data.get("offer_sdp")?.asString
                         _incomingCall.value = IncomingCallData(callId, caller, callType, offerSdp)
+                    }
+                    // The caller gave up before we answered. The server reports
+                    // that as "missed", not "end" — ignoring it here is what left
+                    // this overlay ringing after they had already hung up.
+                    "call_status_update" -> {
+                        val status = data.get("status")?.asString ?: return@collect
+                        if (status !in CALL_TERMINAL_STATUSES) return@collect
+                        val callId = data.get("call_id")?.asInt
+                        val ringing = _incomingCall.value
+                        if (ringing != null && (callId == null || callId == ringing.callId)) {
+                            NotificationHelper.stopRingtone()
+                            _incomingCall.value = null
+                            _missedCall.value = MissedCallInfo(ringing.callerUsername, ringing.callType)
+                        }
+                        if (callId != null && _minimizedCall.value?.callId == callId) clearMinimized()
+                    }
+                    // The 1:1 call we are on became a conference. It runs in the
+                    // LiveKit room, not on our mesh peer connection, so the other
+                    // party has to follow it there or they sit on a dead leg.
+                    "conference_upgraded" -> {
+                        val confId = data.get("conference_id")?.asInt ?: return@collect
+                        _conferenceUpgrade.value = confId
                     }
                     // Being added to a live call rings like any other call: the
                     // invitee has to answer before their microphone joins it.
@@ -75,6 +121,10 @@ class CallOverlayViewModel @Inject constructor(
     }
 
     fun clear() { _incomingCall.value = null }
+
+    fun clearMissedCall() { _missedCall.value = null }
+
+    fun clearConferenceUpgrade() { _conferenceUpgrade.value = null }
 
     fun clearConferenceInvite() { _conferenceInvite.value = null }
 

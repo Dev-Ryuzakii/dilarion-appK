@@ -512,6 +512,17 @@ export async function getGroupMembers(token: string, groupId: number): Promise<G
   return res.json();
 }
 
+/**
+ * Every call_status_update status that means "this call is over".
+ *
+ * The server reports a caller who hangs up before the callee picks up as
+ * "missed", not "end" — a client that only listens for "end"/"declined" keeps
+ * ringing forever after the other side gives up.
+ */
+export const CALL_TERMINAL_STATUSES = [
+  'end', 'ended', 'decline', 'declined', 'missed', 'busy', 'cancelled', 'canceled',
+];
+
 // ── Call history ───────────────────────────────────────────────────────────────
 
 export interface CallRecord {

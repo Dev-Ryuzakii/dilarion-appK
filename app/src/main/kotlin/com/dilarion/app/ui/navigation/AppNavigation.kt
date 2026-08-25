@@ -2,6 +2,9 @@ package com.dilarion.app.ui.navigation
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -43,10 +46,41 @@ fun AppNavigation(pendingIncomingCall: IncomingCallData? = null) {
     val incomingCall by overlayVm.incomingCall.collectAsState()
     val conferenceInvite by overlayVm.conferenceInvite.collectAsState()
     val minimizedCall by overlayVm.minimizedCall.collectAsState()
+    val missedCall by overlayVm.missedCall.collectAsState()
+    val conferenceUpgrade by overlayVm.conferenceUpgrade.collectAsState()
+
+    // Our 1:1 call was turned into a group call by the other party. Group calls
+    // run in the LiveKit room — staying on the mesh leg would leave us connected
+    // to no one — so follow it there.
+    LaunchedEffect(conferenceUpgrade) {
+        val confId = conferenceUpgrade ?: return@LaunchedEffect
+        overlayVm.clearConferenceUpgrade()
+        overlayVm.clearMinimized()
+        navController.navigate(Screen.Gallery.route(confId))
+    }
 
     // Inject call from notification intent into overlay VM
     LaunchedEffect(pendingIncomingCall) {
         if (pendingIncomingCall != null) overlayVm.setFromNotification(pendingIncomingCall)
+    }
+
+    // The caller gave up before this device answered. The ring is already gone;
+    // offer the call back here rather than making the user go find them again.
+    missedCall?.let { missed ->
+        AlertDialog(
+            onDismissRequest = { overlayVm.clearMissedCall() },
+            title = { Text("Missed call") },
+            text = { Text("${missed.caller} called and hung up before you answered.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    overlayVm.clearMissedCall()
+                    navController.navigate(Screen.Call.route(missed.caller))
+                }) { Text("Call back") }
+            },
+            dismissButton = {
+                TextButton(onClick = { overlayVm.clearMissedCall() }) { Text("Dismiss") }
+            },
+        )
     }
 
     // Show incoming call overlay over whatever screen is active
@@ -117,6 +151,9 @@ fun AppNavigation(pendingIncomingCall: IncomingCallData? = null) {
                 onOpenChat = { username ->
                     navController.navigate(Screen.Chat.route(username))
                 },
+                onCallUser = { username ->
+                    navController.navigate(Screen.Call.route(username))
+                },
                 onOpenGroupChat = { groupId, groupName ->
                     navController.navigate(Screen.GroupChat.route(groupId, groupName))
                 },
@@ -184,6 +221,11 @@ fun AppNavigation(pendingIncomingCall: IncomingCallData? = null) {
             CallScreen(
                 username = username,
                 onCallEnded = { overlayVm.clearMinimized(); navController.popBackStack() },
+                onOpenGallery = { confId ->
+                    overlayVm.clearMinimized()
+                    navController.popBackStack()
+                    navController.navigate(Screen.Gallery.route(confId))
+                },
                 onMinimize = { callId ->
                     overlayVm.setMinimized(callId ?: 0, username)
                     navController.popBackStack()

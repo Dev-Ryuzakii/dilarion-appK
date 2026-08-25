@@ -136,11 +136,64 @@ struct CallScreen: View {
                                 }
                             }
                         }
-                    } else if vm.uiState.state == .ended {
+                    } else if vm.uiState.state == .ended && vm.uiState.endedByMe {
                         // Empty control space when call is ending
                         Text("Ending session...")
                             .font(.system(size: 14))
                             .foregroundColor(.white.opacity(0.5))
+                    } else if vm.uiState.state == .ended {
+                        // The other side ended, declined, or never answered —
+                        // offer the redial here rather than sending the user
+                        // back to the contact list to try again.
+                        HStack(spacing: 28) {
+                            Button {
+                                onDismiss()
+                            } label: {
+                                VStack(spacing: 8) {
+                                    Image(systemName: "xmark")
+                                        .font(.system(size: 22))
+                                        .foregroundColor(.white)
+                                        .frame(width: 56, height: 56)
+                                        .background(Color.white.opacity(0.15))
+                                        .clipShape(Circle())
+                                    Text("Close")
+                                        .font(.system(size: 13, weight: .medium))
+                                        .foregroundColor(.white.opacity(0.8))
+                                }
+                            }
+
+                            Button {
+                                vm.startOutgoingCall(peerUsername: vm.uiState.peerUsername, type: .voice)
+                            } label: {
+                                VStack(spacing: 8) {
+                                    Image(systemName: "phone.fill")
+                                        .font(.system(size: 24))
+                                        .foregroundColor(.white)
+                                        .frame(width: 64, height: 64)
+                                        .background(Color.green)
+                                        .clipShape(Circle())
+                                    Text("Call back")
+                                        .font(.system(size: 13, weight: .medium))
+                                        .foregroundColor(.white.opacity(0.8))
+                                }
+                            }
+
+                            Button {
+                                vm.startOutgoingCall(peerUsername: vm.uiState.peerUsername, type: .video)
+                            } label: {
+                                VStack(spacing: 8) {
+                                    Image(systemName: "video.fill")
+                                        .font(.system(size: 22))
+                                        .foregroundColor(.white)
+                                        .frame(width: 56, height: 56)
+                                        .background(Color.blue)
+                                        .clipShape(Circle())
+                                    Text("Video")
+                                        .font(.system(size: 13, weight: .medium))
+                                        .foregroundColor(.white.opacity(0.8))
+                                }
+                            }
+                        }
                     } else {
                         // Active call option: mute, speaker, end
                         HStack(spacing: 28) {
@@ -197,7 +250,9 @@ struct CallScreen: View {
         }
         .statusBarHidden(true)
         .onChange(of: vm.uiState.state) { state in
-            if state == .ended {
+            // Only auto-dismiss the call we ended ourselves — a call the other
+            // side ended stays up so its "Call back" buttons can be used.
+            if state == .ended && vm.uiState.endedByMe {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
                     onDismiss()
                 }

@@ -294,6 +294,22 @@ struct CallHistoryRow: View {
                 Text(formatTime(call.startedAt ?? ""))
                     .font(.system(size: 11))
                     .foregroundColor(.textSecondary)
+
+                // Redial straight from the history entry — the whole point of
+                // opening the calls tab after a call you did not take.
+                if call.otherPartyUsername != nil {
+                    Button {
+                        CallViewModel.shared.startOutgoingCall(
+                            peerUsername: peer,
+                            type: isVideo ? .video : .voice
+                        )
+                    } label: {
+                        Image(systemName: isVideo ? "video.fill" : "phone.fill")
+                            .font(.system(size: 17))
+                            .foregroundColor(.onlineGreen)
+                    }
+                    .buttonStyle(.plain)
+                }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)

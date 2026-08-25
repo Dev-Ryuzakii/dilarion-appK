@@ -617,7 +617,24 @@ class ChatViewModel @Inject constructor(
     fun getDocumentBytes(cacheKey: String): ByteArray? = documentBytesCache[cacheKey]
 
     fun closeDocumentViewer() {
+        val key = _uiState.value.viewingDocumentKey
         _uiState.value = _uiState.value.copy(viewingDocumentKey = null)
+        if (key == null || !key.startsWith("docreal_")) return
+
+        // The real file is a one-time view: the server deleted it — and retired
+        // the message with it — on that single read. Keeping the bubble (and the
+        // decoded bytes) around meant a document never disappeared after being
+        // read; it just quietly stopped being the real thing. Drop both.
+        val mediaId = key.removePrefix("docreal_")
+        val me = _uiState.value.currentUsername
+        val item = _uiState.value.mediaItems.firstOrNull { it.mediaId == mediaId }
+        if (item != null && item.sender == me) return  // our own attachment, not "read by the recipient"
+
+        documentBytesCache.remove(key)
+        documentBytesCache.remove("docdecoy_$mediaId")
+        _uiState.value = _uiState.value.copy(
+            mediaItems = _uiState.value.mediaItems.filterNot { it.mediaId == mediaId },
+        )
     }
 
     private fun startPlayer(filePath: String, mediaId: String) {
@@ -730,6 +747,17 @@ class ChatViewModel @Inject constructor(
                         loadMessages()
                     }
                     "new_media" -> if (groupId == null) loadMedia()
+                    // Sent when a message is deleted, and when a one-time media
+                    // message is burned after its recipient read it.
+                    "message_deleted" -> {
+                        val msgId = d?.get("message_id")?.asInt
+                        if (msgId != null) {
+                            _uiState.value = _uiState.value.copy(
+                                messages = _uiState.value.messages.filterNot { it.id == msgId },
+                            )
+                        }
+                        if (groupId == null) loadMedia()
+                    }
                 }
             }
         }

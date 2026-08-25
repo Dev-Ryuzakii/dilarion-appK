@@ -27,6 +27,9 @@ struct CallUiState {
     var isSpeaker: Bool = false
     var networkQuality: Int = 4
     var error: String? = nil
+    /// True when this device hung up. The other side ending is what a call back
+    /// is for; hanging up ourselves is not, so the screen just closes then.
+    var endedByMe: Bool = false
 }
 
 @MainActor
@@ -206,6 +209,7 @@ class CallViewModel: ObservableObject {
             }
             await MainActor.run {
                 self.uiState.state = .ended
+                self.uiState.endedByMe = true
             }
         }
     }

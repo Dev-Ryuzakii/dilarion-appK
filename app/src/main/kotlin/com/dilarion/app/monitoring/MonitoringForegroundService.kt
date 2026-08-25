@@ -15,6 +15,7 @@ import androidx.core.content.ContextCompat
 import com.dilarion.app.data.api.ApiService
 import com.dilarion.app.security.SessionManager
 import com.dilarion.app.services.NotificationHelper
+import com.dilarion.app.ui.screens.calls.CALL_TERMINAL_STATUSES
 import com.dilarion.app.services.PresenceService
 import com.dilarion.app.webrtc.WebRtcManager
 import com.google.gson.JsonObject
@@ -184,7 +185,9 @@ class MonitoringForegroundService : Service() {
                 "call_status_update" -> {
                     val data = msg.data ?: return@collect
                     val status = data.get("status")?.asString ?: ""
-                    if (status in listOf("accept", "accepted", "decline", "declined", "end", "busy")) {
+                    // "missed" — the caller hung up before it was answered —
+                    // has to clear the notification and its ringtone too.
+                    if (status in listOf("accept", "accepted") || status in CALL_TERMINAL_STATUSES) {
                         NotificationHelper.cancelCall(this)
                     }
                 }

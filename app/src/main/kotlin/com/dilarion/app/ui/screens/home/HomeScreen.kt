@@ -37,6 +37,8 @@ private enum class HomeTab { CHATS, GROUPS, MEETINGS, CALENDAR, CALLS }
 fun HomeScreen(
     viewModel: HomeViewModel,
     onOpenChat: (String) -> Unit,
+    /** Redial someone straight from their call-history entry. */
+    onCallUser: (String) -> Unit,
     onOpenGroupChat: (Int, String) -> Unit,
     onNewChat: () -> Unit,
     onNewMeeting: () -> Unit,
@@ -136,7 +138,7 @@ fun HomeScreen(
                 HomeTab.GROUPS   -> GroupsTab(uiState, onOpenGroupChat)
                 HomeTab.MEETINGS -> MeetingsTab(onNewMeeting, onMeetings)
                 HomeTab.CALENDAR -> com.dilarion.app.ui.screens.calendar.CalendarScreen(onJoinMeeting = onJoinMeeting)
-                HomeTab.CALLS    -> CallsTab(uiState, uiState.currentUsername)
+                HomeTab.CALLS    -> CallsTab(uiState, uiState.currentUsername, onCallUser)
             }
         }
     }
@@ -260,7 +262,11 @@ private fun GroupsTab(uiState: HomeUiState, onOpenGroupChat: (Int, String) -> Un
 // ── Calls Tab ────────────────────────────────────────────────────────────────
 
 @Composable
-private fun CallsTab(uiState: HomeUiState, currentUsername: String) {
+private fun CallsTab(
+    uiState: HomeUiState,
+    currentUsername: String,
+    onCallUser: (String) -> Unit,
+) {
     if (uiState.isCallHistoryLoading) {
         UserListSkeleton(count = 6)
         return
@@ -273,22 +279,29 @@ private fun CallsTab(uiState: HomeUiState, currentUsername: String) {
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = 8.dp)) {
         items(uiState.callHistory, key = { "call_${it.id}" }) { call ->
-            CallHistoryRow(call, currentUsername)
+            CallHistoryRow(call, currentUsername, onCallUser)
         }
     }
 }
 
 @Composable
-private fun CallHistoryRow(call: CallHistoryItem, currentUsername: String) {
+private fun CallHistoryRow(
+    call: CallHistoryItem,
+    currentUsername: String,
+    onCallUser: (String) -> Unit,
+) {
     val isOutgoing = call.isCaller
     val peer = call.otherPartyUsername ?: "Unknown"
     val isVideo = call.callType == "video"
     val missed = call.status == "declined" || call.status == "missed" || call.status == "busy"
 
+    val canCallBack = call.otherPartyUsername != null && peer != currentUsername
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .background(SurfaceWhite)
+            .then(if (canCallBack) Modifier.clickable { onCallUser(peer) } else Modifier)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -330,6 +343,16 @@ private fun CallHistoryRow(call: CallHistoryItem, currentUsername: String) {
             style = MaterialTheme.typography.labelSmall,
             color = TextSecondary,
         )
+        if (canCallBack) {
+            IconButton(onClick = { onCallUser(peer) }) {
+                Icon(
+                    if (isVideo) Icons.Default.Videocam else Icons.Default.Call,
+                    "Call $peer back",
+                    tint = OnlineGreen,
+                    modifier = Modifier.size(22.dp),
+                )
+            }
+        }
     }
     HorizontalDivider(modifier = Modifier.padding(start = 78.dp), color = BorderGrey, thickness = 0.5.dp)
 }

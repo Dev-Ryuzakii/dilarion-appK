@@ -36,6 +36,8 @@ interface Props {
   onMasterTokenSaved: (t: string) => void;
   onCall: (partner: string, type: 'audio' | 'video') => void;
   onJoinMeeting: JoinMeetingHandler;
+  /** Leave the conversation and go back to the list. */
+  onBack?: () => void;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -662,7 +664,7 @@ interface PendingMsg {
   timestamp: string;
 }
 
-export default function ChatPanel({ token, myUsername, partner, partnerOnline, masterToken, onMasterTokenSaved, onCall, onJoinMeeting }: Props) {
+export default function ChatPanel({ token, myUsername, partner, partnerOnline, masterToken, onMasterTokenSaved, onCall, onJoinMeeting, onBack }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [pending, setPending] = useState<PendingMsg[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1013,6 +1015,13 @@ export default function ChatPanel({ token, myUsername, partner, partnerOnline, m
       {/* Header */}
       <div style={cs.header}>
         <div style={cs.headerLeft}>
+          {onBack && (
+            <button onClick={onBack} style={cs.backBtn} title="Back to conversations" aria-label="Back">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M19 12H5M12 19l-7-7 7-7" />
+              </svg>
+            </button>
+          )}
           <div style={cs.avatar}>{initials(partner)}</div>
           <div>
             <div style={cs.partnerName}>{partner}</div>
@@ -1359,6 +1368,17 @@ const cs: Record<string, React.CSSProperties> = {
     display: 'flex',
     alignItems: 'center',
     gap: 12,
+  },
+  backBtn: {
+    background: 'transparent',
+    border: 'none',
+    color: 'var(--text-secondary)',
+    cursor: 'pointer',
+    padding: 4,
+    borderRadius: 8,
+    display: 'flex',
+    alignItems: 'center',
+    flexShrink: 0,
   },
   avatar: {
     width: 42,

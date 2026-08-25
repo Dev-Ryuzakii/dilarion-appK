@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { presenceService } from '../services/presence';
-import { initiateCall, performCallAction, sendCallIceCandidate, setCallMediaState, getCallStatus, createConference, conferenceInvite, conferenceSignal, conferenceLeave, getUsers, getIceServers, Contact } from '../services/api';
+import { initiateCall, performCallAction, sendCallIceCandidate, setCallMediaState, getCallStatus, createConference, conferenceInvite, conferenceSignal, conferenceLeave, getUsers, getIceServers, Contact, CALL_TERMINAL_STATUSES } from '../services/api';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -27,6 +27,10 @@ interface Props {
   /** No longer taken from stored state: answering prompts for it every time. */
   masterToken?: string;
   onEnd: () => void;
+  /** Redial this partner after the call ended, as a fresh outgoing call. */
+  onCallBack?: (callType: CallType) => void;
+  /** Adding a third participant moves everyone to the LiveKit conference room. */
+  onUpgradeToGallery?: (conferenceId: number) => void;
   minimized?: boolean;
   onMinimize?: () => void;
   onMaximize?: () => void;
@@ -160,7 +164,7 @@ function fmtDur(s: number) {
 
 // ── CallModal ─────────────────────────────────────────────────────────────────
 
-export default function CallModal({ token, partner, callType, isIncoming, callId: incomingCallId, offerSdp: incomingOfferSdp, conferenceIdProp, conferenceParticipants, onEnd, minimized = false, onMinimize, onMaximize }: Props) {
+export default function CallModal({ token, partner, callType, isIncoming, callId: incomingCallId, offerSdp: incomingOfferSdp, conferenceIdProp, conferenceParticipants, onEnd, onCallBack, onUpgradeToGallery, minimized = false, onMinimize, onMaximize }: Props) {
   // calling = outgoing, waiting for callee to receive; ringing = callee's device is ringing; connecting = SDP negotiating
   const [state, setState] = useState<'calling' | 'ringing' | 'connecting' | 'connected' | 'ended'>(
     isIncoming ? 'ringing' : 'calling',
@@ -434,8 +438,11 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
         } else if (data.status === 'accept' || data.status === 'accepted') {
           setState('connecting');
           if (data.answer_sdp) await applyAnswer(data.answer_sdp);
-        } else if (['declined', 'decline', 'end', 'busy'].includes(data.status)) {
-          handleEnd();
+        } else if (CALL_TERMINAL_STATUSES.includes(data.status)) {
+          // Includes "missed" — how the server reports the caller hanging up
+          // before we answered. Without it this side kept ringing after they
+          // had already given up.
+          finishCall();
         }
         return;
       }
@@ -468,7 +475,7 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
 
       // Legacy p2p fallback: call_end sent directly by other desktop client
       if (msg.type === 'call_end' && (msg.sender === partner || msg.from === partner)) {
-        handleEnd();
+        finishCall();
       }
 
       // ── Conference signaling ────────────────────────────────────────────────
@@ -653,6 +660,17 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
     await conferenceInvite(token, confId, username.trim());
     setUserPickerOpen(false);
     setUserSearch('');
+
+    // The invitee joins the conference through LiveKit (that is the only place a
+    // group call renders video and a per-participant grid). Staying on the 1:1
+    // mesh here would leave them on a different transport from us — audio-only
+    // at best, with no way to turn a camera on. Move everyone into the room.
+    if (onUpgradeToGallery && confId) {
+      const id = confId;
+      if (callIdRef.current) performCallAction(token, callIdRef.current, 'end').catch(() => {});
+      finishCall();
+      onUpgradeToGallery(id);
+    }
   }
 
   function stopAllMedia() {
@@ -701,14 +719,26 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
 
   // ── Controls ─────────────────────────────────────────────────────────────────
 
-  function handleEnd() {
+  /**
+   * Tear our side down without telling the server anything. Used when the call
+   * is already over as far as the server is concerned — the other party ended,
+   * declined, or we cancelled and it came back as "missed". Deliberately leaves
+   * the modal mounted so the "Call back" affordance can be offered; the user
+   * dismisses it (or redials) from there.
+   */
+  function finishCall() {
     if (reconnectTimerRef.current) { clearTimeout(reconnectTimerRef.current); reconnectTimerRef.current = null; }
+    if (timerRef.current) clearInterval(timerRef.current);
+    stopAllMedia();
+    setState('ended');
+  }
+
+  function handleEnd() {
     if (callIdRef.current) {
       performCallAction(token, callIdRef.current, 'end').catch(() => {});
     }
-    setState('ended');
-    if (timerRef.current) clearInterval(timerRef.current);
-    stopAllMedia();
+    finishCall();
+    // We chose to hang up, so there is nothing to offer a call back for — close.
     setTimeout(onEnd, 400);
   }
 
@@ -874,6 +904,26 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
         {(state === 'calling' || (state === 'ringing' && !isIncoming)) && (
           <div style={cs.controls}>
             <ControlBtn icon="end" color="#ef4444" label="Cancel" onClick={handleEnd} />
+          </div>
+        )}
+
+        {/* Ended by the other side (declined / no answer / hung up) — offer a
+            redial rather than dropping the user back into the list, which is
+            where they would otherwise have to go hunting for the contact. */}
+        {state === 'ended' && onCallBack && !conferenceId && (
+          <div style={cs.controls}>
+            <ControlBtn icon="end" color="#4b5563" label="Close" onClick={onEnd} />
+            <ControlBtn
+              icon="accept"
+              color="#25d366"
+              label="Call back"
+              onClick={() => onCallBack(callType)}
+            />
+            {callType === 'video' ? (
+              <ControlBtn icon="accept" color="#2563eb" label="Voice" onClick={() => onCallBack('audio')} />
+            ) : (
+              <ControlBtn icon="cam" color="#2563eb" label="Video" onClick={() => onCallBack('video')} />
+            )}
           </div>
         )}
 

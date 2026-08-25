@@ -53,6 +53,8 @@ private val ControlButton = Color(0xFF2C2C54)
 fun CallScreen(
     username: String,
     onCallEnded: () -> Unit,
+    /** Adding a third participant moves everyone into the LiveKit conference room. */
+    onOpenGallery: ((conferenceId: Int) -> Unit)? = null,
     onMinimize: ((callId: Int?) -> Unit)? = null,
     viewModel: CallViewModel = hiltViewModel(LocalContext.current as ComponentActivity),
 ) {
@@ -69,12 +71,24 @@ fun CallScreen(
         if (uiState.state == CallState.ENDED) viewModel.resetToIdle()
     }
 
-    // Only navigate away on ENDED when the call was actually active (not showing type dialog)
+    // Only navigate away on ENDED when the call was actually active (not showing
+    // type dialog). A call the OTHER side ended stays put: that is the case a
+    // call back is for, and the buttons on the ended screen close it instead.
     LaunchedEffect(uiState.state) {
-        if (uiState.state == CallState.ENDED && !showTypeDialog) {
+        if (uiState.state == CallState.ENDED && !showTypeDialog && uiState.endedByMe) {
             kotlinx.coroutines.delay(1200)
             onCallEnded()
         }
+    }
+
+    // This call was turned into a group call — leave the mesh leg and join the
+    // conference room, which is where a group call renders video.
+    val conferenceUpgrade by viewModel.conferenceUpgrade.collectAsState()
+    LaunchedEffect(conferenceUpgrade) {
+        val confId = conferenceUpgrade ?: return@LaunchedEffect
+        viewModel.clearConferenceUpgrade()
+        viewModel.endCallForConferenceUpgrade()
+        if (onOpenGallery != null) onOpenGallery(confId) else onCallEnded()
     }
 
     uiState.error?.let { err ->
@@ -103,6 +117,7 @@ fun CallScreen(
             remoteVideo = remoteVideo,
             eglBaseContext = viewModel.eglBaseContext,
             onMinimize = onMinimize,
+            onCloseEnded = { viewModel.resetToIdle(); onCallEnded() },
         )
     }
 }
@@ -220,6 +235,7 @@ private fun CallContent(
     remoteVideo: VideoTrack?,
     eglBaseContext: EglBase.Context,
     onMinimize: ((callId: Int?) -> Unit)? = null,
+    onCloseEnded: () -> Unit = {},
 ) {
     when {
         uiState.callType == CallType.VIDEO && uiState.state == CallState.CONNECTED && remoteVideo != null -> {
@@ -297,6 +313,11 @@ private fun CallContent(
                     Spacer(Modifier.weight(1f))
                     if (uiState.state == CallState.CONNECTED) {
                         CallControls(uiState, viewModel, showFlip = false, onMinimize = onMinimize)
+                    } else if (uiState.state == CallState.ENDED && !uiState.endedByMe) {
+                        EndedCallControls(
+                            onCallBack = { type -> viewModel.startOutgoingCall(uiState.peerUsername, type) },
+                            onClose = onCloseEnded,
+                        )
                     } else {
                         CallActionButton(Icons.Default.CallEnd, "End", EndCallRed) { viewModel.endCall() }
                     }
@@ -755,6 +776,23 @@ internal fun CallActionButton(icon: ImageVector, label: String, color: Color, on
         ) { Icon(icon, label, tint = SurfaceWhite, modifier = Modifier.size(32.dp)) }
         Spacer(Modifier.height(8.dp))
         Text(label, color = SurfaceWhite.copy(alpha = 0.7f), fontSize = 12.sp)
+    }
+}
+
+/**
+ * Shown after the other side ended, declined, or never answered. Redialling from
+ * here saves the trip back to the contact list, which is where the user would
+ * otherwise have to go to try again.
+ */
+@Composable
+private fun EndedCallControls(
+    onCallBack: (CallType) -> Unit,
+    onClose: () -> Unit,
+) {
+    Row(horizontalArrangement = Arrangement.spacedBy(28.dp), verticalAlignment = Alignment.CenterVertically) {
+        CallActionButton(Icons.Default.Close, "Close", ControlButton, onClose)
+        CallActionButton(Icons.Default.Call, "Call back", AcceptGreen) { onCallBack(CallType.VOICE) }
+        CallActionButton(Icons.Default.Videocam, "Video", Color(0xFF2563EB)) { onCallBack(CallType.VIDEO) }
     }
 }
 

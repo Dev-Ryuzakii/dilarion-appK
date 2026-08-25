@@ -48,6 +48,12 @@ data class CallUiState(
     val masterTokenRejected: Boolean = false,
     /** Whether the person on the other end has muted their microphone. */
     val peerMuted: Boolean = false,
+    /**
+     * True when this device hung up. The other side ending the call is what a
+     * call back is for; hanging up ourselves is not, so the screen closes
+     * straight away in that case instead of offering to redial.
+     */
+    val endedByMe: Boolean = false,
 )
 
 @HiltViewModel
@@ -63,6 +69,15 @@ class CallViewModel @Inject constructor(
 
     private val _conferenceState = MutableStateFlow(ConferenceUiState())
     val conferenceState: StateFlow<ConferenceUiState> = _conferenceState
+
+    /**
+     * Set to the conference id when this 1:1 call has been turned into a group
+     * call. A conference runs on the LiveKit SFU, which is where a group call
+     * gets per-participant video; the mesh leg this screen is on carries audio
+     * only, so everyone has to move into the room rather than stay here.
+     */
+    private val _conferenceUpgrade = MutableStateFlow<Int?>(null)
+    val conferenceUpgrade: StateFlow<Int?> = _conferenceUpgrade
 
     val localVideo: StateFlow<VideoTrack?> = webRtcManager.localVideo
     val remoteVideo: StateFlow<VideoTrack?> = webRtcManager.remoteVideo
@@ -246,11 +261,30 @@ class CallViewModel @Inject constructor(
         }
     }
 
+    fun clearConferenceUpgrade() { _conferenceUpgrade.value = null }
+
+    /**
+     * Hang up the 1:1 leg without moving to ENDED — the call is not over, it is
+     * continuing in the conference room. ENDED would make CallScreen navigate
+     * back home a beat after we sent it to the gallery.
+     */
+    fun endCallForConferenceUpgrade() {
+        NotificationHelper.stopRingtone()
+        val callId = _uiState.value.callId
+        teardownMedia()
+        _uiState.value = CallUiState()
+        if (callId == null) return
+        viewModelScope.launch {
+            val token = sessionManager.sessionToken.first() ?: return@launch
+            runCatching { apiService.callAction("Bearer $token", CallActionRequest(callId, "end")) }
+        }
+    }
+
     fun endCall() {
         NotificationHelper.stopRingtone()
         val callId = _uiState.value.callId
         teardownMedia()
-        _uiState.value = _uiState.value.copy(state = CallState.ENDED)
+        _uiState.value = _uiState.value.copy(state = CallState.ENDED, endedByMe = true)
         if (callId == null) return
         viewModelScope.launch {
             val token = sessionManager.sessionToken.first() ?: return@launch
@@ -393,6 +427,7 @@ class CallViewModel @Inject constructor(
         wsObserverJob = null
         _uiState.value = CallUiState()
         _conferenceState.value = ConferenceUiState()
+        _conferenceUpgrade.value = null
         remoteDescSet = false
         pendingRemoteCandidates.clear()
         pendingCandidates.clear()
@@ -409,7 +444,7 @@ class CallViewModel @Inject constructor(
                     "call_status_update" -> {
                         val callId = data.get("call_id")?.asInt ?: return@collect
                         if (callId != _uiState.value.callId) return@collect
-                        when (data.get("status")?.asString) {
+                        when (data.get("status")?.asString ?: "") {
                             "accept", "accepted" -> {
                                 val answerSdp = data.get("answer_sdp")?.asString
                                 if (answerSdp != null) webRtcManager.handleAnswer(answerSdp)
@@ -425,9 +460,12 @@ class CallViewModel @Inject constructor(
                             }
                             "calling" -> _uiState.value = _uiState.value.copy(state = CallState.RINGING)
                             "ringing" -> _uiState.value = _uiState.value.copy(state = CallState.RINGING)
-                            "decline", "declined", "end", "busy" -> {
+                            in CALL_TERMINAL_STATUSES -> {
                                 // Remote hung up — kill our side of the media too,
                                 // otherwise both peers keep hearing each other.
+                                // "missed" belongs here: it is what the server
+                                // reports when the caller gives up mid-ring, and
+                                // leaving it out kept this side ringing after.
                                 NotificationHelper.stopRingtone()
                                 teardownMedia()
                                 _uiState.value = _uiState.value.copy(state = CallState.ENDED)
@@ -775,6 +813,10 @@ class CallViewModel @Inject constructor(
                 }
                 if (confId != null) {
                     apiService.conferenceInvite("Bearer $token", confId, mapOf("username" to username))
+                    // Everyone now belongs in the LiveKit room, not on this mesh
+                    // leg — the invitee joins there, and it is the only path with
+                    // video for a third participant.
+                    _conferenceUpgrade.value = confId
                 }
             }
         }

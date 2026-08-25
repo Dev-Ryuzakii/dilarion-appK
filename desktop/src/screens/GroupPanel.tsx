@@ -37,6 +37,8 @@ interface Props {
   masterToken: string | null;
   onMasterTokenSaved: (t: string) => void;
   onJoinMeeting: JoinMeetingHandler;
+  /** Leave the group thread and go back to the list. */
+  onBack?: () => void;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -301,12 +303,14 @@ interface GroupMsgBubbleProps {
   onStarToggle: () => void;
   onEdit: () => void;
   onDelete: () => void;
+  onRemoveMessage: (id: number) => void;
   isStarred: boolean;
 }
 
 function GroupMsgBubble({
   msg, isMine, myUsername, token, masterToken, onDecrypt, onMasterTokenSaved, onJoinMeeting,
-  replyToMsg, onReact, onReply, onForward, onPinToggle, onStarToggle, onEdit, onDelete, isStarred,
+  replyToMsg, onReact, onReply, onForward, onPinToggle, onStarToggle, onEdit, onDelete,
+  onRemoveMessage, isStarred,
 }: GroupMsgBubbleProps) {
   const ct = msg.content_type;
   const mediaId = msg.content;
@@ -363,10 +367,11 @@ function GroupMsgBubble({
         mediaId={mediaId}
         masterToken={masterToken}
         onMasterTokenSaved={onMasterTokenSaved}
+        onRemove={() => onRemoveMessage(msg.id)}
       />
     );
   } else if (isImage(ct) || isVoice(ct) || isMedia(ct)) {
-    body = <MediaBubble token={token} mediaId={mediaId} contentType={ct} />;
+    body = <MediaBubble token={token} mediaId={mediaId} contentType={ct} onRemove={() => onRemoveMessage(msg.id)} />;
   } else {
     body = (
       <span style={{ fontSize: '0.88rem', lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'inherit' }}>
@@ -504,7 +509,7 @@ function MessageSkeleton() {
 
 // ── GroupPanel ─────────────────────────────────────────────────────────────────
 
-export default function GroupPanel({ token, myUsername, group, masterToken, onMasterTokenSaved, onJoinMeeting }: Props) {
+export default function GroupPanel({ token, myUsername, group, masterToken, onMasterTokenSaved, onJoinMeeting, onBack }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [text, setText] = useState('');
@@ -785,6 +790,13 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
       {/* Header */}
       <div style={{ ...gs.header, justifyContent: 'space-between' }}>
         <div style={gs.headerLeft}>
+          {onBack && (
+            <button onClick={onBack} style={gs.backBtn} title="Back to groups" aria-label="Back">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M19 12H5M12 19l-7-7 7-7" />
+              </svg>
+            </button>
+          )}
           <div style={{ ...gs.avatar, background: avatarBg }}>{initials(group.name)}</div>
           <div>
             <div style={gs.groupName}>{group.name}</div>
@@ -833,6 +845,7 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
                 onStarToggle={() => handleStarToggle(msg)}
                 onEdit={() => handleEditStart(msg)}
                 onDelete={() => handleDeleteMessage(msg)}
+                onRemoveMessage={id => setMessages(prev => prev.filter(m => m.id !== id))}
                 isStarred={starredIds.has(msg.id)}
               />
             );
@@ -1080,6 +1093,17 @@ const gs: Record<string, React.CSSProperties> = {
     padding: '12px 20px',
     borderBottom: '1px solid var(--border-color)',
     background: 'var(--header-bg)',
+    flexShrink: 0,
+  },
+  backBtn: {
+    background: 'transparent',
+    border: 'none',
+    color: 'var(--text-secondary)',
+    cursor: 'pointer',
+    padding: 4,
+    borderRadius: 8,
+    display: 'flex',
+    alignItems: 'center',
     flexShrink: 0,
   },
   headerLeft: {

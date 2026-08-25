@@ -31,6 +31,7 @@ import {
   cancelMeeting,
   MeetingSummary,
   CalendarOccurrence,
+  CALL_TERMINAL_STATUSES,
 } from '../services/api';
 import { Keypair, loadKeypair, saveKeypair, clearKeypair, parseExportedKey } from '../services/keys';
 import ChatPanel from './ChatPanel';
@@ -1149,7 +1150,10 @@ function CallsList({ calls, loading, selectedCallId, onSelectCall }: CallsListPr
 
 // ── Call Detail Panel ──────────────────────────────────────────────────────────
 
-function CallDetailPanel({ call }: { call: CallRecord | null }) {
+function CallDetailPanel({ call, onCall }: {
+  call: CallRecord | null;
+  onCall: (partner: string, type: CallType) => void;
+}) {
   if (!call) {
     return (
       <div style={{
@@ -1215,6 +1219,37 @@ function CallDetailPanel({ call }: { call: CallRecord | null }) {
           <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Time</span>
           <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{fmtCallTime(call.started_at)}</span>
         </div>
+      </div>
+
+      {/* Redial straight from the history entry — the whole reason to open one. */}
+      <div style={{ display: 'flex', gap: 10 }}>
+        <button
+          onClick={() => onCall(call.other_party_username, 'audio')}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            background: '#25d366', color: '#062', border: 'none', borderRadius: 10,
+            padding: '0.6rem 1.1rem', fontWeight: 700, cursor: 'pointer', fontSize: '0.85rem',
+          }}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 1h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.64a16 16 0 0 0 6 6l.95-.95a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/>
+          </svg>
+          Call back
+        </button>
+        <button
+          onClick={() => onCall(call.other_party_username, 'video')}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            background: 'transparent', color: 'var(--text-secondary)',
+            border: '1px solid var(--border-color)', borderRadius: 10,
+            padding: '0.6rem 1.1rem', fontWeight: 600, cursor: 'pointer', fontSize: '0.85rem',
+          }}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M15 10l4.553-2.553A1 1 0 0 1 21 8.382v7.236a1 1 0 0 1-1.447.894L15 14M3 8a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+          </svg>
+          Video
+        </button>
       </div>
     </div>
   );
@@ -1327,6 +1362,9 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
       setConfJoining(false);
     }
   }
+  // A call that stopped ringing before it was answered — offered as a call back
+  // instead of leaving the user to go and find the caller again.
+  const [missedCall, setMissedCall] = useState<{ from: string; callType: CallType } | null>(null);
   const [callTokenInput, setCallTokenInput] = useState('');
   const [callTokenError, setCallTokenError] = useState<string | null>(null);
   const [callTokenLoading, setCallTokenLoading] = useState(false);
@@ -1454,10 +1492,31 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
         }
       } else if (msg.type === 'call_status_update') {
         const data = (msg as any).data || {};
-        if (['end', 'declined'].includes(data.status)) {
+        // "missed" is what the server reports when the caller hangs up before we
+        // answer — leaving it out of this list is what kept our side ringing
+        // after they gave up. Every terminal status has to stop the ring.
+        if (CALL_TERMINAL_STATUSES.includes(data.status)) {
           stopRinging();
-          setActiveCall(null);
+          // Only the un-answered incoming overlay is torn down here. A mounted
+          // CallModal owns its own ended state so it can offer a call back —
+          // it closes itself through onEnd.
+          setIncomingCall(prev => {
+            if (prev) setMissedCall({ from: prev.from, callType: prev.callType });
+            return null;
+          });
+        }
+      } else if (msg.type === 'conference_upgraded') {
+        // The other side of our 1:1 call added someone. A conference lives in the
+        // LiveKit room, not on our mesh peer connection, so follow them into it
+        // instead of sitting on a leg no one else is on.
+        const data = (msg as any).data || {};
+        const confId = Number(data.conference_id);
+        if (confId) {
+          stopRinging();
           setIncomingCall(null);
+          setActiveCall(null);
+          setCallMinimized(false);
+          setActiveGalleryCall({ conferenceId: confId });
         }
       }
     };
@@ -1973,6 +2032,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
             onMasterTokenSaved={() => {}}
             onCall={handleCall}
             onJoinMeeting={handleJoinMeetingFromChat}
+            onBack={() => setSelectedChat(null)}
           />
         );
       }
@@ -1998,6 +2058,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
               masterToken={null}
               onMasterTokenSaved={() => {}}
               onJoinMeeting={handleJoinMeetingFromChat}
+              onBack={() => setSelectedGroup(null)}
             />
           );
         }
@@ -2057,7 +2118,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
 
     if (activeTab === 'calls') {
       const selectedCall = calls.find(c => c.id === selectedCallId) ?? null;
-      return <CallDetailPanel call={selectedCall} />;
+      return <CallDetailPanel call={selectedCall} onCall={handleCall} />;
     }
 
     if (activeTab === 'settings') {
@@ -2226,6 +2287,20 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
           conferenceParticipants={activeCall.conferenceParticipants}
           masterToken={masterToken ?? undefined}
           onEnd={() => { setActiveCall(null); setCallMinimized(false); }}
+          onCallBack={(type) => {
+            // Remount as a brand-new outgoing call rather than resetting the
+            // modal in place: a fresh mount is the same path a normal outgoing
+            // call takes, so there is no half-torn-down peer connection to reuse.
+            const to = activeCall.partner;
+            setActiveCall(null);
+            setCallMinimized(false);
+            setTimeout(() => setActiveCall({ partner: to, callType: type, isIncoming: false }), 250);
+          }}
+          onUpgradeToGallery={(confId) => {
+            setActiveCall(null);
+            setCallMinimized(false);
+            setActiveGalleryCall({ conferenceId: confId });
+          }}
           minimized={callMinimized}
           onMinimize={() => setCallMinimized(true)}
           onMaximize={() => setCallMinimized(false)}
@@ -2278,6 +2353,37 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
                 {confJoining ? 'Joining…' : 'Join'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MISSED CALL — CALL BACK ──────────────────────────────────────── */}
+      {missedCall && !incomingCall && !activeCall && !activeGalleryCall && (
+        <div style={{
+          position: 'fixed', right: 24, bottom: 24, zIndex: 900,
+          background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 16,
+          padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 10,
+        }}>
+          <span style={{ fontSize: '0.8rem', color: '#9ca3af' }}>Missed call</span>
+          <span style={{ fontSize: '0.95rem', color: '#fff', fontWeight: 600 }}>{missedCall.from}</span>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              style={{ background: 'transparent', color: '#9ca3af', border: '1px solid #2a2a2a', borderRadius: 10, padding: '0.45rem 0.8rem', cursor: 'pointer', fontSize: '0.8rem' }}
+              onClick={() => setMissedCall(null)}
+            >
+              Dismiss
+            </button>
+            <button
+              style={{ background: '#25d366', color: '#062', border: 'none', borderRadius: 10, padding: '0.45rem 0.9rem', fontWeight: 700, cursor: 'pointer', fontSize: '0.8rem' }}
+              onClick={() => {
+                const to = missedCall.from;
+                const type = missedCall.callType;
+                setMissedCall(null);
+                handleCall(to, type);
+              }}
+            >
+              Call back
+            </button>
           </div>
         </div>
       )}
