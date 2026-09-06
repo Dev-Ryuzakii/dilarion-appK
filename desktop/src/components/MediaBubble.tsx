@@ -154,8 +154,9 @@ function VoiceBubble({ token, mediaId, masterToken, onMasterTokenSaved, onRemove
       const { mime } = sniffMedia(buf);
       setVoiceUrl(toDataUrl(buf, mime.startsWith('audio/') ? mime : 'audio/mp4'));
       setStage('decoy');
-    } catch {
-      setError('Failed to load');
+    } catch (err: any) {
+      const status = err?.status;
+      setError(status === 404 ? 'Voice note not found' : status ? `Failed to load (${status})` : 'Failed to load — check connection');
       setStage('idle');
     }
   }
@@ -204,19 +205,22 @@ function VoiceBubble({ token, mediaId, masterToken, onMasterTokenSaved, onRemove
 
   if (stage === 'idle' || stage === 'loading') {
     return (
-      <button
-        onClick={loadDecoy}
-        disabled={stage === 'loading'}
-        style={{
-          display: 'flex', alignItems: 'center', gap: 10, background: 'var(--bg-card)',
-          border: '1px solid var(--border-color)', borderRadius: 10, padding: '12px 16px',
-          cursor: stage === 'loading' ? 'wait' : 'pointer', color: 'var(--text-muted)', fontSize: '0.85rem',
-          opacity: stage === 'loading' ? 0.7 : 1,
-        }}
-      >
-        {stage === 'loading' ? <SpinnerIcon size={22} /> : <MicIconSvg size={22} color="#9ca3af" />}
-        <span>{stage === 'loading' ? 'Loading...' : 'Voice note'}</span>
-      </button>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <button
+          onClick={loadDecoy}
+          disabled={stage === 'loading'}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 10, background: 'var(--bg-card)',
+            border: '1px solid var(--border-color)', borderRadius: 10, padding: '12px 16px',
+            cursor: stage === 'loading' ? 'wait' : 'pointer', color: 'var(--text-muted)', fontSize: '0.85rem',
+            opacity: stage === 'loading' ? 0.7 : 1,
+          }}
+        >
+          {stage === 'loading' ? <SpinnerIcon size={22} /> : <MicIconSvg size={22} color="#9ca3af" />}
+          <span>{stage === 'loading' ? 'Loading...' : 'Voice note'}</span>
+        </button>
+        {error && <span style={{ fontSize: '0.72rem', color: '#ef4444' }}>{error}</span>}
+      </div>
     );
   }
 
