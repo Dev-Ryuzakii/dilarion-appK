@@ -30,6 +30,19 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.File
 import javax.inject.Inject
 
+enum class PendingUploadKind { IMAGE, DOCUMENT, VOICE }
+
+// WhatsApp-style optimistic bubble — shown the instant a send starts, in the
+// spot the real bubble will land, removed once loadMedia() picks up the real
+// MediaItem (or on failure). Never persisted, purely a local placeholder.
+data class PendingUpload(
+    val id: String = java.util.UUID.randomUUID().toString(),
+    val kind: PendingUploadKind,
+    val filename: String,
+    val previewUri: Uri? = null,
+    val timestamp: String = java.time.Instant.now().toString(),
+)
+
 sealed class ChatItem {
     abstract val timestamp: String?
 
@@ -40,6 +53,10 @@ sealed class ChatItem {
     data class MediaMessage(val item: MediaItem) : ChatItem() {
         override val timestamp: String? = item.timestamp
     }
+
+    data class Pending(val upload: PendingUpload) : ChatItem() {
+        override val timestamp: String? = upload.timestamp
+    }
 }
 
 data class ChatUiState(
@@ -49,6 +66,7 @@ data class ChatUiState(
     val isLoading: Boolean = true,
     val isSending: Boolean = false,
     val isUploadingMedia: Boolean = false,
+    val pendingUploads: List<PendingUpload> = emptyList(),
     val currentUsername: String = "",
     val error: String? = null,
     // Per-item unlock — "msg_<id>" / "media_<mediaId>". Entering the master token
@@ -436,10 +454,15 @@ class ChatViewModel @Inject constructor(
     fun sendAttachment(uri: Uri, context: Context, decoyKind: String? = null) {
         viewModelScope.launch {
             val token = sessionManager.sessionToken.first() ?: return@launch
-            _uiState.value = _uiState.value.copy(isUploadingMedia = true)
+            val mime = context.contentResolver.getType(uri) ?: "application/octet-stream"
+            val displayName = queryDisplayName(context, uri) ?: "attachment"
+            val kind = if (mime.startsWith("image/")) PendingUploadKind.IMAGE else PendingUploadKind.DOCUMENT
+            val pending = PendingUpload(kind = kind, filename = displayName, previewUri = uri)
+            _uiState.value = _uiState.value.copy(
+                isUploadingMedia = true,
+                pendingUploads = _uiState.value.pendingUploads + pending,
+            )
             runCatching {
-                val mime = context.contentResolver.getType(uri) ?: "application/octet-stream"
-                val displayName = queryDisplayName(context, uri) ?: "attachment"
                 val bytes = context.contentResolver.openInputStream(uri)?.readBytes() ?: return@launch
                 val tempFile = File(context.cacheDir, "upload_${System.currentTimeMillis()}_$displayName")
                 tempFile.writeBytes(bytes)
@@ -454,7 +477,10 @@ class ChatViewModel @Inject constructor(
             }.onFailure {
                 _uiState.value = _uiState.value.copy(error = it.message)
             }
-            _uiState.value = _uiState.value.copy(isUploadingMedia = false)
+            _uiState.value = _uiState.value.copy(
+                isUploadingMedia = false,
+                pendingUploads = _uiState.value.pendingUploads.filterNot { it.id == pending.id },
+            )
         }
     }
 
@@ -497,7 +523,11 @@ class ChatViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(isRecording = false, recordingSeconds = 0)
         viewModelScope.launch {
             val token = sessionManager.sessionToken.first() ?: return@launch
-            _uiState.value = _uiState.value.copy(isUploadingMedia = true)
+            val pending = PendingUpload(kind = PendingUploadKind.VOICE, filename = "Voice message")
+            _uiState.value = _uiState.value.copy(
+                isUploadingMedia = true,
+                pendingUploads = _uiState.value.pendingUploads + pending,
+            )
             runCatching {
                 val requestFile = file.asRequestBody("audio/mp4".toMediaTypeOrNull())
                 val filePart = MultipartBody.Part.createFormData("file", file.name, requestFile)
@@ -509,7 +539,10 @@ class ChatViewModel @Inject constructor(
             }.onFailure {
                 _uiState.value = _uiState.value.copy(error = it.message)
             }
-            _uiState.value = _uiState.value.copy(isUploadingMedia = false)
+            _uiState.value = _uiState.value.copy(
+                isUploadingMedia = false,
+                pendingUploads = _uiState.value.pendingUploads.filterNot { it.id == pending.id },
+            )
         }
     }
 
@@ -672,7 +705,8 @@ class ChatViewModel @Inject constructor(
         val s = _uiState.value
         return (s.messages.filter { !isMediaFilenameMessage(it, s.mediaItems) }
                     .map { ChatItem.TextMessage(it) } +
-                s.mediaItems.map { ChatItem.MediaMessage(it) })
+                s.mediaItems.map { ChatItem.MediaMessage(it) } +
+                s.pendingUploads.map { ChatItem.Pending(it) })
             .sortedBy { it.timestamp ?: "" }
     }
 

@@ -305,16 +305,19 @@ fun ChatScreen(
                             when (item) {
                                 is ChatItem.TextMessage -> "msg_${item.message.id}"
                                 is ChatItem.MediaMessage -> "media_${item.item.mediaId}"
+                                is ChatItem.Pending -> "pending_${item.upload.id}"
                             }
                         }
                     ) { index, item ->
                         val curTs = when (item) {
                             is ChatItem.TextMessage -> item.message.timestamp
                             is ChatItem.MediaMessage -> item.item.timestamp
+                            is ChatItem.Pending -> item.upload.timestamp
                         }
                         val prevTs = if (index > 0) when (val prev = combinedItems[index - 1]) {
                             is ChatItem.TextMessage -> prev.message.timestamp
                             is ChatItem.MediaMessage -> prev.item.timestamp
+                            is ChatItem.Pending -> prev.upload.timestamp
                         } else null
                         val showSep = curTs != null && (index == 0 || prevTs == null || !isSameDay(curTs, prevTs))
                         if (showSep && curTs != null) DateSeparator(curTs)
@@ -392,6 +395,7 @@ fun ChatScreen(
                                     )
                                 }
                             }
+                            is ChatItem.Pending -> PendingUploadBubble(item.upload)
                         }
                     }
                 }
@@ -760,6 +764,37 @@ private fun DocumentBubble(
                 color = TextSecondary,
                 modifier = Modifier.align(Alignment.End).padding(end = 4.dp),
             )
+        }
+    }
+}
+
+// WhatsApp-style optimistic "sending…" bubble — appears the instant an
+// upload starts, in the exact spot the real bubble will land.
+@Composable
+private fun PendingUploadBubble(upload: PendingUpload) {
+    val bubbleShape = RoundedCornerShape(topStart = 18.dp, topEnd = 4.dp, bottomStart = 18.dp, bottomEnd = 18.dp)
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .widthIn(min = 160.dp, max = 240.dp)
+                .clip(bubbleShape)
+                .background(ChatBubbleSelf.copy(alpha = 0.6f))
+                .padding(8.dp),
+        ) {
+            val icon = when (upload.kind) {
+                PendingUploadKind.IMAGE -> Icons.Default.Image
+                PendingUploadKind.DOCUMENT -> Icons.Default.Description
+                PendingUploadKind.VOICE -> Icons.Default.GraphicEq
+            }
+            Icon(icon, null, tint = TextSecondary, modifier = Modifier.size(28.dp))
+            Spacer(Modifier.width(8.dp))
+            Column(Modifier.weight(1f)) {
+                Text(upload.filename, style = MaterialTheme.typography.bodySmall, color = TextPrimary, maxLines = 1)
+                Text("Sending…", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+            }
+            Spacer(Modifier.width(8.dp))
+            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = DilarionRed)
         }
     }
 }

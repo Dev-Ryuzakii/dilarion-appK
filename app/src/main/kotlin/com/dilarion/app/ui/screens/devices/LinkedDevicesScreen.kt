@@ -24,10 +24,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.fragment.app.FragmentActivity
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.dilarion.app.security.BiometricAuth
 import com.dilarion.app.ui.theme.*
+import kotlinx.coroutines.launch
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 
@@ -39,6 +43,9 @@ fun LinkedDevicesScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val snackbar = remember { SnackbarHostState() }
+    val context = LocalContext.current
+    val activity = context as? FragmentActivity
+    val scope = rememberCoroutineScope()
 
     val scanLauncher = rememberLauncherForActivityResult(ScanContract()) { result ->
         result.contents?.let { viewModel.approveScannedLink(it) }
@@ -105,7 +112,14 @@ fun LinkedDevicesScreen(
                 )
                 Spacer(Modifier.height(20.dp))
                 Button(
-                    onClick = { startScan() },
+                    onClick = {
+                        val act = activity
+                        if (act == null) {
+                            startScan()
+                        } else {
+                            scope.launch { if (BiometricAuth.gateSensitiveAction(act)) startScan() }
+                        }
+                    },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(24.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = DilarionRed, contentColor = SurfaceWhite),

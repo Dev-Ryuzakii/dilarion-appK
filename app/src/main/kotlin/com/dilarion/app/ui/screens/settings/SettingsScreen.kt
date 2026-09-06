@@ -1,5 +1,8 @@
 package com.dilarion.app.ui.screens.settings
 
+import android.Manifest
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -13,6 +16,8 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.ExitToApp
+import androidx.compose.material.icons.filled.Fingerprint
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
@@ -27,8 +32,13 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.collectAsState
+import androidx.compose.ui.platform.LocalContext
+import androidx.fragment.app.FragmentActivity
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.dilarion.app.security.BiometricAuth
+import com.dilarion.app.security.BiometricLockPrefs
 import com.dilarion.app.ui.theme.*
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -40,6 +50,16 @@ fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val context = LocalContext.current
+    val activity = context as? FragmentActivity
+    val scope = rememberCoroutineScope()
+
+    fun gateThen(action: () -> Unit) {
+        val act = activity
+        if (act == null) { action(); return }
+        scope.launch { if (BiometricAuth.gateSensitiveAction(act)) action() }
+    }
+
     var showLogoutDialog by remember { mutableStateOf(false) }
     var showEnable2FA by remember { mutableStateOf(false) }
     var enable2FAMasterToken by remember { mutableStateOf("") }
@@ -48,6 +68,10 @@ fun SettingsScreen(
     var disable2FAPassword by remember { mutableStateOf("") }
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var deleteReason by remember { mutableStateOf("") }
+
+    val voiceIdentityAudioPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) viewModel.startVoiceIdentityRecording(context)
+    }
 
     if (showLogoutDialog) {
         AlertDialog(
@@ -130,7 +154,7 @@ fun SettingsScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { onMasterToken() }
+                        .clickable { gateThen(onMasterToken) }
                         .padding(horizontal = 16.dp, vertical = 14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -178,7 +202,7 @@ fun SettingsScreen(
 
                     if (!uiState.twoFaEnabled && !showEnable2FA) {
                         Spacer(Modifier.height(10.dp))
-                        TextButton(onClick = { showEnable2FA = true }) { Text("Enable 2FA", color = DilarionRed) }
+                        TextButton(onClick = { gateThen { showEnable2FA = true } }) { Text("Enable 2FA", color = DilarionRed) }
                     }
 
                     if (!uiState.twoFaEnabled && showEnable2FA) {
@@ -226,7 +250,7 @@ fun SettingsScreen(
 
                     if (uiState.twoFaEnabled && !showDisable2FA) {
                         Spacer(Modifier.height(10.dp))
-                        TextButton(onClick = { showDisable2FA = true }) { Text("Disable 2FA", color = TextSecondary) }
+                        TextButton(onClick = { gateThen { showDisable2FA = true } }) { Text("Disable 2FA", color = TextSecondary) }
                     }
 
                     if (uiState.twoFaEnabled && showDisable2FA) {
@@ -261,6 +285,103 @@ fun SettingsScreen(
                     }
 
                     uiState.twoFaError?.let { err ->
+                        Spacer(Modifier.height(6.dp))
+                        Text(err, style = MaterialTheme.typography.bodySmall, color = DilarionRed)
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            // ── Biometric Lock section ────────────────────────────────────────
+            SettingsSectionHeader("Biometric Lock")
+
+            SettingsCard {
+                var biometricEnabled by remember { mutableStateOf(BiometricLockPrefs.isEnabled(context)) }
+                var biometricUnavailable by remember { mutableStateOf(false) }
+                LaunchedEffect(Unit) {
+                    biometricUnavailable = activity?.let { !BiometricAuth.isAvailable(it) } ?: true
+                }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Default.Fingerprint, null, tint = DilarionRed, modifier = Modifier.size(22.dp))
+                    Spacer(Modifier.width(16.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "Biometric Lock",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium,
+                        )
+                        Text(
+                            if (biometricUnavailable) "Not available — set up a fingerprint/face or screen lock first"
+                            else "Fingerprint/face to open Dilarion and before security changes",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondary,
+                        )
+                    }
+                    Switch(
+                        checked = biometricEnabled,
+                        enabled = !biometricUnavailable,
+                        onCheckedChange = {
+                            biometricEnabled = it
+                            BiometricLockPrefs.setEnabled(context, it)
+                        },
+                        colors = SwitchDefaults.colors(checkedThumbColor = DilarionRed, checkedTrackColor = DilarionRedLight),
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            // ── AI Voice Decoy section ────────────────────────────────────────
+            SettingsSectionHeader("AI Voice Decoy")
+
+            SettingsCard {
+                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.GraphicEq, null, tint = DilarionRed, modifier = Modifier.size(22.dp))
+                        Spacer(Modifier.width(16.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                if (uiState.voiceIdentityEnrolled) "Enrolled — decoys use your voice" else "Not set — voice notes get a generic decoy",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium,
+                            )
+                            Text(
+                                "Record a short sample once; used only to generate decoy voice notes",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextSecondary,
+                            )
+                        }
+                    }
+
+                    Spacer(Modifier.height(10.dp))
+                    if (uiState.isRecordingVoiceIdentity) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("${uiState.voiceIdentityRecordingSeconds}s", color = TextSecondary, style = MaterialTheme.typography.bodySmall)
+                            Spacer(Modifier.width(12.dp))
+                            Button(
+                                onClick = { viewModel.stopAndUploadVoiceIdentity() },
+                                colors = ButtonDefaults.buttonColors(containerColor = DilarionRed),
+                            ) { Text("Stop & Save") }
+                        }
+                    } else {
+                        Row {
+                            TextButton(onClick = { voiceIdentityAudioPermission.launch(Manifest.permission.RECORD_AUDIO) }) {
+                                Text(if (uiState.voiceIdentityEnrolled) "Re-record" else "Record sample (8s+)", color = DilarionRed)
+                            }
+                            if (uiState.voiceIdentityUploading) {
+                                Spacer(Modifier.width(8.dp))
+                                CircularProgressIndicator(Modifier.size(16.dp), color = DilarionRed, strokeWidth = 2.dp)
+                            }
+                        }
+                    }
+
+                    uiState.voiceIdentityError?.let { err ->
                         Spacer(Modifier.height(6.dp))
                         Text(err, style = MaterialTheme.typography.bodySmall, color = DilarionRed)
                     }

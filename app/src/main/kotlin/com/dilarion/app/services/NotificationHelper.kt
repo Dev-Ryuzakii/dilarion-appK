@@ -129,7 +129,7 @@ object NotificationHelper {
 
         return Notification.Builder(context, CHANNEL_CALLS)
             .setContentTitle("Incoming ${if (callType == "video") "Video" else "Voice"} Call")
-            .setContentText(callerUsername)
+            .setContentText("Someone is calling you")
             .setSmallIcon(android.R.drawable.ic_menu_call)
             .setPriority(Notification.PRIORITY_MAX)
             .setCategory(Notification.CATEGORY_CALL)
@@ -153,7 +153,7 @@ object NotificationHelper {
         )
         return Notification.Builder(context, CHANNEL_MESSAGES)
             .setContentTitle("New message")
-            .setContentText("From $sender")
+            .setContentText("You have a new message")
             .setSmallIcon(android.R.drawable.ic_dialog_email)
             .setContentIntent(tapPending)
             .setAutoCancel(true)

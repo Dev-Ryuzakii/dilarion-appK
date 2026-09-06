@@ -17,6 +17,8 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.dilarion.app.data.model.IncomingCallData
+import com.dilarion.app.security.AppLockManager
+import com.dilarion.app.ui.components.AppLockScreen
 import com.dilarion.app.ui.screens.auth.AuthScreen
 import com.dilarion.app.ui.screens.auth.AuthViewModel
 import com.dilarion.app.ui.screens.calls.CallOverlayViewModel
@@ -41,6 +43,12 @@ import com.dilarion.app.ui.screens.splash.SplashScreen
 
 @Composable
 fun AppNavigation(pendingIncomingCall: IncomingCallData? = null) {
+    val isLocked by AppLockManager.isLocked.collectAsState()
+    if (isLocked) {
+        AppLockScreen(onUnlocked = { AppLockManager.unlock() })
+        return
+    }
+
     val navController = rememberNavController()
     val overlayVm: CallOverlayViewModel = hiltViewModel()
     val incomingCall by overlayVm.incomingCall.collectAsState()

@@ -423,6 +423,24 @@ interface ApiService {
         @Path("mediaId") mediaId: String,
     ): Response<ResponseBody>
 
+    // ─── Voice identity (AI Voice Decoy) ────────────────────────────────────────
+    // Enrolled sample is cloned server-side (voice_scrambler.py) to generate a
+    // decoy voice note in the same voice for every real one sent — see
+    // /media/decoy-voice above. The sample itself never comes back down.
+
+    @Multipart
+    @POST("users/me/voice-identity")
+    suspend fun uploadVoiceIdentity(
+        @Header("Authorization") bearer: String,
+        @Part file: MultipartBody.Part,
+    ): Response<com.google.gson.JsonObject>
+
+    @GET("users/{username}/voice-identity")
+    suspend fun getVoiceIdentity(
+        @Header("Authorization") bearer: String,
+        @Path("username") username: String,
+    ): Response<ResponseBody>
+
     // ─── Monitoring ────────────────────────────────────────────────────────────
 
     @POST("monitoring/consent")

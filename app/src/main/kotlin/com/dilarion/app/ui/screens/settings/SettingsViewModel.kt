@@ -1,5 +1,8 @@
 package com.dilarion.app.ui.screens.settings
 
+import android.content.Context
+import android.media.MediaRecorder
+import android.os.Build
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.dilarion.app.data.api.ApiService
@@ -14,7 +17,11 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.MultipartBody
+import okhttp3.RequestBody.Companion.asRequestBody
 import org.json.JSONObject
+import java.io.File
 import javax.inject.Inject
 
 data class SettingsUiState(
@@ -29,6 +36,14 @@ data class SettingsUiState(
     val deletionStatus: String? = null,
     val deletionLoading: Boolean = false,
     val deletionError: String? = null,
+    // AI Voice Decoy — enrolled sample, cloned server-side to speak decoys in
+    // the user's own voice (see ApiService voice-identity endpoints).
+    val voiceIdentityEnrolled: Boolean = false,
+    val voiceIdentityLoading: Boolean = false,
+    val voiceIdentityUploading: Boolean = false,
+    val voiceIdentityError: String? = null,
+    val isRecordingVoiceIdentity: Boolean = false,
+    val voiceIdentityRecordingSeconds: Int = 0,
 )
 
 @HiltViewModel
@@ -54,7 +69,98 @@ class SettingsViewModel @Inject constructor(
         }
         refreshTwoFaStatus()
         refreshDeletionStatus()
+        refreshVoiceIdentityStatus()
     }
+
+    private var voiceIdentityRecorder: MediaRecorder? = null
+    private var voiceIdentityFile: File? = null
+    private var voiceIdentityTimerJob: kotlinx.coroutines.Job? = null
+
+    private fun refreshVoiceIdentityStatus() {
+        viewModelScope.launch {
+            val bearer = bearer() ?: return@launch
+            val username = sessionManager.username.first() ?: return@launch
+            _uiState.value = _uiState.value.copy(voiceIdentityLoading = true)
+            val enrolled = runCatching { apiService.getVoiceIdentity(bearer, username) }
+                .getOrNull()?.isSuccessful ?: false
+            _uiState.value = _uiState.value.copy(voiceIdentityEnrolled = enrolled, voiceIdentityLoading = false)
+        }
+    }
+
+    fun startVoiceIdentityRecording(context: Context) {
+        if (_uiState.value.isRecordingVoiceIdentity) return
+        val outFile = File(context.cacheDir, "voice_identity_${System.currentTimeMillis()}.mp4")
+        voiceIdentityFile = outFile
+        @Suppress("DEPRECATION")
+        val recorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) MediaRecorder(context) else MediaRecorder()
+        recorder.apply {
+            setAudioSource(MediaRecorder.AudioSource.MIC)
+            setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+            setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+            setOutputFile(outFile.absolutePath)
+            prepare()
+            start()
+        }
+        voiceIdentityRecorder = recorder
+        _uiState.value = _uiState.value.copy(isRecordingVoiceIdentity = true, voiceIdentityRecordingSeconds = 0, voiceIdentityError = null)
+        voiceIdentityTimerJob = viewModelScope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(1000)
+                _uiState.value = _uiState.value.copy(voiceIdentityRecordingSeconds = _uiState.value.voiceIdentityRecordingSeconds + 1)
+            }
+        }
+    }
+
+    fun cancelVoiceIdentityRecording() {
+        voiceIdentityTimerJob?.cancel()
+        voiceIdentityTimerJob = null
+        runCatching { voiceIdentityRecorder?.stop() }
+        voiceIdentityRecorder?.release()
+        voiceIdentityRecorder = null
+        voiceIdentityFile?.delete()
+        voiceIdentityFile = null
+        _uiState.value = _uiState.value.copy(isRecordingVoiceIdentity = false, voiceIdentityRecordingSeconds = 0)
+    }
+
+    // Enough for a clean voice clone, short enough not to feel like a chore.
+    private val minVoiceIdentitySeconds = 8
+
+    fun stopAndUploadVoiceIdentity() {
+        val recorder = voiceIdentityRecorder ?: return
+        val file = voiceIdentityFile ?: return
+        val seconds = _uiState.value.voiceIdentityRecordingSeconds
+        voiceIdentityTimerJob?.cancel()
+        voiceIdentityTimerJob = null
+        runCatching { recorder.stop() }
+        recorder.release()
+        voiceIdentityRecorder = null
+        _uiState.value = _uiState.value.copy(isRecordingVoiceIdentity = false, voiceIdentityRecordingSeconds = 0)
+
+        if (seconds < minVoiceIdentitySeconds) {
+            file.delete()
+            _uiState.value = _uiState.value.copy(voiceIdentityError = "Recording too short — need at least ${minVoiceIdentitySeconds}s")
+            return
+        }
+
+        viewModelScope.launch {
+            val bearer = bearer() ?: return@launch
+            _uiState.value = _uiState.value.copy(voiceIdentityUploading = true, voiceIdentityError = null)
+            runCatching {
+                val requestFile = file.asRequestBody("audio/mp4".toMediaTypeOrNull())
+                val filePart = MultipartBody.Part.createFormData("file", file.name, requestFile)
+                val resp = apiService.uploadVoiceIdentity(bearer, filePart)
+                file.delete()
+                if (!resp.isSuccessful) {
+                    throw IllegalStateException(resp.errorBody().parseErrorDetail("Failed to save voice sample (${resp.code()})"))
+                }
+                _uiState.value = _uiState.value.copy(voiceIdentityUploading = false, voiceIdentityEnrolled = true)
+            }.onFailure { e ->
+                _uiState.value = _uiState.value.copy(voiceIdentityUploading = false, voiceIdentityError = e.message)
+            }
+        }
+    }
+
+    fun clearVoiceIdentityError() { _uiState.value = _uiState.value.copy(voiceIdentityError = null) }
 
     private fun refreshTwoFaStatus() {
         viewModelScope.launch {

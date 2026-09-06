@@ -12,20 +12,25 @@ import android.os.PowerManager
 import android.provider.Settings
 import android.util.Rational
 import android.view.WindowManager
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.fragment.app.FragmentActivity
 import com.dilarion.app.data.model.IncomingCallData
+import com.dilarion.app.security.AppLockManager
 import com.dilarion.app.services.NotificationHelper
 import com.dilarion.app.ui.components.PipController
 import com.dilarion.app.ui.navigation.AppNavigation
 import com.dilarion.app.ui.theme.DilarionTheme
 import dagger.hilt.android.AndroidEntryPoint
 
+// FragmentActivity (not plain ComponentActivity) — androidx.biometric.BiometricPrompt
+// requires a FragmentActivity/Fragment host for its dialog. Still a
+// ComponentActivity under the hood, so setContent {} and everything else here
+// is unaffected.
 @AndroidEntryPoint
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
 
     private var pendingIncomingCall: IncomingCallData? = null
 
@@ -51,6 +56,7 @@ class MainActivity : ComponentActivity() {
         requestMonitoringPermissions()
         requestBatteryOptimizationExemption()
         pendingIncomingCall = extractIncomingCall(intent)
+        AppLockManager.armIfEnabled(this)
         setContent {
             DilarionTheme {
                 AppNavigation(pendingIncomingCall = pendingIncomingCall)
@@ -61,6 +67,11 @@ class MainActivity : ComponentActivity() {
     // Home button / recents while a meeting is on screen — same "minimize like
     // Google Meet" behavior as the explicit minimize button, just triggered by
     // the system gesture instead of a tap.
+    override fun onPause() {
+        super.onPause()
+        AppLockManager.armIfEnabled(this)
+    }
+
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
         if (PipController.meetingActive.value) enterMeetingPip()
