@@ -319,6 +319,14 @@ export async function downloadDecoyFile(token: string, mediaId: string): Promise
   return res.blob();
 }
 
+export async function downloadDecoyVoice(token: string, mediaId: string): Promise<Blob> {
+  const res = await fetch(`${BASE}/media/decoy-voice/${encodeURIComponent(mediaId)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw Object.assign(new Error('Failed to load decoy'), { status: res.status });
+  return res.blob();
+}
+
 // ── Mark read ──────────────────────────────────────────────────────────────────
 
 export async function markRead(token: string, messageId: number): Promise<void> {

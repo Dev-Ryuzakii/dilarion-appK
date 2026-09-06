@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { downloadMedia, downloadDecoyFile, confirmMasterToken } from '../services/api';
-import { CameraIcon, MicIcon as MicIconSvg, PaperclipIcon as PaperclipIconSvg, SpinnerIcon } from './Icons';
+import { downloadMedia, downloadDecoyFile, downloadDecoyVoice, confirmMasterToken } from '../services/api';
+import { CameraIcon, LockIcon, MicIcon as MicIconSvg, PaperclipIcon as PaperclipIconSvg, SpinnerIcon } from './Icons';
 
 // Best-effort classification from the server's content_type, used only for the
 // pre-download placeholder icon. The real decision is made by sniffing bytes.
@@ -126,12 +126,170 @@ function MediaLightbox({ src, kind, onClose }: { src: string; kind: MediaKind; o
 
 // ── MediaBubble ────────────────────────────────────────────────────────────────
 
+type VoiceStage = 'idle' | 'loading' | 'decoy' | 'revealing' | 'revealed';
+
 /**
- * View-once media bubble. Downloads on tap, classifies by magic bytes, and shows
- * photos/videos in a full-screen lightbox. `onRemove` (when provided) fires 10s
- * after the media is dismissed, matching the server's one-time-view deletion.
+ * Voice notes get the same decoy-first treatment as documents (see
+ * DocumentBubble below) — playing the note never requires the master token,
+ * it just plays whatever the current stage has loaded (decoy, then real once
+ * revealed). No gate on hearing SOMETHING; the real audio behind the lock
+ * icon is the only thing that's actually gated. Sender and receiver go
+ * through the exact same stages — there's no isMine bypass.
  */
-export default function MediaBubble({ token, mediaId, contentType, onRemove }: { token: string; mediaId: string; contentType: string; onRemove?: () => void }) {
+function VoiceBubble({ token, mediaId, masterToken, onMasterTokenSaved, onRemove }: {
+  token: string; mediaId: string; masterToken: string | null; onMasterTokenSaved: (t: string) => void; onRemove?: () => void;
+}) {
+  const [stage, setStage] = useState<VoiceStage>('idle');
+  const [voiceUrl, setVoiceUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [tokenInputVisible, setTokenInputVisible] = useState(false);
+  const [tokenValue, setTokenValue] = useState('');
+
+  async function loadDecoy() {
+    setStage('loading');
+    setError(null);
+    try {
+      const blob = await downloadDecoyVoice(token, mediaId);
+      const buf = new Uint8Array(await blob.arrayBuffer());
+      const { mime } = sniffMedia(buf);
+      setVoiceUrl(toDataUrl(buf, mime.startsWith('audio/') ? mime : 'audio/mp4'));
+      setStage('decoy');
+    } catch {
+      setError('Failed to load');
+      setStage('idle');
+    }
+  }
+
+  async function reveal(mToken: string) {
+    setStage('revealing');
+    setError(null);
+    try {
+      const valid = masterToken === mToken ? true : await confirmMasterToken(token, mToken);
+      if (!valid) {
+        setError('Invalid master token');
+        setStage('decoy');
+        return;
+      }
+      onMasterTokenSaved(mToken);
+      const blob = await downloadMedia(token, mediaId);
+      const buf = new Uint8Array(await blob.arrayBuffer());
+      const { mime } = sniffMedia(buf);
+      setVoiceUrl(toDataUrl(buf, mime.startsWith('audio/') ? mime : 'audio/mp4'));
+      setStage('revealed');
+      setTokenInputVisible(false);
+      setTokenValue('');
+      if (onRemove) setTimeout(onRemove, 10_000);
+    } catch (err: any) {
+      // 410/404: the real file is already gone server-side. The decoy is
+      // unaffected — fall back to it, not an error.
+      if (err?.status === 410 || err?.status === 404) {
+        setStage('decoy');
+      } else {
+        setError('Failed to reveal');
+        setStage('decoy');
+      }
+    }
+  }
+
+  function handleLockTap() {
+    if (masterToken) reveal(masterToken);
+    else setTokenInputVisible(v => !v);
+  }
+
+  async function handleSubmitToken() {
+    const trimmed = tokenValue.trim();
+    if (!trimmed) return;
+    await reveal(trimmed);
+  }
+
+  if (stage === 'idle' || stage === 'loading') {
+    return (
+      <button
+        onClick={loadDecoy}
+        disabled={stage === 'loading'}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 10, background: 'var(--bg-card)',
+          border: '1px solid var(--border-color)', borderRadius: 10, padding: '12px 16px',
+          cursor: stage === 'loading' ? 'wait' : 'pointer', color: 'var(--text-muted)', fontSize: '0.85rem',
+          opacity: stage === 'loading' ? 0.7 : 1,
+        }}
+      >
+        {stage === 'loading' ? <SpinnerIcon size={22} /> : <MicIconSvg size={22} color="#9ca3af" />}
+        <span>{stage === 'loading' ? 'Loading...' : 'Voice note'}</span>
+      </button>
+    );
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        {voiceUrl && <audio controls src={voiceUrl} preload="auto" style={{ maxWidth: 220, display: 'block' }} />}
+        {stage !== 'revealed' && (
+          <button
+            onClick={handleLockTap}
+            disabled={stage === 'revealing'}
+            title="Unlock real audio"
+            style={{ background: 'transparent', border: 'none', cursor: stage === 'revealing' ? 'wait' : 'pointer', padding: 4, display: 'flex' }}
+          >
+            {stage === 'revealing' ? <SpinnerIcon size={16} /> : <LockIcon size={16} color="#9ca3af" />}
+          </button>
+        )}
+      </div>
+      {tokenInputVisible && !masterToken && stage !== 'revealed' && (
+        <div style={{ display: 'flex', gap: 6 }}>
+          <input
+            type="password"
+            placeholder="Master token"
+            value={tokenValue}
+            onChange={e => setTokenValue(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') handleSubmitToken(); }}
+            style={{ flex: 1, background: 'var(--input-field-bg)', border: '1px solid var(--border-color)', borderRadius: 8, color: 'var(--text-primary)', fontSize: '0.8rem', padding: '6px 10px' }}
+            autoFocus
+          />
+          <button
+            style={{ background: 'var(--accent)', color: '#fff', fontSize: '0.75rem', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', border: 'none' }}
+            onClick={handleSubmitToken}
+          >
+            OK
+          </button>
+        </div>
+      )}
+      {error && <span style={{ fontSize: '0.72rem', color: '#ef4444' }}>{error}</span>}
+    </div>
+  );
+}
+
+/**
+ * View-once media bubble for images/video (and any other non-voice, non-
+ * document attachment). Downloads on tap, classifies by magic bytes, and
+ * shows photos/videos in a full-screen lightbox. `onRemove` (when provided)
+ * fires 10s after the media is dismissed, matching the server's one-time-view
+ * deletion. Gating against the master token happens in the caller (see
+ * ChatPanel/GroupPanel's LockedContent wrapper) — this component only ever
+ * mounts once that's already been satisfied. Voice notes are routed to
+ * VoiceBubble above instead, which self-gates (decoy-first, no wrapper).
+ */
+export default function MediaBubble({ token, mediaId, contentType, masterToken, onMasterTokenSaved, onRemove }: {
+  token: string; mediaId: string; contentType: string; masterToken?: string | null; onMasterTokenSaved?: (t: string) => void; onRemove?: () => void;
+}) {
+  if (isVoice(contentType)) {
+    return (
+      <VoiceBubble
+        token={token}
+        mediaId={mediaId}
+        masterToken={masterToken ?? null}
+        onMasterTokenSaved={onMasterTokenSaved ?? (() => {})}
+        onRemove={onRemove}
+      />
+    );
+  }
+  return <VisualMediaBubble token={token} mediaId={mediaId} contentType={contentType} onRemove={onRemove} />;
+}
+
+// Split out from the default export above purely so MediaBubble itself never
+// calls a hook before its early voice-routing return — this is the actual
+// hook-owning component for the image/video/fallback-file path.
+function VisualMediaBubble({ token, mediaId, contentType, onRemove }: { token: string; mediaId: string; contentType: string; onRemove?: () => void }) {
   const [loaded, setLoaded] = useState(false);
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
   const [kind, setKind] = useState<MediaKind>('file');

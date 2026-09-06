@@ -27,7 +27,7 @@ import { loadKeypair } from '../services/keys';
 import { presenceService, WsMessage } from '../services/presence';
 import { LockIcon, PaperclipIcon as PaperclipIconSvg } from '../components/Icons';
 import MediaBubble, { DocumentBubble } from '../components/MediaBubble';
-import { PendingBubble, PendingMsg } from './ChatPanel';
+import { PendingBubble, PendingMsg, LockedContent } from './ChatPanel';
 import MeetingCard, { JoinMeetingHandler } from '../components/MeetingCard';
 import { MessageMenuTrigger, MessageReactionPills } from '../components/MessageMenu';
 
@@ -371,8 +371,27 @@ function GroupMsgBubble({
         onRemove={() => onRemoveMessage(msg.id)}
       />
     );
-  } else if (isImage(ct) || isVoice(ct) || isMedia(ct)) {
-    body = <MediaBubble token={token} mediaId={mediaId} contentType={ct} onRemove={() => onRemoveMessage(msg.id)} />;
+  } else if (isVoice(ct)) {
+    // Self-gates (decoy-first) — see VoiceBubble inside MediaBubble.tsx. Group
+    // chat had no lock at all here before; this closes that gap too.
+    body = (
+      <MediaBubble
+        token={token}
+        mediaId={mediaId}
+        contentType={ct}
+        masterToken={masterToken}
+        onMasterTokenSaved={onMasterTokenSaved}
+        onRemove={() => onRemoveMessage(msg.id)}
+      />
+    );
+  } else if (isImage(ct) || isMedia(ct)) {
+    // Group chat never wrapped images/media in a lock gate — LockedContent
+    // added here to close that gap, matching ChatPanel's DM behavior.
+    body = (
+      <LockedContent apiToken={token} masterToken={masterToken} onMasterTokenSaved={onMasterTokenSaved} isMine={isMine}>
+        <MediaBubble token={token} mediaId={mediaId} contentType={ct} onRemove={() => onRemoveMessage(msg.id)} />
+      </LockedContent>
+    );
   } else {
     body = (
       <span style={{ fontSize: '0.88rem', lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'inherit' }}>

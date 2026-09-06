@@ -317,7 +317,7 @@ interface LockedContentProps {
   children: React.ReactNode;
 }
 
-function LockedContent({ apiToken, masterToken, onMasterTokenSaved, isMine, children }: LockedContentProps) {
+export function LockedContent({ apiToken, masterToken, onMasterTokenSaved, isMine, children }: LockedContentProps) {
   const [showing, setShowing] = useState(false);
   const [inputVisible, setInputVisible] = useState(false);
   const [inputValue, setInputValue] = useState('');
@@ -510,7 +510,21 @@ function MessageBubble({
         onRemove={() => onRemoveMessage(msg.id)}
       />
     );
-  } else if (isImage(ct) || isVoice(ct) || isMedia(ct)) {
+  } else if (isVoice(ct)) {
+    // Voice notes self-gate (decoy-first, no lock wrapper) — see VoiceBubble
+    // inside MediaBubble.tsx. Sender and receiver both get the decoy until
+    // the master token reveals the real note; there's no isMine bypass.
+    body = (
+      <MediaBubble
+        token={token}
+        mediaId={mediaId}
+        contentType={ct}
+        masterToken={masterToken}
+        onMasterTokenSaved={onMasterTokenSaved}
+        onRemove={() => onRemoveMessage(msg.id)}
+      />
+    );
+  } else if (isImage(ct) || isMedia(ct)) {
     body = (
       <LockedContent apiToken={token} masterToken={masterToken} onMasterTokenSaved={onMasterTokenSaved} isMine={isMine}>
         <MediaBubble token={token} mediaId={mediaId} contentType={ct} onRemove={() => onRemoveMessage(msg.id)} />
