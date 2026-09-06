@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { downloadMedia, downloadDecoyFile, downloadDecoyVoice, confirmMasterToken } from '../services/api';
-import { CameraIcon, LockIcon, MicIcon as MicIconSvg, PaperclipIcon as PaperclipIconSvg, SpinnerIcon } from './Icons';
+import { CameraIcon, LockIcon, MicIcon as MicIconSvg, PaperclipIcon as PaperclipIconSvg, SpinnerIcon, CloseIcon } from './Icons';
 
 // Best-effort classification from the server's content_type, used only for the
 // pre-download placeholder icon. The real decision is made by sniffing bytes.
@@ -86,12 +86,13 @@ function MediaLightbox({ src, kind, onClose }: { src: string; kind: MediaKind; o
           border: 'none',
           background: 'rgba(255,255,255,0.12)',
           color: '#fff',
-          fontSize: '1.1rem',
           cursor: 'pointer',
-          lineHeight: 1,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
         }}
       >
-        ✕
+        <CloseIcon size={18} color="#fff" />
       </button>
 
       <div onClick={e => e.stopPropagation()} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
@@ -126,68 +127,190 @@ function MediaLightbox({ src, kind, onClose }: { src: string; kind: MediaKind; o
 
 // ── MediaBubble ────────────────────────────────────────────────────────────────
 
-type VoiceStage = 'idle' | 'loading' | 'decoy' | 'revealing' | 'revealed';
+type VoiceStage = 'loading' | 'ready' | 'error';
+
+function formatVoiceTime(ms: number): string {
+  const totalSec = Math.max(0, Math.floor(ms / 1000));
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+function voiceInitials(name: string): string {
+  return name.split(/[\s_-]+/).map(w => w[0] ?? '').join('').toUpperCase().slice(0, 2) || '?';
+}
 
 /**
- * Voice notes get the same decoy-first treatment as documents (see
- * DocumentBubble below) — playing the note never requires the master token,
- * it just plays whatever the current stage has loaded (decoy, then real once
- * revealed). No gate on hearing SOMETHING; the real audio behind the lock
- * icon is the only thing that's actually gated. Sender and receiver go
- * through the exact same stages — there's no isMine bypass.
+ * Decodes real per-recording amplitude via Web Audio API — not decorative
+ * bars — bucketed into ~40 RMS samples and normalized. decodeAudioData's
+ * callback form (not the promise form) for broadest webview compatibility.
+ * Falls back to flat bars + unknown duration on any decode failure rather
+ * than blocking playback on it.
  */
-function VoiceBubble({ token, mediaId, masterToken, onMasterTokenSaved, onRemove }: {
-  token: string; mediaId: string; masterToken: string | null; onMasterTokenSaved: (t: string) => void; onRemove?: () => void;
+function extractWaveform(buf: ArrayBuffer, bucketCount = 40): Promise<{ bars: number[]; durationMs: number }> {
+  const fallback = { bars: Array(bucketCount).fill(0.3), durationMs: 0 };
+  return new Promise(resolve => {
+    try {
+      const Ctx = (window as any).AudioContext || (window as any).webkitAudioContext;
+      const ctx = new Ctx();
+      ctx.decodeAudioData(
+        buf.slice(0),
+        (audioBuffer: AudioBuffer) => {
+          try {
+            const channel = audioBuffer.getChannelData(0);
+            const bucketSize = Math.max(1, Math.floor(channel.length / bucketCount));
+            const raw: number[] = [];
+            for (let i = 0; i < bucketCount; i++) {
+              const start = i * bucketSize;
+              const end = Math.min(start + bucketSize, channel.length);
+              let sum = 0;
+              for (let j = start; j < end; j++) sum += channel[j] * channel[j];
+              raw.push(Math.sqrt(sum / Math.max(1, end - start)));
+            }
+            const max = Math.max(...raw, 0.0001);
+            const bars = raw.map(v => Math.min(1, Math.max(0.15, v / max)));
+            resolve({ bars, durationMs: audioBuffer.duration * 1000 });
+          } catch {
+            resolve(fallback);
+          } finally {
+            ctx.close?.();
+          }
+        },
+        () => { resolve(fallback); ctx.close?.(); },
+      );
+    } catch {
+      resolve(fallback);
+    }
+  });
+}
+
+/**
+ * WhatsApp-style voice message: play/pause circle, a waveform built from the
+ * actual recording's amplitude with a progress-through-waveform scrubber you
+ * can click/drag to seek, elapsed/total duration, a cyclable playback speed,
+ * and a small avatar-with-mic-badge like WhatsApp uses to show whose voice
+ * it is.
+ *
+ * Decoy-first (same model as DocumentBubble): the decoy loads automatically
+ * on mount — safe to fetch eagerly since it's reusable, not a one-time view,
+ * and decoy generation already targets the real note's duration — so
+ * playing never requires the master token; only the REAL audio behind the
+ * lock icon is gated. Sender and receiver go through the exact same path,
+ * no isMine bypass.
+ */
+function VoiceBubble({ token, mediaId, masterToken, onMasterTokenSaved, onRemove, isMine, sender }: {
+  token: string; mediaId: string; masterToken: string | null; onMasterTokenSaved: (t: string) => void; onRemove?: () => void; isMine: boolean; sender: string;
 }) {
-  const [stage, setStage] = useState<VoiceStage>('idle');
+  const [stage, setStage] = useState<VoiceStage>('loading');
   const [voiceUrl, setVoiceUrl] = useState<string | null>(null);
+  const [waveform, setWaveform] = useState<number[]>(Array(40).fill(0.3));
+  const [durationMs, setDurationMs] = useState(0);
+  const [positionMs, setPositionMs] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [speed, setSpeed] = useState(1);
+  const [usingReal, setUsingReal] = useState(false);
+  const [revealing, setRevealing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tokenInputVisible, setTokenInputVisible] = useState(false);
   const [tokenValue, setTokenValue] = useState('');
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const waveformBoxRef = useRef<HTMLDivElement>(null);
 
-  async function loadDecoy() {
-    setStage('loading');
-    setError(null);
-    try {
-      const blob = await downloadDecoyVoice(token, mediaId);
-      const buf = new Uint8Array(await blob.arrayBuffer());
-      const { mime } = sniffMedia(buf);
-      setVoiceUrl(toDataUrl(buf, mime.startsWith('audio/') ? mime : 'audio/mp4'));
-      setStage('decoy');
-    } catch (err: any) {
-      setError(err?.message || 'Failed to load — check connection');
-      setStage('idle');
-    }
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const blob = await downloadDecoyVoice(token, mediaId);
+        const arrBuf = await blob.arrayBuffer();
+        const buf = new Uint8Array(arrBuf);
+        const { mime } = sniffMedia(buf);
+        const [url, wf] = await Promise.all([
+          Promise.resolve(toDataUrl(buf, mime.startsWith('audio/') ? mime : 'audio/mp4')),
+          extractWaveform(arrBuf),
+        ]);
+        if (cancelled) return;
+        setVoiceUrl(url);
+        setWaveform(wf.bars);
+        setDurationMs(wf.durationMs);
+        setStage('ready');
+      } catch (err: any) {
+        if (cancelled) return;
+        setError(err?.message || 'Failed to load — check connection');
+        setStage('error');
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mediaId]);
+
+  function togglePlay() {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (isPlaying) audio.pause();
+    else audio.play().catch(() => {});
+  }
+
+  function handleSeek(clientX: number) {
+    const box = waveformBoxRef.current;
+    const audio = audioRef.current;
+    if (!box || !audio || durationMs <= 0) return;
+    const rect = box.getBoundingClientRect();
+    const fraction = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+    audio.currentTime = (fraction * durationMs) / 1000;
+    setPositionMs(fraction * durationMs);
+  }
+
+  function startDrag(e: ReactMouseEvent) {
+    handleSeek(e.clientX);
+    const onMove = (ev: MouseEvent) => handleSeek(ev.clientX);
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }
+
+  function cycleSpeed() {
+    const next = speed === 1 ? 1.5 : speed === 1.5 ? 2 : 1;
+    setSpeed(next);
+    if (audioRef.current) audioRef.current.playbackRate = next;
   }
 
   async function reveal(mToken: string) {
-    setStage('revealing');
+    setRevealing(true);
     setError(null);
     try {
       const valid = masterToken === mToken ? true : await confirmMasterToken(token, mToken);
       if (!valid) {
         setError('Invalid master token');
-        setStage('decoy');
+        setRevealing(false);
         return;
       }
       onMasterTokenSaved(mToken);
       const blob = await downloadMedia(token, mediaId);
-      const buf = new Uint8Array(await blob.arrayBuffer());
+      const arrBuf = await blob.arrayBuffer();
+      const buf = new Uint8Array(arrBuf);
       const { mime } = sniffMedia(buf);
-      setVoiceUrl(toDataUrl(buf, mime.startsWith('audio/') ? mime : 'audio/mp4'));
-      setStage('revealed');
+      const [url, wf] = await Promise.all([
+        Promise.resolve(toDataUrl(buf, mime.startsWith('audio/') ? mime : 'audio/mp4')),
+        extractWaveform(arrBuf),
+      ]);
+      setVoiceUrl(url);
+      setWaveform(wf.bars);
+      setDurationMs(wf.durationMs);
+      setPositionMs(0);
+      setIsPlaying(false);
+      setUsingReal(true);
       setTokenInputVisible(false);
       setTokenValue('');
+      setRevealing(false);
       if (onRemove) setTimeout(onRemove, 10_000);
     } catch (err: any) {
-      // 410/404: the real file is already gone server-side. The decoy is
-      // unaffected — fall back to it, not an error.
-      if (err?.status === 410 || err?.status === 404) {
-        setStage('decoy');
-      } else {
-        setError('Failed to reveal');
-        setStage('decoy');
-      }
+      setRevealing(false);
+      // 410/404: the real file is already gone server-side. The decoy stays
+      // exactly as it was — not an error state, nothing to change.
+      if (err?.status !== 410 && err?.status !== 404) setError('Failed to reveal');
     }
   }
 
@@ -202,43 +325,124 @@ function VoiceBubble({ token, mediaId, masterToken, onMasterTokenSaved, onRemove
     await reveal(trimmed);
   }
 
-  if (stage === 'idle' || stage === 'loading') {
+  if (stage === 'loading') {
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-        <button
-          onClick={loadDecoy}
-          disabled={stage === 'loading'}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 10, background: 'var(--bg-card)',
-            border: '1px solid var(--border-color)', borderRadius: 10, padding: '12px 16px',
-            cursor: stage === 'loading' ? 'wait' : 'pointer', color: 'var(--text-muted)', fontSize: '0.85rem',
-            opacity: stage === 'loading' ? 0.7 : 1,
-          }}
-        >
-          {stage === 'loading' ? <SpinnerIcon size={22} /> : <MicIconSvg size={22} color="#9ca3af" />}
-          <span>{stage === 'loading' ? 'Loading...' : 'Voice note'}</span>
-        </button>
-        {error && <span style={{ fontSize: '0.72rem', color: '#ef4444' }}>{error}</span>}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 4px', color: isMine ? 'rgba(255,255,255,0.85)' : 'var(--text-muted)', fontSize: '0.83rem' }}>
+        <SpinnerIcon size={20} />
+        <span>Loading voice note...</span>
+      </div>
+    );
+  }
+  if (stage === 'error') {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: isMine ? 'rgba(255,255,255,0.85)' : 'var(--text-muted)', fontSize: '0.83rem' }}>
+        <MicIconSvg size={18} color={isMine ? 'rgba(255,255,255,0.7)' : '#9ca3af'} />
+        <span>{error}</span>
       </div>
     );
   }
 
+  const progress = durationMs > 0 ? Math.min(1, positionMs / durationMs) : 0;
+  const playedColor = isMine ? '#ffffff' : 'var(--accent)';
+  const unplayedColor = isMine ? 'rgba(255,255,255,0.4)' : 'rgba(239,68,68,0.3)';
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 220 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        {voiceUrl && <audio controls src={voiceUrl} preload="auto" style={{ maxWidth: 220, display: 'block' }} />}
-        {stage !== 'revealed' && (
+        <audio
+          ref={audioRef}
+          src={voiceUrl ?? undefined}
+          preload="auto"
+          style={{ display: 'none' }}
+          onPlay={() => setIsPlaying(true)}
+          onPause={() => setIsPlaying(false)}
+          onEnded={() => { setIsPlaying(false); setPositionMs(0); }}
+          onTimeUpdate={e => setPositionMs((e.target as HTMLAudioElement).currentTime * 1000)}
+          onLoadedMetadata={e => {
+            const d = (e.target as HTMLAudioElement).duration;
+            if (isFinite(d) && d > 0) setDurationMs(d * 1000);
+          }}
+        />
+        <button
+          onClick={togglePlay}
+          style={{
+            width: 32, height: 32, borderRadius: '50%', border: 'none', cursor: 'pointer', flexShrink: 0,
+            background: isMine ? 'rgba(255,255,255,0.25)' : 'rgba(239,68,68,0.12)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}
+        >
+          {isPlaying ? (
+            <div style={{ display: 'flex', gap: 3 }}>
+              <div style={{ width: 3, height: 12, borderRadius: 1, background: isMine ? '#fff' : 'var(--accent)' }} />
+              <div style={{ width: 3, height: 12, borderRadius: 1, background: isMine ? '#fff' : 'var(--accent)' }} />
+            </div>
+          ) : (
+            <div style={{
+              width: 0, height: 0, marginLeft: 2,
+              borderTop: '6px solid transparent', borderBottom: '6px solid transparent',
+              borderLeft: `9px solid ${isMine ? '#fff' : 'var(--accent)'}`,
+            }} />
+          )}
+        </button>
+
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+          <div
+            ref={waveformBoxRef}
+            onMouseDown={startDrag}
+            style={{ display: 'flex', alignItems: 'center', gap: 2, height: 24, cursor: durationMs > 0 ? 'pointer' : 'default' }}
+          >
+            {waveform.map((amp, i) => {
+              const played = i / waveform.length < progress;
+              return (
+                <div
+                  key={i}
+                  style={{ flex: 1, height: `${6 + amp * 18}px`, borderRadius: 2, background: played ? playedColor : unplayedColor }}
+                />
+              );
+            })}
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: '0.68rem', color: isMine ? 'rgba(255,255,255,0.85)' : 'var(--text-muted)' }}>
+              {formatVoiceTime(isPlaying || positionMs > 0 ? positionMs : durationMs)}
+            </span>
+            {durationMs > 0 && (
+              <span
+                onClick={cycleSpeed}
+                style={{ fontSize: '0.68rem', fontWeight: 700, cursor: 'pointer', color: isMine ? 'rgba(255,255,255,0.85)' : 'var(--text-muted)', padding: '0 4px' }}
+              >
+                {speed}x
+              </span>
+            )}
+          </div>
+        </div>
+
+        <div style={{ position: 'relative', flexShrink: 0 }}>
+          <div style={{
+            width: 26, height: 26, borderRadius: '50%', background: 'var(--accent)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: '0.62rem', fontWeight: 700,
+          }}>
+            {voiceInitials(sender)}
+          </div>
+          <div style={{
+            position: 'absolute', bottom: -2, right: -2, width: 12, height: 12, borderRadius: '50%',
+            background: isMine ? '#DCF8C6' : 'var(--bg-card)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <MicIconSvg size={7} color="var(--accent)" />
+          </div>
+        </div>
+
+        {!usingReal && (
           <button
             onClick={handleLockTap}
-            disabled={stage === 'revealing'}
+            disabled={revealing}
             title="Unlock real audio"
-            style={{ background: 'transparent', border: 'none', cursor: stage === 'revealing' ? 'wait' : 'pointer', padding: 4, display: 'flex' }}
+            style={{ background: 'transparent', border: 'none', cursor: revealing ? 'wait' : 'pointer', padding: 4, display: 'flex', flexShrink: 0 }}
           >
-            {stage === 'revealing' ? <SpinnerIcon size={16} /> : <LockIcon size={16} color="#9ca3af" />}
+            {revealing ? <SpinnerIcon size={14} /> : <LockIcon size={14} color={isMine ? 'rgba(255,255,255,0.8)' : '#9ca3af'} />}
           </button>
         )}
       </div>
-      {tokenInputVisible && !masterToken && stage !== 'revealed' && (
+      {tokenInputVisible && !masterToken && !usingReal && (
         <div style={{ display: 'flex', gap: 6 }}>
           <input
             type="password"
@@ -272,8 +476,8 @@ function VoiceBubble({ token, mediaId, masterToken, onMasterTokenSaved, onRemove
  * mounts once that's already been satisfied. Voice notes are routed to
  * VoiceBubble above instead, which self-gates (decoy-first, no wrapper).
  */
-export default function MediaBubble({ token, mediaId, contentType, masterToken, onMasterTokenSaved, onRemove }: {
-  token: string; mediaId: string; contentType: string; masterToken?: string | null; onMasterTokenSaved?: (t: string) => void; onRemove?: () => void;
+export default function MediaBubble({ token, mediaId, contentType, masterToken, onMasterTokenSaved, onRemove, isMine, sender }: {
+  token: string; mediaId: string; contentType: string; masterToken?: string | null; onMasterTokenSaved?: (t: string) => void; onRemove?: () => void; isMine?: boolean; sender?: string;
 }) {
   if (isVoice(contentType)) {
     return (
@@ -283,6 +487,8 @@ export default function MediaBubble({ token, mediaId, contentType, masterToken, 
         masterToken={masterToken ?? null}
         onMasterTokenSaved={onMasterTokenSaved ?? (() => {})}
         onRemove={onRemove}
+        isMine={isMine ?? false}
+        sender={sender ?? '?'}
       />
     );
   }

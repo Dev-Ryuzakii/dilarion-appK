@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { sendWhiteboardStroke, sendWhiteboardClear, WhiteboardTarget, WhiteboardStroke } from '../services/api';
 import { presenceService, WsMessage } from '../services/presence';
+import { CloseIcon } from './Icons';
 
 /**
  * Ephemeral shared canvas. Strokes are relayed live via WS (POST /whiteboard/
@@ -152,8 +153,8 @@ export default function WhiteboardModal({
           </div>
           <button
             onClick={onClose}
-            style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: '1.1rem', lineHeight: 1 }}
-          >✕</button>
+            style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex' }}
+          ><CloseIcon size={18} color="var(--text-muted)" /></button>
         </div>
         <canvas
           ref={canvasRef}

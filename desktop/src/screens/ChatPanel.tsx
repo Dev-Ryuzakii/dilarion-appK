@@ -22,7 +22,7 @@ import { encryptMessage } from '../services/crypto';
 import { generateDecoy } from '../services/decoy';
 import { loadKeypair } from '../services/keys';
 import { presenceService, WsMessage } from '../services/presence';
-import { LockIcon, MicIcon as MicIconSvg, PaperclipIcon as PaperclipIconSvg, CameraIcon } from '../components/Icons';
+import { LockIcon, MicIcon as MicIconSvg, PaperclipIcon as PaperclipIconSvg, CameraIcon, CloseIcon, PinIcon } from '../components/Icons';
 import MediaBubble, { DocumentBubble } from '../components/MediaBubble';
 import MeetingCard, { JoinMeetingHandler } from '../components/MeetingCard';
 import { MessageMenuTrigger, MessageReactionPills } from '../components/MessageMenu';
@@ -522,6 +522,8 @@ function MessageBubble({
         masterToken={masterToken}
         onMasterTokenSaved={onMasterTokenSaved}
         onRemove={() => onRemoveMessage(msg.id)}
+        isMine={isMine}
+        sender={msg.sender || '?'}
       />
     );
   } else if (isImage(ct) || isMedia(ct)) {
@@ -621,7 +623,7 @@ function MessageBubble({
       <MessageReactionPills reactions={msg.reactions} onToggle={onReact} />
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 3, marginTop: 3, justifyContent: isMine ? 'flex-end' : 'flex-start' }}>
-        {msg.is_pinned && <span title="Pinned" style={{ fontSize: '0.7rem' }}>📌</span>}
+        {msg.is_pinned && <span title="Pinned" style={{ display: 'inline-flex' }}><PinIcon size={11} color={isMine ? 'rgba(255,255,255,0.75)' : '#6b7280'} /></span>}
         {msg.is_edited && <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>edited</span>}
         <span style={ms.ts}>{fmtTime(msg.timestamp)}</span>
         {isMine && <MsgStatusIcon delivered={msg.delivered} read={msg.read} />}
@@ -1160,9 +1162,9 @@ export default function ChatPanel({ token, myUsername, partner, partnerOnline, m
           <span>{sendError}</span>
           <button
             onClick={() => setSendError(null)}
-            style={{ background: 'none', border: 'none', color: '#fca5a5', cursor: 'pointer', fontSize: '0.9rem' }}
+            style={{ background: 'none', border: 'none', color: '#fca5a5', cursor: 'pointer', display: 'flex' }}
           >
-            ✕
+            <CloseIcon size={14} color="#fca5a5" />
           </button>
         </div>
       )}
@@ -1219,8 +1221,8 @@ export default function ChatPanel({ token, myUsername, partner, partnerOnline, m
           </div>
           <button
             onClick={() => { setReplyTarget(null); setEditingMessage(null); setText(''); }}
-            style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '0.9rem' }}
-          >✕</button>
+            style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex' }}
+          ><CloseIcon size={14} color="var(--text-muted)" /></button>
         </div>
       )}
 

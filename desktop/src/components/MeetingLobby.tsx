@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { CameraIcon } from './Icons';
 
 // Pre-join device setup — matches Meet/Teams: preview your own mic/camera and
 // pick their starting state before actually joining. Uses a plain getUserMedia
@@ -82,9 +83,9 @@ export default function MeetingLobby({
           <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <div style={{
               width: 64, height: 64, borderRadius: '50%', background: 'var(--accent, #6d5efc)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.4rem', fontWeight: 700,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}>
-              📷
+              <CameraIcon size={28} color="#fff" />
             </div>
           </div>
         )}

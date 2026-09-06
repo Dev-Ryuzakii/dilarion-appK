@@ -56,6 +56,8 @@ import {
   PhoneMissedIcon,
   EyeIcon,
   EyeOffIcon,
+  CloseIcon,
+  SparkleIcon,
 } from '../components/Icons';
 
 interface Props {
@@ -2402,8 +2404,8 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
           {chatJoinError}
           <button
             onClick={() => setChatJoinError(null)}
-            style={{ background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', fontSize: '0.9rem' }}
-          >✕</button>
+            style={{ background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', display: 'flex' }}
+          ><CloseIcon size={14} color="#fff" /></button>
         </div>
       )}
 
@@ -2715,8 +2717,8 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
               <span style={{ fontWeight: 800, fontSize: '1rem', color: 'var(--text-primary)' }}>New Chat</span>
               <button
                 onClick={() => { setShowNewChat(false); setUserSearch(''); }}
-                style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: '1.1rem', lineHeight: 1 }}
-              >✕</button>
+                style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex' }}
+              ><CloseIcon size={18} color="var(--text-muted)" /></button>
             </div>
             {/* Search */}
             <div style={{
@@ -2799,8 +2801,8 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
               <span style={{ fontWeight: 800, fontSize: '1rem', color: 'var(--text-primary)' }}>New Meeting</span>
               <button
                 onClick={() => { setShowNewMeeting(false); setMeetingSearch(''); }}
-                style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: '1.1rem', lineHeight: 1 }}
-              >✕</button>
+                style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex' }}
+              ><CloseIcon size={18} color="var(--text-muted)" /></button>
             </div>
             <div style={{
               display: 'flex', alignItems: 'center', gap: 8,
@@ -2932,8 +2934,8 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
                   if (showScheduleForm) { setShowScheduleForm(false); setScheduleCopilotNote(null); }
                   else setShowMeetings(false);
                 }}
-                style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: '1.2rem', lineHeight: 1 }}
-              >✕</button>
+                style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex' }}
+              ><CloseIcon size={18} color="var(--text-muted)" /></button>
             </div>
 
             <div style={{ flex: 1, overflowY: 'auto', padding: showScheduleForm ? '18px 22px' : '8px 12px' }}>
@@ -2985,8 +2987,8 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
                         <button
                           onClick={() => cancelScheduledMeeting(m.id)}
                           title="Cancel"
-                          style={{ background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '0.95rem', flexShrink: 0 }}
-                        >✕</button>
+                          style={{ background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', flexShrink: 0, display: 'flex' }}
+                        ><CloseIcon size={15} color="#ef4444" /></button>
                       )}
                     </div>
                   ))
@@ -2999,8 +3001,10 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
                     <div style={{
                       background: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.35)',
                       borderRadius: 8, padding: '8px 12px', fontSize: '0.76rem', color: '#f59e0b',
+                      display: 'flex', alignItems: 'flex-start', gap: 6,
                     }}>
-                      ✨ Copilot filled this in, but wasn't fully sure: {scheduleCopilotNote}
+                      <SparkleIcon size={13} color="#f59e0b" />
+                      <span>Copilot filled this in, but wasn't fully sure: {scheduleCopilotNote}</span>
                     </div>
                   )}
                   <div>

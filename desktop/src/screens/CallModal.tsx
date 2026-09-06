@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { presenceService } from '../services/presence';
 import { initiateCall, performCallAction, sendCallIceCandidate, setCallMediaState, getCallStatus, createConference, conferenceInvite, conferenceSignal, conferenceLeave, getUsers, getIceServers, Contact, CALL_TERMINAL_STATUSES } from '../services/api';
+import { CloseIcon, MuteIcon } from '../components/Icons';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -936,7 +937,7 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
                 <div key={p} style={{ background: '#1f2937', borderRadius: 20, padding: '4px 10px', fontSize: '0.75rem', color: isMuted ? '#9ca3af' : '#d1d5db', display: 'flex', alignItems: 'center', gap: 6 }}>
                   <span style={{ width: 8, height: 8, borderRadius: '50%', background: isMuted ? '#6b7280' : '#22c55e', display: 'inline-block' }} />
                   {p}
-                  {isMuted && <span title="muted" style={{ fontSize: '0.7rem' }}>🔇</span>}
+                  {isMuted && <span title="muted" style={{ display: 'inline-flex' }}><MuteIcon size={11} color="#9ca3af" /></span>}
                 </div>
               );
             })}
@@ -949,7 +950,7 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
             <div style={cs.pickerModal}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px', borderBottom: '1px solid #1f2937' }}>
                 <span style={{ color: '#f1f5f9', fontWeight: 700, fontSize: '1rem' }}>Add to Call</span>
-                <button onClick={() => { setUserPickerOpen(false); setUserSearch(''); }} style={cs.pickerClose}>✕</button>
+                <button onClick={() => { setUserPickerOpen(false); setUserSearch(''); }} style={{ ...cs.pickerClose, display: 'flex' }}><CloseIcon size={16} color="#9ca3af" /></button>
               </div>
               <div style={{ padding: '12px 16px' }}>
                 <input

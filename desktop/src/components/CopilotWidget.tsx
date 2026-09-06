@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { parseScheduleCopilot } from '../services/api';
+import { CloseIcon, SparkleIcon, CheckIcon } from './Icons';
 
 export interface CopilotScheduleDraft {
   title: string;
@@ -91,12 +92,12 @@ export default function CopilotWidget({ token, onScheduleDraft }: {
             padding: '14px 16px', borderBottom: '1px solid var(--border-color)',
             display: 'flex', alignItems: 'center', gap: 8,
           }}>
-            <span style={{ fontSize: '1.1rem' }}>✨</span>
+            <SparkleIcon size={16} color="var(--accent)" />
             <span style={{ fontWeight: 800, fontSize: '0.9rem', color: 'var(--text-primary)', flex: 1 }}>Copilot</span>
             <button
               onClick={() => setOpen(false)}
-              style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: '1.1rem', lineHeight: 1 }}
-            >✕</button>
+              style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex' }}
+            ><CloseIcon size={16} color="var(--text-muted)" /></button>
           </div>
 
           <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', padding: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -119,7 +120,9 @@ export default function CopilotWidget({ token, onScheduleDraft }: {
                   >Use this — pick attendees</button>
                 )}
                 {m.draft && m.used && (
-                  <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: 4 }}>✓ Opened in the schedule form</span>
+                  <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <CheckIcon size={11} color="var(--text-muted)" /> Opened in the schedule form
+                  </span>
                 )}
               </div>
             ))}
@@ -160,12 +163,12 @@ export default function CopilotWidget({ token, onScheduleDraft }: {
         style={{
           position: 'fixed', bottom: 24, right: 24, zIndex: 961,
           width: 56, height: 56, borderRadius: '50%', border: 'none', cursor: 'pointer',
-          background: 'var(--accent)', color: '#fff', fontSize: '1.4rem',
+          background: 'var(--accent)', color: '#fff',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
         }}
       >
-        {open ? '✕' : '✨'}
+        {open ? <CloseIcon size={22} color="#fff" /> : <SparkleIcon size={22} color="#fff" />}
       </button>
     </>
   );

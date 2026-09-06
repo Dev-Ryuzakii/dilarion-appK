@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Room, RoomEvent, Track, RemoteParticipant, TrackPublication, Participant } from 'livekit-client';
+import { CloseIcon as SharedCloseIcon } from './Icons';
 import {
   getLiveKitToken, getIceServers, getUsers, conferenceInvite as apiConferenceInvite, Contact,
   getWaitingRoom, admitFromWaitingRoom, denyFromWaitingRoom, WaitingParticipant,
@@ -587,7 +588,7 @@ export default function GalleryView({
       {recordingError && (
         <div style={{ position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)', zIndex: 970, background: '#2a1414', border: '1px solid rgba(239,68,68,0.4)', borderRadius: 8, padding: '8px 14px', color: '#fca5a5', fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: 10 }}>
           {recordingError}
-          <button onClick={() => setRecordingError(null)} style={{ background: 'transparent', border: 'none', color: '#fca5a5', cursor: 'pointer' }}>✕</button>
+          <button onClick={() => setRecordingError(null)} style={{ background: 'transparent', border: 'none', color: '#fca5a5', cursor: 'pointer', display: 'flex' }}><SharedCloseIcon size={14} color="#fca5a5" /></button>
         </div>
       )}
 
@@ -663,7 +664,7 @@ export default function GalleryView({
           }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 18px', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
               <span style={{ color: '#fff', fontWeight: 700, fontSize: '0.9rem' }}>Participants ({tileList.length})</span>
-              <button onClick={() => setShowParticipants(false)} style={{ background: 'transparent', border: 'none', color: '#aaa', fontSize: '1rem', cursor: 'pointer' }}>✕</button>
+              <button onClick={() => setShowParticipants(false)} style={{ background: 'transparent', border: 'none', color: '#aaa', cursor: 'pointer', display: 'flex' }}><SharedCloseIcon size={16} color="#aaa" /></button>
             </div>
             {waiting.length > 0 && (
               <div style={{ padding: '10px 14px', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
