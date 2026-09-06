@@ -429,6 +429,9 @@ struct ChatView: View {
             )
             .id(item.id)
             }
+        case .pendingUpload(let pending):
+            PendingUploadBubbleView(pending: pending)
+                .id(item.id)
         }
     }
 
@@ -1338,6 +1341,66 @@ struct MeetingCardBubbleView: View {
 // master-token dialog, kept separate from the open action itself. Mirrors
 // desktop (MediaBubble.tsx's DocumentBubble) and Android (ChatScreen.kt's
 // DocumentBubble).
+// WhatsApp-style optimistic "sending" bubble — appears the instant an
+// upload starts, in the exact spot the real bubble will land, so the send
+// never looks like it silently vanished while the network call is in flight.
+struct PendingUploadBubbleView: View {
+    let pending: PendingUpload
+
+    var body: some View {
+        HStack {
+            Spacer()
+            HStack(spacing: 8) {
+                thumbnail
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(pending.filename)
+                        .font(.system(size: 13))
+                        .foregroundColor(.textPrimary)
+                        .lineLimit(1)
+                    Text("Sending…")
+                        .font(.system(size: 11))
+                        .foregroundColor(.textSecondary)
+                }
+                ProgressView()
+                    .scaleEffect(0.75)
+            }
+            .padding(8)
+            .frame(minWidth: 160, maxWidth: 240)
+            .background(Color.chatBubbleSelf.opacity(0.6))
+            .cornerRadius(16)
+        }
+    }
+
+    @ViewBuilder
+    private var thumbnail: some View {
+        switch pending.kind {
+        case .image:
+            if let data = pending.previewImage, let uiImage = UIImage(data: data) {
+                Image(uiImage: uiImage)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 36, height: 36)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .opacity(0.6)
+            } else {
+                Image(systemName: "photo.fill")
+                    .foregroundColor(.textSecondary)
+                    .frame(width: 36, height: 36)
+            }
+        case .document:
+            Image(systemName: "doc.fill")
+                .font(.system(size: 20))
+                .foregroundColor(.textSecondary)
+                .frame(width: 36, height: 36)
+        case .voice:
+            Image(systemName: "waveform")
+                .font(.system(size: 20))
+                .foregroundColor(.textSecondary)
+                .frame(width: 36, height: 36)
+        }
+    }
+}
+
 struct DocumentBubbleView: View {
     let media: MediaItem
     let isMine: Bool

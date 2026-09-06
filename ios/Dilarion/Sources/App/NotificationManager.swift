@@ -26,12 +26,15 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     // push sender stay in place; re-add registerForRemoteNotifications +
     // AppDelegate token handling once the account is paid and the p8 key set.
 
-    // Matches Android buildMessageNotification: "New message" / "From <sender>"
+    // Sender/caller identity never goes in the notification body — a locked
+    // screen or lock-screen banner is a bystander-readable surface, same
+    // reasoning as the master-token/decoy model: nothing sensitive shows
+    // without the app itself being unlocked first.
     func notifyNewMessage(from sender: String) {
         post(
             id: "dilarion_message",
             title: "New message",
-            body: "From \(sender)",
+            body: "You have a new message",
             sound: Self.messageSound
         )
     }
@@ -40,17 +43,16 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         post(
             id: "dilarion_media",
             title: "New media",
-            body: sender.map { "From \($0)" } ?? "You received new media",
+            body: "You received new media",
             sound: Self.messageSound
         )
     }
 
-    // Matches Android buildCallNotification: "Incoming Voice/Video Call" / caller
     func notifyIncomingCall(from caller: String, isVideo: Bool) {
         post(
             id: "dilarion_call",
             title: "Incoming \(isVideo ? "Video" : "Voice") Call",
-            body: caller,
+            body: "Someone is calling you",
             sound: Self.callSound
         )
     }

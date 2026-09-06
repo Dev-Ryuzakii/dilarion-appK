@@ -24,6 +24,8 @@
 	<string>1</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Dilarion needs camera access for video calls.</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>Dilarion uses Face ID to lock the app and protect security changes.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Dilarion needs microphone access for voice notes and calls.</string>
 	<key>UILaunchScreen</key>

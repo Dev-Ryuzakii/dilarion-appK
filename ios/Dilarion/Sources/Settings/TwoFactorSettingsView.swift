@@ -49,7 +49,10 @@ struct TwoFactorSettingsRow: View {
 
     var body: some View {
         Button {
-            if vm.isEnabled { showDisableSheet = true } else { showEnableSheet = true }
+            Task {
+                guard await BiometricLockSettingsRow.gateSensitiveAction() else { return }
+                if vm.isEnabled { showDisableSheet = true } else { showEnableSheet = true }
+            }
         } label: {
             HStack(spacing: 16) {
                 Image(systemName: "lock.shield.fill")

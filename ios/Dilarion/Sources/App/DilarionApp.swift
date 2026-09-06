@@ -24,6 +24,8 @@ struct RootView: View {
     @StateObject private var splashVM = SplashViewModel()
     @ObservedObject private var callVM = CallViewModel.shared
     @ObservedObject private var meetingVM = MeetingViewModel.shared
+    @ObservedObject private var appLock = AppLockManager.shared
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         SwiftUI.Group {
@@ -33,10 +35,20 @@ struct RootView: View {
             case .auth:
                 AuthView(onSuccess: { splashVM.destination = .home })
             case .home:
-                HomeView(onLogout: { splashVM.destination = .auth })
+                ZStack {
+                    HomeView(onLogout: { splashVM.destination = .auth })
+                    if appLock.isLocked {
+                        AppLockOverlayView()
+                    }
+                }
             }
         }
-        .onReceive(splashVM.$destination) { _ in }
+        .onReceive(splashVM.$destination) { destination in
+            if destination == .home { appLock.armIfEnabled() }
+        }
+        .onChange(of: scenePhase) { phase in
+            if phase == .background { appLock.armIfEnabled() }
+        }
         .fullScreenCover(isPresented: Binding(
             get: { callVM.uiState.state != .idle },
             set: { if !$0 { callVM.resetToIdle() } }

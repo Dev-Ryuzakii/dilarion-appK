@@ -1,14 +1,31 @@
 import Foundation
 import Combine
 
+enum PendingUploadKind {
+    case image, document, voice
+}
+
+// Shown in the timeline the instant a send starts — WhatsApp-style optimistic
+// bubble — and removed once the real MediaItem lands via loadMedia(). Never
+// persisted; purely a local placeholder for the in-flight request.
+struct PendingUpload: Identifiable {
+    let id = UUID()
+    let kind: PendingUploadKind
+    let previewImage: Data?
+    let filename: String
+    let timestamp: String = ISO8601DateFormatter().string(from: Date())
+}
+
 enum ChatItem: Identifiable {
     case textMessage(Message)
     case mediaMessage(MediaItem)
+    case pendingUpload(PendingUpload)
 
     var id: String {
         switch self {
         case .textMessage(let m): return "msg_\(m.id)"
         case .mediaMessage(let m): return "media_\(m.mediaId)"
+        case .pendingUpload(let p): return "pending_\(p.id)"
         }
     }
 
@@ -16,6 +33,7 @@ enum ChatItem: Identifiable {
         switch self {
         case .textMessage(let m): return m.timestamp
         case .mediaMessage(let m): return m.timestamp
+        case .pendingUpload(let p): return p.timestamp
         }
     }
 }
@@ -30,6 +48,7 @@ struct ChatUiState {
     var isRecording: Bool = false
     var recordingSeconds: Int = 0
     var isUploadingMedia: Bool = false
+    var pendingUploads: [PendingUpload] = []
     // Session-level: user has proven they know the master token. Gates
     // decryption + whether a bubble tap needs the dialog or can reveal
     // straight away — it does NOT mean every message is shown in plaintext,
@@ -203,7 +222,8 @@ class ChatViewModel: ObservableObject {
             .filter { !isMediaFilenameMessage($0) }
             .map { ChatItem.textMessage($0) }
         let mediaItems = state.mediaItems.map { ChatItem.mediaMessage($0) }
-        return (textItems + mediaItems)
+        let pending = state.pendingUploads.map { ChatItem.pendingUpload($0) }
+        return (textItems + mediaItems + pending)
             .sorted { ($0.timestamp ?? "") < ($1.timestamp ?? "") }
     }
 
@@ -626,7 +646,11 @@ class ChatViewModel: ObservableObject {
 
     // MARK: — Media Actions
     func sendImage(data: Data) async {
-        await MainActor.run { state.isUploadingMedia = true }
+        let placeholder = PendingUpload(kind: .image, previewImage: data, filename: "Photo")
+        await MainActor.run {
+            state.isUploadingMedia = true
+            state.pendingUploads.append(placeholder)
+        }
         do {
             let parameters = ["username": partnerUsername]
             let filename = "upload_\(Int(Date().timeIntervalSince1970)).jpg"
@@ -641,14 +665,21 @@ class ChatViewModel: ObservableObject {
         } catch {
             await MainActor.run { state.error = error.localizedDescription }
         }
-        await MainActor.run { state.isUploadingMedia = false }
+        await MainActor.run {
+            state.isUploadingMedia = false
+            state.pendingUploads.removeAll { $0.id == placeholder.id }
+        }
     }
 
     /// Generic file attachment — gets a decoy document rather than the plain
     /// lock gate images/voice notes use. `decoyKind` is nil for a group-chat
     /// send when the user skips the picker (backend falls back to a default).
     func sendDocument(data: Data, filename: String, mimeType: String, decoyKind: DecoyKind?) async {
-        await MainActor.run { state.isUploadingMedia = true }
+        let placeholder = PendingUpload(kind: .document, previewImage: nil, filename: filename)
+        await MainActor.run {
+            state.isUploadingMedia = true
+            state.pendingUploads.append(placeholder)
+        }
         do {
             _ = try await APIClient.shared.uploadDocument(
                 recipient: groupId == nil ? partnerUsername : nil,
@@ -662,7 +693,10 @@ class ChatViewModel: ObservableObject {
         } catch {
             await MainActor.run { state.error = error.localizedDescription }
         }
-        await MainActor.run { state.isUploadingMedia = false }
+        await MainActor.run {
+            state.isUploadingMedia = false
+            state.pendingUploads.removeAll { $0.id == placeholder.id }
+        }
     }
 
     /// Tapping a document bubble always opens *something* — the decoy while
@@ -736,7 +770,11 @@ class ChatViewModel: ObservableObject {
 
     func stopAndSendRecording() async {
         guard let url = AudioManager.shared.stopRecording() else { return }
-        await MainActor.run { state.isUploadingMedia = true }
+        let placeholder = PendingUpload(kind: .voice, previewImage: nil, filename: "Voice message")
+        await MainActor.run {
+            state.isUploadingMedia = true
+            state.pendingUploads.append(placeholder)
+        }
         do {
             let data = try Data(contentsOf: url)
             let parameters = [
@@ -756,7 +794,10 @@ class ChatViewModel: ObservableObject {
         } catch {
             await MainActor.run { state.error = error.localizedDescription }
         }
-        await MainActor.run { state.isUploadingMedia = false }
+        await MainActor.run {
+            state.isUploadingMedia = false
+            state.pendingUploads.removeAll { $0.id == placeholder.id }
+        }
     }
 
     func cancelRecording() {

@@ -67,7 +67,11 @@ struct LinkedDevicesView: View {
                     .padding(.top, 12)
 
                 Button {
-                    showScanner = true
+                    Task {
+                        if await BiometricLockSettingsRow.gateSensitiveAction() {
+                            showScanner = true
+                        }
+                    }
                 } label: {
                     HStack(spacing: 10) {
                         Image(systemName: "qrcode.viewfinder")

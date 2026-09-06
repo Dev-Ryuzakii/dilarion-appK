@@ -40,6 +40,7 @@ targets:
         UIViewControllerBasedStatusBarAppearance: true
         NSMicrophoneUsageDescription: "Dilarion needs microphone access for voice notes and calls."
         NSCameraUsageDescription: "Dilarion needs camera access for video calls."
+        NSFaceIDUsageDescription: "Dilarion uses Face ID to lock the app and protect security changes."
     settings:
       TARGETED_DEVICE_FAMILY: 1
       GENERATE_INFOPLIST_FILE: false

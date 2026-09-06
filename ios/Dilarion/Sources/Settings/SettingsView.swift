@@ -75,7 +75,11 @@ struct SettingsViewFull: View {
                             .padding(.leading, 16)
                         
                         Button {
-                            showMasterTokenSetup = true
+                            Task {
+                                if await BiometricLockSettingsRow.gateSensitiveAction() {
+                                    showMasterTokenSetup = true
+                                }
+                            }
                         } label: {
                             HStack(spacing: 16) {
                                 Image(systemName: "shield.fill")
@@ -108,6 +112,14 @@ struct SettingsViewFull: View {
                         Divider().padding(.leading, 56)
 
                         TwoFactorSettingsRow()
+
+                        Divider().padding(.leading, 56)
+
+                        VoiceIdentitySettingsRow()
+
+                        Divider().padding(.leading, 56)
+
+                        BiometricLockSettingsRow()
                     }
 
                     Spacer().frame(height: 20)
