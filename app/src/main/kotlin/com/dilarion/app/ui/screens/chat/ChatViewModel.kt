@@ -1,8 +1,12 @@
 package com.dilarion.app.ui.screens.chat
 
 import android.content.Context
+import android.media.MediaCodec
+import android.media.MediaExtractor
+import android.media.MediaFormat
 import android.media.MediaPlayer
 import android.media.MediaRecorder
+import android.media.PlaybackParams
 import android.net.Uri
 import android.os.Build
 import androidx.lifecycle.ViewModel
@@ -18,17 +22,24 @@ import com.dilarion.app.data.model.SendGroupMessageRequest
 import com.dilarion.app.security.SessionManager
 import com.dilarion.app.services.PresenceService
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.File
+import java.nio.ByteOrder
 import javax.inject.Inject
+import kotlin.math.sqrt
+
+data class VoiceWaveform(val bars: List<Float>, val durationMs: Int)
 
 enum class PendingUploadKind { IMAGE, DOCUMENT, VOICE }
 
@@ -81,6 +92,15 @@ data class ChatUiState(
     val isRecording: Boolean = false,
     val recordingSeconds: Int = 0,
     val playingMediaId: String? = null,
+    // WhatsApp-style voice bubble — real per-recording waveform (not
+    // decorative) plus its duration, known up front from the file itself
+    // rather than only once playback starts. Keyed by the same cacheKey as
+    // localFilePaths ("real_<id>"/"fake_<id>") so decoy vs real never share
+    // a waveform. playbackPositionMs only applies to whichever mediaId is
+    // currently playing (one MediaPlayer at a time).
+    val waveforms: Map<String, VoiceWaveform> = emptyMap(),
+    val playbackPositionMs: Int = 0,
+    val playbackSpeed: Float = 1f,
     val groupMembers: List<GroupMember> = emptyList(),
     val taggedUser: String? = null,
     val mentionQuery: String? = null,
@@ -109,6 +129,7 @@ class ChatViewModel @Inject constructor(
     private var recordingFile: File? = null
     private var timerJob: Job? = null
     private var mediaPlayer: MediaPlayer? = null
+    private var positionJob: Job? = null
 
     fun init(username: String, gId: Int?) {
         peerUsername = username
@@ -561,6 +582,7 @@ class ChatViewModel @Inject constructor(
         val cacheKey = "${if (useRealAudio) "real" else "fake"}_$mediaId"
         val existingPath = _uiState.value.localFilePaths[cacheKey]
         if (existingPath != null) {
+            ensureWaveform(cacheKey, existingPath)
             startPlayer(existingPath, mediaId)
             return
         }
@@ -579,10 +601,153 @@ class ChatViewModel @Inject constructor(
                 _uiState.value = _uiState.value.copy(
                     localFilePaths = _uiState.value.localFilePaths + (cacheKey to file.absolutePath)
                 )
+                ensureWaveform(cacheKey, file.absolutePath)
                 startPlayer(file.absolutePath, mediaId)
             }.onFailure {
                 _uiState.value = _uiState.value.copy(error = it.message, playingMediaId = null)
             }
+        }
+    }
+
+    /**
+     * Shows a WhatsApp-style duration+waveform on a voice bubble before it's
+     * ever tapped, matching how a real message looks pre-play. Always the
+     * decoy — decoy generation targets the real note's duration already, so
+     * this is an accurate stand-in, and unlike the real file it's safe to
+     * fetch eagerly (reusable, not a one-time view). Never call this with
+     * useRealAudio=true; that would burn the one-time real file just from
+     * the bubble rendering.
+     */
+    fun prefetchVoicePreview(mediaId: String, context: Context) {
+        val cacheKey = "fake_$mediaId"
+        if (_uiState.value.waveforms.containsKey(cacheKey)) return
+        val existingPath = _uiState.value.localFilePaths[cacheKey]
+        if (existingPath != null) {
+            ensureWaveform(cacheKey, existingPath)
+            return
+        }
+        viewModelScope.launch {
+            val token = sessionManager.sessionToken.first() ?: return@launch
+            runCatching {
+                val resp = apiService.downloadDecoyVoice("Bearer $token", mediaId)
+                val bytes = resp.body()?.bytes() ?: return@launch
+                val file = File(context.cacheDir, "$cacheKey.mp4")
+                file.writeBytes(bytes)
+                _uiState.value = _uiState.value.copy(
+                    localFilePaths = _uiState.value.localFilePaths + (cacheKey to file.absolutePath)
+                )
+                ensureWaveform(cacheKey, file.absolutePath)
+            }
+            // Silent failure is fine here — this is a passive preview, not a
+            // user-initiated action; playMedia's own error handling covers
+            // the real tap-to-play path.
+        }
+    }
+
+    /** Decodes the actual recording once per cacheKey — decoy and real audio
+     * never share a waveform even for the same media id, matching how their
+     * bytes genuinely differ. Cheap enough to run inline; the file is
+     * already local by the time this is called. */
+    private fun ensureWaveform(cacheKey: String, filePath: String) {
+        if (_uiState.value.waveforms.containsKey(cacheKey)) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val waveform = extractWaveform(filePath)
+            _uiState.value = _uiState.value.copy(waveforms = _uiState.value.waveforms + (cacheKey to waveform))
+        }
+    }
+
+    private fun extractWaveform(filePath: String, bucketCount: Int = 40): VoiceWaveform {
+        val fallback = VoiceWaveform(List(bucketCount) { 0.3f }, 0)
+        val extractor = MediaExtractor()
+        return try {
+            extractor.setDataSource(filePath)
+            var trackIndex = -1
+            var format: MediaFormat? = null
+            for (i in 0 until extractor.trackCount) {
+                val f = extractor.getTrackFormat(i)
+                if (f.getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true) {
+                    trackIndex = i; format = f; break
+                }
+            }
+            if (trackIndex < 0 || format == null) return fallback
+            val durationMs = if (format.containsKey(MediaFormat.KEY_DURATION)) {
+                (format.getLong(MediaFormat.KEY_DURATION) / 1000).toInt()
+            } else 0
+            extractor.selectTrack(trackIndex)
+            val codec = MediaCodec.createDecoderByType(format.getString(MediaFormat.KEY_MIME)!!)
+            codec.configure(format, null, null, 0)
+            codec.start()
+
+            val bufferInfo = MediaCodec.BufferInfo()
+            val amplitudes = mutableListOf<Float>()
+            var inputDone = false
+            var outputDone = false
+            val timeoutUs = 10_000L
+
+            while (!outputDone) {
+                if (!inputDone) {
+                    val inIndex = codec.dequeueInputBuffer(timeoutUs)
+                    if (inIndex >= 0) {
+                        val buffer = codec.getInputBuffer(inIndex)
+                        val sampleSize = buffer?.let { extractor.readSampleData(it, 0) } ?: -1
+                        if (sampleSize < 0) {
+                            codec.queueInputBuffer(inIndex, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                            inputDone = true
+                        } else {
+                            codec.queueInputBuffer(inIndex, 0, sampleSize, extractor.sampleTime, 0)
+                            extractor.advance()
+                        }
+                    }
+                }
+                val outIndex = codec.dequeueOutputBuffer(bufferInfo, timeoutUs)
+                if (outIndex >= 0) {
+                    val outBuffer = codec.getOutputBuffer(outIndex)
+                    if (outBuffer != null && bufferInfo.size > 0) {
+                        outBuffer.order(ByteOrder.LITTLE_ENDIAN)
+                        val shorts = ShortArray(bufferInfo.size / 2)
+                        outBuffer.asShortBuffer().get(shorts)
+                        if (shorts.isNotEmpty()) {
+                            var sum = 0.0
+                            for (s in shorts) sum += s.toDouble() * s.toDouble()
+                            amplitudes.add(sqrt(sum / shorts.size).toFloat())
+                        }
+                    }
+                    codec.releaseOutputBuffer(outIndex, false)
+                    if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) outputDone = true
+                }
+            }
+            codec.stop()
+            codec.release()
+
+            if (amplitudes.isEmpty()) return VoiceWaveform(fallback.bars, durationMs)
+            val bucketSize = (amplitudes.size / bucketCount).coerceAtLeast(1)
+            val buckets = amplitudes.chunked(bucketSize).map { it.average().toFloat() }.take(bucketCount)
+            val maxVal = buckets.maxOrNull()?.takeIf { it > 0f } ?: 1f
+            val normalized = buckets.map { (it / maxVal).coerceIn(0.15f, 1f) }
+            val bars = if (normalized.size < bucketCount) normalized + List(bucketCount - normalized.size) { 0.15f } else normalized
+            VoiceWaveform(bars, durationMs)
+        } catch (e: Exception) {
+            fallback
+        } finally {
+            runCatching { extractor.release() }
+        }
+    }
+
+    fun seekVoice(positionMs: Int) {
+        val mp = mediaPlayer ?: return
+        runCatching { mp.seekTo(positionMs) }
+        _uiState.value = _uiState.value.copy(playbackPositionMs = positionMs)
+    }
+
+    fun cyclePlaybackSpeed() {
+        val next = when (_uiState.value.playbackSpeed) {
+            1f -> 1.5f
+            1.5f -> 2f
+            else -> 1f
+        }
+        _uiState.value = _uiState.value.copy(playbackSpeed = next)
+        mediaPlayer?.let { mp ->
+            if (mp.isPlaying) runCatching { mp.playbackParams = mp.playbackParams.setSpeed(next) }
         }
     }
 
@@ -671,17 +836,28 @@ class ChatViewModel @Inject constructor(
     }
 
     private fun startPlayer(filePath: String, mediaId: String) {
+        positionJob?.cancel()
         mediaPlayer?.release()
         mediaPlayer = null
-        _uiState.value = _uiState.value.copy(playingMediaId = mediaId)
+        _uiState.value = _uiState.value.copy(playingMediaId = mediaId, playbackPositionMs = 0)
         runCatching {
             mediaPlayer = MediaPlayer().apply {
                 setDataSource(filePath)
                 setOnCompletionListener {
-                    _uiState.value = _uiState.value.copy(playingMediaId = null)
+                    positionJob?.cancel()
+                    _uiState.value = _uiState.value.copy(playingMediaId = null, playbackPositionMs = 0)
                 }
                 prepare()
+                runCatching { playbackParams = playbackParams.setSpeed(_uiState.value.playbackSpeed) }
                 start()
+            }
+            positionJob = viewModelScope.launch {
+                while (isActive) {
+                    delay(80)
+                    val mp = mediaPlayer ?: break
+                    val pos = runCatching { mp.currentPosition }.getOrNull() ?: break
+                    _uiState.value = _uiState.value.copy(playbackPositionMs = pos)
+                }
             }
         }.onFailure {
             _uiState.value = _uiState.value.copy(error = it.message, playingMediaId = null)
@@ -689,9 +865,11 @@ class ChatViewModel @Inject constructor(
     }
 
     fun stopPlayback() {
+        positionJob?.cancel()
+        positionJob = null
         mediaPlayer?.release()
         mediaPlayer = null
-        _uiState.value = _uiState.value.copy(playingMediaId = null)
+        _uiState.value = _uiState.value.copy(playingMediaId = null, playbackPositionMs = 0)
     }
 
     fun markRead(messageId: Int) {

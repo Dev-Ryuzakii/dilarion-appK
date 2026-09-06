@@ -9,6 +9,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
@@ -31,6 +32,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.foundation.Image
@@ -376,20 +378,37 @@ fun ChatScreen(
                                             viewModel.downloadImageForDisplay(mediaItem.mediaId, context)
                                         }
                                     }
+                                    val isThisPlaying = uiState.playingMediaId == mediaItem.mediaId
+                                    // Prefer the real waveform once it's actually been fetched (the
+                                    // user played it for real at least once); until then, the
+                                    // pre-fetched decoy stands in — same as what tapping would show.
+                                    val voiceWaveform = uiState.waveforms["real_${mediaItem.mediaId}"]
+                                        ?: uiState.waveforms["fake_${mediaItem.mediaId}"]
+                                    if (isVoice) {
+                                        LaunchedEffect(mediaItem.mediaId) {
+                                            viewModel.prefetchVoicePreview(mediaItem.mediaId, context)
+                                        }
+                                    }
                                     MediaBubble(
                                         item = mediaItem,
                                         isMine = isMine,
                                         isVoice = isVoice,
                                         isUnlocked = mediaUnlocked,
-                                        isPlaying = uiState.playingMediaId == mediaItem.mediaId,
+                                        isPlaying = isThisPlaying,
                                         localImagePath = if (!isVoice) localPath else null,
+                                        waveform = voiceWaveform?.bars,
+                                        positionMs = if (isThisPlaying) uiState.playbackPositionMs else 0,
+                                        durationMs = voiceWaveform?.durationMs ?: 0,
+                                        speed = uiState.playbackSpeed,
                                         onPlayTap = {
-                                            if (uiState.playingMediaId == mediaItem.mediaId) {
+                                            if (isThisPlaying) {
                                                 viewModel.stopPlayback()
                                             } else {
                                                 viewModel.playMedia(mediaItem.mediaId, mediaUnlocked, context)
                                             }
                                         },
+                                        onSeek = { ms -> if (isThisPlaying) viewModel.seekVoice(ms) },
+                                        onSpeedTap = { viewModel.cyclePlaybackSpeed() },
                                         onImageTap = { path -> viewerImagePath = path },
                                         onLockTap = { unlockTarget = "media_${mediaItem.mediaId}" },
                                     )
@@ -602,6 +621,137 @@ private fun RecordingRow(seconds: Int, onCancel: () -> Unit, onSend: () -> Unit)
     }
 }
 
+private fun formatVoiceTime(ms: Int): String {
+    val totalSec = (ms / 1000).coerceAtLeast(0)
+    val m = totalSec / 60
+    val s = totalSec % 60
+    return "%d:%02d".format(m, s)
+}
+
+/**
+ * WhatsApp-style voice message: play/pause circle, a waveform built from the
+ * actual recording's amplitude (not decorative bars) with a progress-through-
+ * waveform scrubber you can drag to seek, elapsed/total duration, a cyclable
+ * playback speed pill, and a small avatar-with-mic badge like WhatsApp uses
+ * to show whose voice it is. `waveform`/`durationMs` come from whichever of
+ * decoy or real audio has actually been fetched — see ChatViewModel's
+ * prefetchVoicePreview/ensureWaveform. Locked bubbles still play (the decoy)
+ * on tap; the lock only gates the real audio, never whether something plays.
+ */
+@Composable
+private fun VoiceMessageBubble(
+    isMine: Boolean,
+    isPlaying: Boolean,
+    isUnlocked: Boolean,
+    sender: String,
+    waveform: List<Float>?,
+    positionMs: Int,
+    durationMs: Int,
+    speed: Float,
+    onPlayTap: () -> Unit,
+    onSeek: (Int) -> Unit,
+    onSpeedTap: () -> Unit,
+    onLockTap: () -> Unit,
+) {
+    val bars = waveform ?: List(40) { 0.3f }
+    val progress = if (durationMs > 0) (positionMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
+    val playedColor = if (isMine) SurfaceWhite else DilarionRed
+    val unplayedColor = if (isMine) SurfaceWhite.copy(alpha = 0.4f) else DilarionRed.copy(alpha = 0.3f)
+
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(4.dp).widthIn(min = 220.dp)) {
+        IconButton(onClick = onPlayTap, modifier = Modifier.size(38.dp)) {
+            Box(
+                Modifier.size(34.dp).clip(CircleShape).background(if (isMine) SurfaceWhite.copy(alpha = 0.25f) else DilarionRed.copy(alpha = 0.12f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                    "Play",
+                    tint = if (isMine) SurfaceWhite else DilarionRed,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+        }
+        Spacer(Modifier.width(4.dp))
+
+        Column(Modifier.weight(1f)) {
+            var boxWidthPx by remember { mutableStateOf(0f) }
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(28.dp)
+                    .onGloballyPositioned { boxWidthPx = it.size.width.toFloat() }
+                    .pointerInput(durationMs) {
+                        if (durationMs <= 0) return@pointerInput
+                        detectTapGestures { offset ->
+                            onSeek(((offset.x / boxWidthPx).coerceIn(0f, 1f) * durationMs).toInt())
+                        }
+                    }
+                    .pointerInput(durationMs) {
+                        if (durationMs <= 0) return@pointerInput
+                        detectDragGestures { change, _ ->
+                            onSeek(((change.position.x / boxWidthPx).coerceIn(0f, 1f) * durationMs).toInt())
+                        }
+                    },
+                contentAlignment = Alignment.CenterStart,
+            ) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
+                    bars.forEachIndexed { i, amp ->
+                        val played = i.toFloat() / bars.size < progress
+                        Box(
+                            Modifier
+                                .weight(1f)
+                                .height((6 + amp * 18).dp)
+                                .clip(RoundedCornerShape(2.dp))
+                                .background(if (played) playedColor else unplayedColor)
+                        )
+                    }
+                }
+            }
+            Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    formatVoiceTime(if (isPlaying || positionMs > 0) positionMs else durationMs),
+                    fontSize = 11.sp,
+                    color = if (isMine) SurfaceWhite.copy(alpha = 0.85f) else TextSecondary,
+                )
+                if (durationMs > 0) {
+                    Text(
+                        "${if (speed == speed.toInt().toFloat()) speed.toInt().toString() else speed.toString()}x",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isMine) SurfaceWhite.copy(alpha = 0.85f) else TextSecondary,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .clickable(onClick = onSpeedTap)
+                            .padding(horizontal = 4.dp),
+                    )
+                }
+            }
+        }
+
+        Spacer(Modifier.width(6.dp))
+        Box {
+            SenderAvatar(sender)
+            Box(
+                Modifier
+                    .align(Alignment.BottomEnd)
+                    .size(14.dp)
+                    .clip(CircleShape)
+                    .background(if (isMine) ChatBubbleSelf else ChatBubbleOther),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Default.Mic, null, tint = DilarionRed, modifier = Modifier.size(9.dp))
+            }
+        }
+        if (!isUnlocked) {
+            Spacer(Modifier.width(4.dp))
+            IconButton(onClick = onLockTap, modifier = Modifier.size(24.dp)) {
+                Icon(Icons.Default.Lock, "Unlock real audio", tint = if (isMine) SurfaceWhite.copy(alpha = 0.85f) else TextSecondary, modifier = Modifier.size(14.dp))
+            }
+        }
+    }
+}
+
 @Composable
 private fun MediaBubble(
     item: MediaItem,
@@ -610,7 +760,13 @@ private fun MediaBubble(
     isUnlocked: Boolean,
     isPlaying: Boolean,
     localImagePath: String?,
+    waveform: List<Float>?,
+    positionMs: Int,
+    durationMs: Int,
+    speed: Float,
     onPlayTap: () -> Unit,
+    onSeek: (Int) -> Unit,
+    onSpeedTap: () -> Unit,
     onImageTap: (String) -> Unit,
     onLockTap: () -> Unit,
 ) {
@@ -633,30 +789,20 @@ private fun MediaBubble(
                 .padding(8.dp),
         ) {
             if (isVoice) {
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(4.dp)) {
-                    IconButton(onClick = onPlayTap, modifier = Modifier.size(36.dp)) {
-                        Icon(
-                            if (isPlaying) Icons.Default.Stop else Icons.Default.PlayArrow,
-                            "Play",
-                            tint = DilarionRed,
-                            modifier = Modifier.size(24.dp),
-                        )
-                    }
-                    Spacer(Modifier.width(4.dp))
-                    // Simple waveform placeholder
-                    Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
-                        repeat(12) { i ->
-                            val h = ((i * 7 + 3) % 16 + 8).dp
-                            Box(Modifier.width(3.dp).height(h).clip(RoundedCornerShape(2.dp)).background(DilarionRed.copy(alpha = 0.6f)))
-                        }
-                    }
-                    Spacer(Modifier.width(4.dp))
-                    if (!isUnlocked) {
-                        IconButton(onClick = onLockTap, modifier = Modifier.size(28.dp)) {
-                            Icon(Icons.Default.Lock, "Unlock real audio", tint = TextSecondary, modifier = Modifier.size(16.dp))
-                        }
-                    }
-                }
+                VoiceMessageBubble(
+                    isMine = isMine,
+                    isPlaying = isPlaying,
+                    isUnlocked = isUnlocked,
+                    sender = item.sender ?: "?",
+                    waveform = waveform,
+                    positionMs = positionMs,
+                    durationMs = durationMs,
+                    speed = speed,
+                    onPlayTap = onPlayTap,
+                    onSeek = onSeek,
+                    onSpeedTap = onSpeedTap,
+                    onLockTap = onLockTap,
+                )
             } else {
                 // Image
                 if (!isUnlocked) {
