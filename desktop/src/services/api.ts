@@ -1020,6 +1020,29 @@ export async function createMasterToken(token: string, masterToken: string, twoF
 
 // ── Master-token 2FA ─────────────────────────────────────────────────────────
 
+// ── Voice identity (AI Voice Decoy) ─────────────────────────────────────────
+// Enrolled sample is cloned server-side (voice_scrambler.py) to generate a
+// decoy voice note in the user's own voice for every real one sent. The
+// sample itself never comes back down — see media/decoy-voice.
+
+export async function uploadVoiceIdentity(token: string, blob: Blob, filename = 'voice_identity.webm'): Promise<void> {
+  const form = new FormData();
+  form.append('file', blob, filename);
+  const res = await fetch(`${BASE}/users/me/voice-identity`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  });
+  if (!res.ok) throw new Error('Failed to save voice sample');
+}
+
+export async function hasVoiceIdentity(token: string, username: string): Promise<boolean> {
+  const res = await fetch(`${BASE}/users/${encodeURIComponent(username)}/voice-identity`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return res.ok;
+}
+
 export async function getMasterToken2FAStatus(token: string): Promise<boolean> {
   const res = await fetch(`${BASE}/mastertoken/2fa/status`, {
     headers: { Authorization: `Bearer ${token}` },

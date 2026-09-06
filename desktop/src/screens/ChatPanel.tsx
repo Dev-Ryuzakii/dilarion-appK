@@ -22,7 +22,7 @@ import { encryptMessage } from '../services/crypto';
 import { generateDecoy } from '../services/decoy';
 import { loadKeypair } from '../services/keys';
 import { presenceService, WsMessage } from '../services/presence';
-import { LockIcon, MicIcon as MicIconSvg, PaperclipIcon as PaperclipIconSvg } from '../components/Icons';
+import { LockIcon, MicIcon as MicIconSvg, PaperclipIcon as PaperclipIconSvg, CameraIcon } from '../components/Icons';
 import MediaBubble, { DocumentBubble } from '../components/MediaBubble';
 import MeetingCard, { JoinMeetingHandler } from '../components/MeetingCard';
 import { MessageMenuTrigger, MessageReactionPills } from '../components/MessageMenu';
@@ -618,13 +618,26 @@ function MessageBubble({
 
 // ── Pending bubble (clock icon while sending) ──────────────────────────────────
 
-function PendingBubble({ content, timestamp }: { content: string; timestamp: string }) {
+export function PendingBubble({ content, timestamp, kind = 'text', filename }: { content: string; timestamp: string; kind?: PendingMsg['kind']; filename?: string }) {
+  const isMedia = kind && kind !== 'text';
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', marginBottom: 4 }}>
-      <div style={{ ...ms.bubbleMine, opacity: 0.65 }}>
-        <span style={{ fontSize: '0.88rem', lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-          {content}
-        </span>
+      <div style={{ ...ms.bubbleMine, opacity: 0.65, ...(isMedia ? { display: 'flex', alignItems: 'center', gap: 8 } : {}) }}>
+        {isMedia ? (
+          <>
+            {kind === 'image' && <CameraIcon size={20} color="#9ca3af" />}
+            {kind === 'document' && <PaperclipIconSvg size={20} color="#9ca3af" />}
+            {kind === 'voice' && <MicIconSvg size={20} color="#9ca3af" />}
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <span style={{ fontSize: '0.85rem' }}>{filename || 'Attachment'}</span>
+              <span style={{ fontSize: '0.72rem', opacity: 0.7 }}>Sending…</span>
+            </div>
+          </>
+        ) : (
+          <span style={{ fontSize: '0.88rem', lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+            {content}
+          </span>
+        )}
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 3, marginTop: 3 }}>
         <span style={ms.ts}>{fmtTime(timestamp)}</span>
@@ -657,11 +670,14 @@ function MessageSkeleton() {
 
 // ── Main ChatPanel ─────────────────────────────────────────────────────────────
 
-// Fake pending message while sending
-interface PendingMsg {
+// Fake pending message while sending — text, or a WhatsApp-style optimistic
+// bubble for an in-flight image/document/voice upload.
+export interface PendingMsg {
   localId: string;
   content: string;
   timestamp: string;
+  kind?: 'text' | 'image' | 'document' | 'voice';
+  filename?: string;
 }
 
 export default function ChatPanel({ token, myUsername, partner, partnerOnline, masterToken, onMasterTokenSaved, onCall, onJoinMeeting, onBack }: Props) {
@@ -932,11 +948,15 @@ export default function ChatPanel({ token, myUsername, partner, partnerOnline, m
       setPendingDocFile(file);
       return;
     }
+    const localId = `pending-${Date.now()}`;
+    setPending(prev => [...prev, { localId, content: '', timestamp: new Date().toISOString(), kind: 'image', filename: file.name }]);
     try {
       await uploadMedia(token, partner, file, ct, file.name);
       await loadConversation();
     } catch {
       // silently fail
+    } finally {
+      setPending(prev => prev.filter(p => p.localId !== localId));
     }
   }
 
@@ -945,11 +965,15 @@ export default function ChatPanel({ token, myUsername, partner, partnerOnline, m
     if (!file) return;
     setPendingDocFile(null);
     const ct = file.type || 'application/octet-stream';
+    const localId = `pending-${Date.now()}`;
+    setPending(prev => [...prev, { localId, content: '', timestamp: new Date().toISOString(), kind: 'document', filename: file.name }]);
     try {
       await uploadMedia(token, partner, file, ct, file.name, kind);
       await loadConversation();
     } catch {
       // silently fail
+    } finally {
+      setPending(prev => prev.filter(p => p.localId !== localId));
     }
   }
 
@@ -988,11 +1012,15 @@ export default function ChatPanel({ token, myUsername, partner, partnerOnline, m
     recorderRef.current = null;
 
     if (blob.size > 0) {
+      const localId = `pending-${Date.now()}`;
+      setPending(prev => [...prev, { localId, content: '', timestamp: new Date().toISOString(), kind: 'voice', filename: 'Voice message' }]);
       try {
         await uploadMedia(token, partner, blob, 'audio/webm', 'voice_note.webm');
         await loadConversation();
       } catch {
         // silently fail
+      } finally {
+        setPending(prev => prev.filter(p => p.localId !== localId));
       }
     }
   }
@@ -1096,7 +1124,7 @@ export default function ChatPanel({ token, myUsername, partner, partnerOnline, m
               );
             })}
             {pending.map(p => (
-              <PendingBubble key={p.localId} content={p.content} timestamp={p.timestamp} />
+              <PendingBubble key={p.localId} content={p.content} timestamp={p.timestamp} kind={p.kind} filename={p.filename} />
             ))}
           </>
         )}

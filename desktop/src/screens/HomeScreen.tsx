@@ -12,6 +12,8 @@ import {
   getMasterToken2FAStatus,
   enableMasterToken2FA,
   disableMasterToken2FA,
+  uploadVoiceIdentity,
+  hasVoiceIdentity,
   requestAccountDeletion,
   getMyAccountDeletionStatus,
   AccountDeletionStatus,
@@ -570,6 +572,16 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
   const [showDisable2FA, setShowDisable2FA] = useState(false);
   const [disable2FAPassword, setDisable2FAPassword] = useState('');
 
+  const [voiceIdentityEnrolled, setVoiceIdentityEnrolled] = useState(false);
+  const [voiceIdentityLoading, setVoiceIdentityLoading] = useState(true);
+  const [voiceIdentityUploading, setVoiceIdentityUploading] = useState(false);
+  const [voiceIdentityError, setVoiceIdentityError] = useState<string | null>(null);
+  const [isRecordingVoiceIdentity, setIsRecordingVoiceIdentity] = useState(false);
+  const [voiceIdentitySeconds, setVoiceIdentitySeconds] = useState(0);
+  const voiceRecorderRef = useRef<MediaRecorder | null>(null);
+  const voiceChunksRef = useRef<Blob[]>([]);
+  const voiceTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   const [deletionStatus, setDeletionStatus] = useState<AccountDeletionStatus | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleteReason, setDeleteReason] = useState('');
@@ -579,7 +591,61 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
   useEffect(() => {
     getMasterToken2FAStatus(token).then(setTwoFaEnabled).catch(() => {});
     getMyAccountDeletionStatus(token).then(setDeletionStatus).catch(() => {});
-  }, [token]);
+    setVoiceIdentityLoading(true);
+    hasVoiceIdentity(token, username).then(setVoiceIdentityEnrolled).finally(() => setVoiceIdentityLoading(false));
+  }, [token, username]);
+
+  const MIN_VOICE_IDENTITY_SECONDS = 8;
+
+  async function startVoiceIdentityRecording() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      voiceChunksRef.current = [];
+      const rec = new MediaRecorder(stream);
+      voiceRecorderRef.current = rec;
+      rec.ondataavailable = e => { if (e.data.size) voiceChunksRef.current.push(e.data); };
+      rec.start(100);
+      setIsRecordingVoiceIdentity(true);
+      setVoiceIdentitySeconds(0);
+      setVoiceIdentityError(null);
+      voiceTimerRef.current = setInterval(() => setVoiceIdentitySeconds(s => s + 1), 1000);
+    } catch {
+      setVoiceIdentityError('Microphone not available');
+    }
+  }
+
+  async function stopAndUploadVoiceIdentity() {
+    const rec = voiceRecorderRef.current;
+    if (!rec) return;
+    if (voiceTimerRef.current) { clearInterval(voiceTimerRef.current); voiceTimerRef.current = null; }
+    setIsRecordingVoiceIdentity(false);
+    const seconds = voiceIdentitySeconds;
+    setVoiceIdentitySeconds(0);
+
+    await new Promise<void>(resolve => {
+      rec.onstop = () => resolve();
+      rec.stop();
+      rec.stream.getTracks().forEach(t => t.stop());
+    });
+    voiceRecorderRef.current = null;
+
+    if (seconds < MIN_VOICE_IDENTITY_SECONDS) {
+      setVoiceIdentityError(`Recording too short — need at least ${MIN_VOICE_IDENTITY_SECONDS}s`);
+      return;
+    }
+
+    const blob = new Blob(voiceChunksRef.current, { type: 'audio/webm' });
+    voiceChunksRef.current = [];
+    setVoiceIdentityUploading(true);
+    try {
+      await uploadVoiceIdentity(token, blob);
+      setVoiceIdentityEnrolled(true);
+    } catch (err: any) {
+      setVoiceIdentityError(err?.message || 'Failed to save voice sample');
+    } finally {
+      setVoiceIdentityUploading(false);
+    }
+  }
 
   async function handleEnable2FA() {
     if (!enable2FAMasterToken.trim() || enable2FAPassword.trim().length < 6) return;
@@ -1012,6 +1078,50 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
         )}
 
         {twoFaError && <span style={{ fontSize: '0.75rem', color: '#ef4444' }}>{twoFaError}</span>}
+      </div>
+
+      {/* AI Voice Decoy section */}
+      <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 12, padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>AI Voice Decoy</div>
+        <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 8, padding: '10px 14px' }}>
+          <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+            Record a short sample of your own voice once; it's only ever used to generate a decoy voice note in your voice for every real one you send.
+          </span>
+        </div>
+
+        {!voiceIdentityLoading && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ width: 8, height: 8, borderRadius: '50%', background: voiceIdentityEnrolled ? '#25d366' : '#6b7280', flexShrink: 0 }} />
+            <span style={{ fontSize: '0.85rem', color: voiceIdentityEnrolled ? '#25d366' : 'var(--text-muted)' }}>
+              {voiceIdentityEnrolled ? 'Enrolled — decoys use your voice' : 'Not set — voice notes get a generic decoy'}
+            </span>
+          </div>
+        )}
+
+        {isRecordingVoiceIdentity ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>{voiceIdentitySeconds}s</span>
+            <button
+              onClick={stopAndUploadVoiceIdentity}
+              style={{ background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 16px', fontSize: '0.82rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}
+            >
+              Stop &amp; Save
+            </button>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <button
+              onClick={startVoiceIdentityRecording}
+              disabled={voiceIdentityUploading}
+              style={{ alignSelf: 'flex-start', background: 'transparent', border: '1px solid var(--accent)', color: 'var(--accent)', borderRadius: 8, padding: '8px 16px', fontSize: '0.82rem', fontWeight: 600, cursor: voiceIdentityUploading ? 'wait' : 'pointer', fontFamily: 'inherit' }}
+            >
+              {voiceIdentityEnrolled ? 'Re-record' : 'Record sample (8s+)'}
+            </button>
+            {voiceIdentityUploading && <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Saving…</span>}
+          </div>
+        )}
+
+        {voiceIdentityError && <span style={{ fontSize: '0.75rem', color: '#ef4444' }}>{voiceIdentityError}</span>}
       </div>
 
       {/* Encryption key section */}

@@ -27,6 +27,7 @@ import { loadKeypair } from '../services/keys';
 import { presenceService, WsMessage } from '../services/presence';
 import { LockIcon, PaperclipIcon as PaperclipIconSvg } from '../components/Icons';
 import MediaBubble, { DocumentBubble } from '../components/MediaBubble';
+import { PendingBubble, PendingMsg } from './ChatPanel';
 import MeetingCard, { JoinMeetingHandler } from '../components/MeetingCard';
 import { MessageMenuTrigger, MessageReactionPills } from '../components/MessageMenu';
 
@@ -516,6 +517,7 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [pendingDocFile, setPendingDocFile] = useState<File | null>(null);
+  const [pending, setPending] = useState<PendingMsg[]>([]);
   const [taggedUser, setTaggedUser] = useState<string | null>(null);
   const [members, setMembers] = useState<GroupMember[]>([]);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
@@ -733,11 +735,15 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
       setPendingDocFile(file);
       return;
     }
+    const localId = `pending-${Date.now()}`;
+    setPending(prev => [...prev, { localId, content: '', timestamp: new Date().toISOString(), kind: 'image', filename: file.name }]);
     try {
       await uploadGroupMedia(token, group.id, file, ct, file.name);
       await loadMessages();
     } catch (err: any) {
       setSendError(err?.message || 'Failed to send file');
+    } finally {
+      setPending(prev => prev.filter(p => p.localId !== localId));
     }
   }
 
@@ -746,11 +752,15 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
     if (!file) return;
     setPendingDocFile(null);
     const ct = file.type || 'application/octet-stream';
+    const localId = `pending-${Date.now()}`;
+    setPending(prev => [...prev, { localId, content: '', timestamp: new Date().toISOString(), kind: 'document', filename: file.name }]);
     try {
       await uploadGroupMedia(token, group.id, file, ct, file.name, kind);
       await loadMessages();
     } catch (err: any) {
       setSendError(err?.message || 'Failed to send file');
+    } finally {
+      setPending(prev => prev.filter(p => p.localId !== localId));
     }
   }
 
@@ -852,6 +862,9 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
             return acc;
           }, [])
         )}
+        {pending.map(p => (
+          <PendingBubble key={p.localId} content={p.content} timestamp={p.timestamp} kind={p.kind} filename={p.filename} />
+        ))}
         <div ref={bottomRef} />
       </div>
 
