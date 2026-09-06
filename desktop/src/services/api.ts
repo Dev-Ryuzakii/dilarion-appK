@@ -789,6 +789,42 @@ export async function createMeeting(
   return res.json();
 }
 
+// ── Copilot ──────────────────────────────────────────────────────────────────
+// Never reads message content — `text` is whatever the user typed directly
+// into the copilot box. Doesn't create anything itself; the caller prefills
+// the existing New Meeting form with the result and still requires the user
+// to pick attendees and confirm.
+
+export interface CopilotScheduleResult {
+  title: string;
+  scheduled_at: string;
+  duration_minutes: number;
+  confidence: 'high' | 'low';
+  note: string;
+}
+
+export async function parseScheduleCopilot(token: string, text: string): Promise<CopilotScheduleResult> {
+  // Local wall-clock ISO, no offset — matches the datetime-local inputs the
+  // result gets dropped into, and lets the model resolve "tomorrow"/"3pm"
+  // against the same clock the user is reading, not a UTC instant that could
+  // land on the wrong calendar day depending on timezone.
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const currentTime = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+
+  const res = await fetch(`${BASE}/copilot/parse-schedule`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ text, current_time: currentTime }),
+  });
+  if (!res.ok) {
+    let detail = `Copilot request failed (${res.status})`;
+    try { const b = await res.json(); detail = b.detail || detail; } catch {}
+    throw new Error(detail);
+  }
+  return res.json();
+}
+
 export async function getUpcomingMeetings(token: string): Promise<MeetingSummary[]> {
   const res = await fetch(`${BASE}/meetings/upcoming`, {
     headers: { Authorization: `Bearer ${token}` },
