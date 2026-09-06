@@ -35,6 +35,11 @@ import {
   CalendarOccurrence,
   CALL_TERMINAL_STATUSES,
 } from '../services/api';
+import {
+  isLivenessLockEnabled,
+  setLivenessLockEnabled,
+  gateSensitiveAction as gateLiveness,
+} from '../services/liveness';
 import { Keypair, loadKeypair, saveKeypair, clearKeypair, parseExportedKey } from '../services/keys';
 import ChatPanel from './ChatPanel';
 import GroupPanel from './GroupPanel';
@@ -572,6 +577,14 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
   const [showDisable2FA, setShowDisable2FA] = useState(false);
   const [disable2FAPassword, setDisable2FAPassword] = useState('');
 
+  const [livenessLockEnabled, setLivenessLockEnabledState] = useState(isLivenessLockEnabled);
+
+  function toggleLivenessLock() {
+    const next = !livenessLockEnabled;
+    setLivenessLockEnabled(next);
+    setLivenessLockEnabledState(next);
+  }
+
   const [voiceIdentityEnrolled, setVoiceIdentityEnrolled] = useState(false);
   const [voiceIdentityLoading, setVoiceIdentityLoading] = useState(true);
   const [voiceIdentityUploading, setVoiceIdentityUploading] = useState(false);
@@ -649,6 +662,7 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
 
   async function handleEnable2FA() {
     if (!enable2FAMasterToken.trim() || enable2FAPassword.trim().length < 6) return;
+    if (!(await gateLiveness())) return;
     setTwoFaLoading(true);
     setTwoFaError(null);
     try {
@@ -666,6 +680,7 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
 
   async function handleDisable2FA() {
     if (!disable2FAPassword.trim()) return;
+    if (!(await gateLiveness())) return;
     setTwoFaLoading(true);
     setTwoFaError(null);
     try {
@@ -721,6 +736,7 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
   async function handleCreate() {
     const trimmed = createInput.trim();
     if (!trimmed) return;
+    if (!(await gateLiveness())) return;
     setCreateLoading(true);
     setCreateError(null);
     setCreateSuccess(false);
@@ -1078,6 +1094,37 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
         )}
 
         {twoFaError && <span style={{ fontSize: '0.75rem', color: '#ef4444' }}>{twoFaError}</span>}
+      </div>
+
+      {/* Liveness Lock section — desktop's stand-in for mobile Biometric Lock;
+          no OS Windows Hello/Touch ID plumbing here, so this confirms a live
+          person is at the camera instead, before opening the app and before
+          the master-token/2FA changes above. */}
+      <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 12, padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Liveness Lock</div>
+        <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 8, padding: '10px 14px' }}>
+          <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+            Confirms a live person is at the camera before opening Dilarion and before master-token or 2FA changes. Checks for presence, not identity.
+          </span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ width: 8, height: 8, borderRadius: '50%', background: livenessLockEnabled ? '#25d366' : '#6b7280', flexShrink: 0 }} />
+          <span style={{ fontSize: '0.85rem', color: livenessLockEnabled ? '#25d366' : 'var(--text-muted)' }}>
+            {livenessLockEnabled ? 'Liveness lock enabled' : 'Liveness lock disabled'}
+          </span>
+        </div>
+        <button
+          onClick={toggleLivenessLock}
+          style={{
+            alignSelf: 'flex-start',
+            background: livenessLockEnabled ? 'transparent' : 'var(--accent)',
+            color: livenessLockEnabled ? 'var(--text-muted)' : '#fff',
+            border: livenessLockEnabled ? '1px solid var(--border-color)' : 'none',
+            borderRadius: 8, padding: '8px 16px', fontSize: '0.82rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+          }}
+        >
+          {livenessLockEnabled ? 'Disable' : 'Enable'}
+        </button>
       </div>
 
       {/* AI Voice Decoy section */}
