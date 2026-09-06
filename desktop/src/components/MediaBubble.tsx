@@ -155,8 +155,7 @@ function VoiceBubble({ token, mediaId, masterToken, onMasterTokenSaved, onRemove
       setVoiceUrl(toDataUrl(buf, mime.startsWith('audio/') ? mime : 'audio/mp4'));
       setStage('decoy');
     } catch (err: any) {
-      const status = err?.status;
-      setError(status === 404 ? 'Voice note not found' : status ? `Failed to load (${status})` : 'Failed to load — check connection');
+      setError(err?.message || 'Failed to load — check connection');
       setStage('idle');
     }
   }

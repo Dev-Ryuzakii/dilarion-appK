@@ -323,7 +323,14 @@ export async function downloadDecoyVoice(token: string, mediaId: string): Promis
   const res = await fetch(`${BASE}/media/decoy-voice/${encodeURIComponent(mediaId)}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
-  if (!res.ok) throw Object.assign(new Error('Failed to load decoy'), { status: res.status });
+  if (!res.ok) {
+    // The backend uses the same 404 for two different reasons ("Media not
+    // found" vs "No audio available to build a decoy from") — surface its
+    // actual detail so a failure is diagnosable instead of a generic guess.
+    let detail = 'Failed to load decoy';
+    try { const b = await res.json(); detail = b.detail || detail; } catch {}
+    throw Object.assign(new Error(detail), { status: res.status });
+  }
   return res.blob();
 }
 
