@@ -28,7 +28,6 @@ import {
   createConference,
   conferenceInvite as apiConferenceInvite,
   createMeeting,
-  parseScheduleCopilot,
   getUpcomingMeetings,
   joinMeetingByCode,
   cancelMeeting,
@@ -50,6 +49,7 @@ import MeetingLobby from '../components/MeetingLobby';
 import WaitingForHostScreen from '../components/WaitingForHostScreen';
 import { fmtRange } from '../components/MeetingCard';
 import CalendarView from '../components/CalendarView';
+import CopilotWidget, { CopilotScheduleDraft } from '../components/CopilotWidget';
 import {
   PhoneIncomingIcon,
   PhoneOutgoingIcon,
@@ -1552,10 +1552,6 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
   const [scheduleSelected, setScheduleSelected] = useState<Set<string>>(new Set());
   const [scheduling, setScheduling] = useState(false);
   const [scheduleCopilotNote, setScheduleCopilotNote] = useState<string | null>(null);
-  const [showCopilotPrompt, setShowCopilotPrompt] = useState(false);
-  const [copilotText, setCopilotText] = useState('');
-  const [copilotLoading, setCopilotLoading] = useState(false);
-  const [copilotError, setCopilotError] = useState<string | null>(null);
   const [meetingsError, setMeetingsError] = useState<string | null>(null);
 
   // ── Badge count — update dock/taskbar icon when unread changes ─────────────────
@@ -1891,40 +1887,25 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
    * low-confidence warning when the model wasn't sure) and still has to
    * pick attendees and hit Schedule, same as manual entry.
    */
-  async function submitCopilotSchedule() {
-    const trimmed = copilotText.trim();
-    if (!trimmed || copilotLoading) return;
-    setCopilotLoading(true);
-    setCopilotError(null);
-    try {
-      const result = await parseScheduleCopilot(token, trimmed);
-      const start = new Date(result.scheduled_at);
-      if (Number.isNaN(start.getTime())) throw new Error("Copilot returned a time I couldn't parse — try rephrasing");
-      const end = new Date(start.getTime() + result.duration_minutes * 60000);
-      const pad = (n: number) => String(n).padStart(2, '0');
-      const toLocalInput = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-
-      setScheduleTitle(result.title);
-      setScheduleWhen(toLocalInput(start));
-      setScheduleEndWhen(toLocalInput(end));
-      setScheduleCopilotNote(
-        result.confidence === 'low' ? (result.note || "Wasn't fully sure how to parse that — double-check the time.") : null
-      );
-      setShowCopilotPrompt(false);
-      setCopilotText('');
-      setShowScheduleForm(true);
-      if (allUsers.length === 0) {
-        setLoadingUsers(true);
-        try {
-          const users = await getUsers(token);
-          setAllUsers(users.filter(u => u.username !== username));
-        } catch {}
-        finally { setLoadingUsers(false); }
-      }
-    } catch (err: any) {
-      setCopilotError(err?.message || 'Copilot request failed');
-    } finally {
-      setCopilotLoading(false);
+  /**
+   * Hand-off from the floating CopilotWidget — prefills the same schedule
+   * form manual entry uses and opens it, but never creates the meeting or
+   * picks attendees itself; the user still reviews and confirms.
+   */
+  async function applyCopilotDraft(draft: CopilotScheduleDraft) {
+    setScheduleTitle(draft.title);
+    setScheduleWhen(draft.scheduleWhen);
+    setScheduleEndWhen(draft.scheduleEndWhen);
+    setScheduleCopilotNote(draft.note);
+    setShowMeetings(true);
+    setShowScheduleForm(true);
+    if (allUsers.length === 0) {
+      setLoadingUsers(true);
+      try {
+        const users = await getUsers(token);
+        setAllUsers(users.filter(u => u.username !== username));
+      } catch {}
+      finally { setLoadingUsers(false); }
     }
   }
 
@@ -3145,50 +3126,8 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
               <div style={{ padding: '8px 16px', color: '#ef4444', fontSize: '0.78rem', flexShrink: 0 }}>{meetingsError}</div>
             )}
 
-            {!showScheduleForm && showCopilotPrompt && (
-              <div style={{ padding: 14, borderTop: '1px solid var(--border-color)', flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <input
-                  autoFocus
-                  placeholder="e.g. call with the team tomorrow at 3 for 30 min"
-                  value={copilotText}
-                  onChange={e => setCopilotText(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter') submitCopilotSchedule(); }}
-                  disabled={copilotLoading}
-                  style={hs.fieldInput}
-                />
-                {copilotError && <span style={{ fontSize: '0.74rem', color: '#ef4444' }}>{copilotError}</span>}
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <button
-                    onClick={submitCopilotSchedule}
-                    disabled={!copilotText.trim() || copilotLoading}
-                    style={{
-                      flex: 1, background: !copilotText.trim() ? 'var(--input-field-bg)' : 'var(--accent)',
-                      color: !copilotText.trim() ? 'var(--text-muted)' : '#fff', border: 'none',
-                      borderRadius: 10, padding: '11px 0', fontSize: '0.85rem', fontWeight: 700,
-                      cursor: !copilotText.trim() || copilotLoading ? 'default' : 'pointer',
-                    }}
-                  >{copilotLoading ? 'Thinking…' : '✨ Ask Copilot'}</button>
-                  <button
-                    onClick={() => { setShowCopilotPrompt(false); setCopilotText(''); setCopilotError(null); }}
-                    disabled={copilotLoading}
-                    style={{
-                      background: 'transparent', color: 'var(--text-muted)', border: '1px solid var(--border-color)',
-                      borderRadius: 10, padding: '11px 16px', fontSize: '0.85rem', cursor: 'pointer',
-                    }}
-                  >Cancel</button>
-                </div>
-              </div>
-            )}
-
-            {!showScheduleForm && !showCopilotPrompt && (
-              <div style={{ padding: 14, borderTop: '1px solid var(--border-color)', flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <button
-                  onClick={() => setShowCopilotPrompt(true)}
-                  style={{
-                    width: '100%', background: 'transparent', color: 'var(--accent)', border: '1.5px solid var(--accent)',
-                    borderRadius: 10, padding: '10px 0', fontSize: '0.85rem', fontWeight: 700, cursor: 'pointer',
-                  }}
-                >✨ Ask Copilot to schedule</button>
+            {!showScheduleForm && (
+              <div style={{ padding: 14, borderTop: '1px solid var(--border-color)', flexShrink: 0 }}>
                 <button
                   onClick={async () => {
                     setShowScheduleForm(true);
@@ -3212,6 +3151,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
         </div>
       )}
 
+      <CopilotWidget token={token} onScheduleDraft={applyCopilotDraft} />
     </div>
   );
 }
