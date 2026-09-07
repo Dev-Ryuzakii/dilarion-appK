@@ -1901,13 +1901,27 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
     setScheduleCopilotNote(draft.note);
     setShowMeetings(true);
     setShowScheduleForm(true);
-    if (allUsers.length === 0) {
+
+    let users = allUsers;
+    if (users.length === 0) {
       setLoadingUsers(true);
       try {
-        const users = await getUsers(token);
-        setAllUsers(users.filter(u => u.username !== username));
+        const fetched = await getUsers(token);
+        users = fetched.filter(u => u.username !== username);
+        setAllUsers(users);
       } catch {}
       finally { setLoadingUsers(false); }
+    }
+
+    // Pre-select any real username mentioned in the request text ("with
+    // dr.bright") so the user only has to confirm, not re-search for them —
+    // matched client-side against actual usernames, never invented by the
+    // model itself (it's explicitly told never to extract attendee names).
+    const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const normalizedText = normalize(draft.rawText);
+    const mentioned = users.filter(u => normalizedText.includes(normalize(u.username)));
+    if (mentioned.length > 0) {
+      setScheduleSelected(new Set(mentioned.map(u => u.username)));
     }
   }
 

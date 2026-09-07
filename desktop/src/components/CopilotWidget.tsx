@@ -7,6 +7,7 @@ export interface CopilotScheduleDraft {
   scheduleWhen: string;    // datetime-local value
   scheduleEndWhen: string; // datetime-local value
   note: string | null;
+  rawText: string; // what the user typed — caller matches it against real usernames to pre-select attendees; never sent anywhere as an invite by itself
 }
 
 interface ChatMsg {
@@ -58,6 +59,7 @@ export default function CopilotWidget({ token, onScheduleDraft }: {
         scheduleWhen: toLocalInput(start),
         scheduleEndWhen: toLocalInput(end),
         note: result.confidence === 'low' ? (result.note || "Wasn't fully sure about this one.") : null,
+        rawText: trimmed,
       };
       const summary = `${result.title} — ${start.toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })} (${result.duration_minutes}m)`;
       setMessages(prev => [...prev, {
