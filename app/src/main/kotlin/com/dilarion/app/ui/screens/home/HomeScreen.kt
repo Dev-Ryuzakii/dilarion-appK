@@ -30,7 +30,7 @@ import com.dilarion.app.ui.theme.*
 import java.text.SimpleDateFormat
 import java.util.Locale
 
-private enum class HomeTab { CHATS, GROUPS, MEETINGS, CALENDAR, CALLS }
+private enum class HomeTab { CHATS, GROUPS, MEETINGS, CALENDAR, TASKS, CALLS }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -112,6 +112,13 @@ fun HomeScreen(
                     colors = NavigationBarItemDefaults.colors(indicatorColor = DilarionRed.copy(alpha = 0.12f), selectedIconColor = DilarionRed, selectedTextColor = DilarionRed),
                 )
                 NavigationBarItem(
+                    selected = selectedTab == HomeTab.TASKS,
+                    onClick = { selectedTab = HomeTab.TASKS },
+                    icon = { Icon(Icons.Default.Checklist, "Tasks") },
+                    label = { Text("Tasks") },
+                    colors = NavigationBarItemDefaults.colors(indicatorColor = DilarionRed.copy(alpha = 0.12f), selectedIconColor = DilarionRed, selectedTextColor = DilarionRed),
+                )
+                NavigationBarItem(
                     selected = selectedTab == HomeTab.CALLS,
                     onClick = {
                         selectedTab = HomeTab.CALLS
@@ -138,6 +145,7 @@ fun HomeScreen(
                 HomeTab.GROUPS   -> GroupsTab(uiState, onOpenGroupChat)
                 HomeTab.MEETINGS -> MeetingsTab(onNewMeeting, onMeetings)
                 HomeTab.CALENDAR -> com.dilarion.app.ui.screens.calendar.CalendarScreen(onJoinMeeting = onJoinMeeting)
+                HomeTab.TASKS    -> com.dilarion.app.ui.screens.tasks.TasksScreen()
                 HomeTab.CALLS    -> CallsTab(uiState, uiState.currentUsername, onCallUser)
             }
         }

@@ -8,6 +8,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.material.icons.filled.CallSplit
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Draw
@@ -29,6 +31,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.dilarion.app.data.model.BreakoutGroupInput
 import com.dilarion.app.data.model.UserInfo
 import com.dilarion.app.ui.components.PipController
 import com.dilarion.app.ui.theme.DilarionRed
@@ -39,8 +42,8 @@ import io.livekit.android.room.track.VideoTrack
 
 /**
  * Group video via LiveKit — the "home" for all in-call tools: gallery grid,
- * mute/camera, participants list, adding someone new mid-call, and leaving.
- * Mirrors desktop's GalleryView.tsx. Breakout rooms / together-mode /
+ * mute/camera, participants list, adding someone new mid-call, breakout
+ * rooms, and leaving. Mirrors desktop's GalleryView.tsx. Together-mode /
  * recording / captions are explicitly out of scope for this round.
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -90,16 +93,36 @@ fun GalleryScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Text(
-                        if (state.tiles.isNotEmpty()) "Group Video · ${state.tiles.size}" else "Group Video",
-                        color = SurfaceWhite,
-                    )
+                    Column {
+                        Text(
+                            (state.inBreakoutName?.let { "Breakout: $it" } ?: "Group Video") +
+                                if (state.tiles.isNotEmpty()) " · ${state.tiles.size}" else "",
+                            color = SurfaceWhite,
+                        )
+                        if (state.inBreakoutName != null) {
+                            Text("in breakout room", color = Color(0xFFC4B5FD), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
                 },
                 actions = {
                     BadgedBox(badge = {
                         if (state.waiting.isNotEmpty()) Badge { Text("${state.waiting.size}") }
                     }) {
                         TextButton(onClick = { viewModel.openParticipants() }) { Text("Participants", color = SurfaceWhite) }
+                    }
+                    if (state.isHost) {
+                        IconButton(onClick = {
+                            if (state.breakoutActive) {
+                                viewModel.endBreakoutRooms()
+                            } else {
+                                viewModel.toggleBreakoutPanel(true)
+                            }
+                        }) {
+                            Icon(
+                                Icons.Default.CallSplit, "Breakout rooms",
+                                tint = if (state.breakoutActive) Color(0xFFEF4444) else SurfaceWhite,
+                            )
+                        }
                     }
                     IconButton(onClick = { showChat = true }) {
                         Icon(Icons.Default.Chat, "Chat", tint = SurfaceWhite)
@@ -224,6 +247,100 @@ fun GalleryScreen(
             onAdmit = { viewModel.admitGuest(conferenceId, it) },
             onDeny = { viewModel.denyGuest(conferenceId, it) },
         )
+    }
+
+    if (state.showBreakoutPanel) {
+        BreakoutPanelDialog(
+            state = state,
+            onDismiss = { viewModel.toggleBreakoutPanel(false) },
+            onAuto = { n -> viewModel.autoBreakoutRooms(n) },
+            onManual = { groups -> viewModel.startBreakoutRooms(groups) },
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+private fun BreakoutPanelDialog(
+    state: GalleryUiState,
+    onDismiss: () -> Unit,
+    onAuto: (Int) -> Unit,
+    onManual: (List<BreakoutGroupInput>) -> Unit,
+) {
+    val others = remember(state.tiles) { state.tiles.filter { !it.isLocal } }
+    var numRooms by remember { mutableStateOf(2) }
+    var groups by remember {
+        mutableStateOf(
+            if (others.size >= 2) listOf("Room 1" to setOf<String>(), "Room 2" to setOf<String>())
+            else emptyList()
+        )
+    }
+
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 24.dp)) {
+            Text("Breakout Rooms", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            Spacer(Modifier.height(14.dp))
+
+            Text("Auto-shuffle", style = MaterialTheme.typography.labelMedium, color = Color.Gray)
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 6.dp)) {
+                OutlinedTextField(
+                    value = numRooms.toString(),
+                    onValueChange = { v -> v.toIntOrNull()?.let { numRooms = it.coerceIn(2, maxOf(2, others.size)) } },
+                    modifier = Modifier.width(80.dp),
+                    singleLine = true,
+                )
+                Spacer(Modifier.width(10.dp))
+                Text("rooms", fontSize = 13.sp)
+                Spacer(Modifier.weight(1f))
+                Button(onClick = { onAuto(numRooms) }, enabled = !state.breakoutBusy && others.isNotEmpty(), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6D5EFC))) {
+                    Text(if (state.breakoutBusy) "Starting…" else "Auto-start")
+                }
+            }
+
+            Divider(modifier = Modifier.padding(vertical = 16.dp))
+
+            Text("Or assign manually", style = MaterialTheme.typography.labelMedium, color = Color.Gray)
+            Spacer(Modifier.height(8.dp))
+            groups.forEachIndexed { gi, (name, members) ->
+                Column(modifier = Modifier.padding(bottom = 10.dp)) {
+                    OutlinedTextField(
+                        value = name,
+                        onValueChange = { v -> groups = groups.toMutableList().also { it[gi] = v to members } },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        others.forEach { tile ->
+                            val checked = members.contains(tile.identity)
+                            FilterChip(
+                                selected = checked,
+                                onClick = {
+                                    val next = if (checked) members - tile.identity else members + tile.identity
+                                    groups = groups.toMutableList().also { it[gi] = name to next }
+                                },
+                                label = { Text(tile.displayName, fontSize = 11.sp) },
+                            )
+                        }
+                    }
+                }
+            }
+            TextButton(onClick = { groups = groups + ("Room ${groups.size + 1}" to emptySet()) }) {
+                Text("+ Add room", color = Color(0xFF6D5EFC))
+            }
+            Button(
+                onClick = { onManual(groups.map { (n, u) -> BreakoutGroupInput(n, u.toList()) }) },
+                enabled = !state.breakoutBusy && groups.any { it.second.isNotEmpty() },
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6D5EFC)),
+                modifier = Modifier.padding(top = 8.dp),
+            ) {
+                Text(if (state.breakoutBusy) "Starting…" else "Start manual rooms")
+            }
+
+            state.breakoutError?.let {
+                Text(it, color = Color(0xFFEF4444), fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
+            }
+        }
     }
 }
 

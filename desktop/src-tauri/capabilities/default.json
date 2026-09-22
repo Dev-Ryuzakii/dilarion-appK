@@ -5,6 +5,8 @@
   "windows": ["main"],
   "permissions": [
     "core:default",
+    "core:webview:allow-create-webview-window",
+    "core:event:allow-emit-to",
     "opener:default",
     "http:default",
     "notification:default"

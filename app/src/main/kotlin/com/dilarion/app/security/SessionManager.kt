@@ -46,6 +46,10 @@ class SessionManager @Inject constructor(
         }
     }
 
+    suspend fun updateUsername(newUsername: String) {
+        context.dataStore.edit { it[Keys.USERNAME] = newUsername }
+    }
+
     suspend fun saveMasterToken(masterToken: String) {
         context.dataStore.edit { it[Keys.MASTER_TOKEN] = masterToken }
     }

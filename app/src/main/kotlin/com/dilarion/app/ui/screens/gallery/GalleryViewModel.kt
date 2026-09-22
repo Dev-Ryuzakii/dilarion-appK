@@ -4,6 +4,8 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.dilarion.app.data.api.ApiService
+import com.dilarion.app.data.model.BreakoutGroupInput
+import com.dilarion.app.data.model.BreakoutStartRequest
 import com.dilarion.app.data.model.UserInfo
 import com.dilarion.app.data.model.WaitingParticipant
 import com.dilarion.app.data.model.WhiteboardOpenRequest
@@ -53,6 +55,14 @@ data class GalleryUiState(
     // announces + auto-surfaces it for everyone, stopping hides it for
     // everyone, matching screen share's semantics.
     val whiteboardOwner: String? = null,
+    // Breakout rooms — host-gated in the UI same as admit/deny (backend also
+    // 403s non-hosts, so this is UX only, not the real boundary).
+    val isHost: Boolean = false,
+    val inBreakoutName: String? = null,
+    val breakoutActive: Boolean = false,
+    val showBreakoutPanel: Boolean = false,
+    val breakoutBusy: Boolean = false,
+    val breakoutError: String? = null,
 )
 
 /**
@@ -75,7 +85,16 @@ class GalleryViewModel @Inject constructor(
     var room: Room? = null
         private set
 
+    // currentConferenceId is whichever LiveKit room we're actually connected
+    // to right now (the parent meeting, or a breakout room after being
+    // assigned into one). parentConferenceId never changes for the life of
+    // this screen — breakout start/auto/end orchestration calls always
+    // target it, never wherever we currently happen to be connected.
     private var currentConferenceId: Int = 0
+    private var parentConferenceId: Int = 0
+    private var lastMicOn: Boolean = true
+    private var lastCamOn: Boolean = true
+    private var lastDisplayName: String? = null
 
     init {
         viewModelScope.launch {
@@ -107,8 +126,100 @@ class GalleryViewModel @Inject constructor(
                         if (confId != currentConferenceId) return@collect
                         _uiState.value = _uiState.value.copy(whiteboardOwner = null)
                     }
+                    "breakout_assigned" -> {
+                        val data = msg.data ?: return@collect
+                        val parentId = data.get("parent_conference_id")?.takeIf { !it.isJsonNull }?.asInt ?: return@collect
+                        if (parentId != parentConferenceId) return@collect
+                        val breakoutId = data.get("breakout_conference_id")?.takeIf { !it.isJsonNull }?.asInt ?: return@collect
+                        val name = data.get("name")?.takeIf { !it.isJsonNull }?.asString ?: "Breakout room"
+                        switchRoom(breakoutId)
+                        _uiState.value = _uiState.value.copy(inBreakoutName = name)
+                    }
+                    "breakout_ended" -> {
+                        val data = msg.data ?: return@collect
+                        val parentId = data.get("parent_conference_id")?.takeIf { !it.isJsonNull }?.asInt ?: return@collect
+                        if (parentId != parentConferenceId) return@collect
+                        switchRoom(parentConferenceId)
+                        _uiState.value = _uiState.value.copy(inBreakoutName = null, breakoutActive = false)
+                    }
                 }
             }
+        }
+    }
+
+    /** Disconnects the current LiveKit room and reconnects to a different one
+     *  (the parent meeting or a breakout room) — used for breakout switching,
+     *  never called for the initial join (that's connect()). */
+    private fun switchRoom(targetConferenceId: Int) {
+        room?.disconnect()
+        room?.release()
+        room = null
+        _uiState.value = _uiState.value.copy(tiles = emptyList(), connecting = true)
+        connectRoom(targetConferenceId, lastMicOn, lastCamOn, lastDisplayName)
+    }
+
+    fun toggleBreakoutPanel(show: Boolean) {
+        _uiState.value = _uiState.value.copy(showBreakoutPanel = show, breakoutError = null)
+    }
+
+    /** Manual assignment — orchestration always targets parentConferenceId,
+     *  never wherever the host happens to currently be connected. */
+    fun startBreakoutRooms(groups: List<BreakoutGroupInput>) {
+        val nonEmpty = groups.filter { it.usernames.isNotEmpty() }
+        if (nonEmpty.isEmpty()) return
+        viewModelScope.launch {
+            val token = sessionManager.sessionToken.first() ?: return@launch
+            _uiState.value = _uiState.value.copy(breakoutBusy = true, breakoutError = null)
+            runCatching { apiService.startBreakoutRooms("Bearer $token", parentConferenceId, BreakoutStartRequest(nonEmpty)) }
+                .onSuccess { resp ->
+                    if (resp.isSuccessful) {
+                        _uiState.value = _uiState.value.copy(breakoutActive = true, showBreakoutPanel = false)
+                    } else {
+                        _uiState.value = _uiState.value.copy(breakoutError = "Failed to start breakout rooms")
+                    }
+                }
+                .onFailure { e -> _uiState.value = _uiState.value.copy(breakoutError = e.message ?: "Failed to start breakout rooms") }
+            _uiState.value = _uiState.value.copy(breakoutBusy = false)
+        }
+    }
+
+    fun autoBreakoutRooms(numRooms: Int) {
+        viewModelScope.launch {
+            val token = sessionManager.sessionToken.first() ?: return@launch
+            _uiState.value = _uiState.value.copy(breakoutBusy = true, breakoutError = null)
+            runCatching { apiService.autoBreakoutRooms("Bearer $token", parentConferenceId, numRooms) }
+                .onSuccess { resp ->
+                    if (resp.isSuccessful) {
+                        _uiState.value = _uiState.value.copy(breakoutActive = true, showBreakoutPanel = false)
+                    } else {
+                        _uiState.value = _uiState.value.copy(breakoutError = "Failed to start breakout rooms")
+                    }
+                }
+                .onFailure { e -> _uiState.value = _uiState.value.copy(breakoutError = e.message ?: "Failed to start breakout rooms") }
+            _uiState.value = _uiState.value.copy(breakoutBusy = false)
+        }
+    }
+
+    /** Host-only: ends every breakout room and pulls all participants (host
+     *  included, if they'd manually hopped into one) back to the parent. */
+    fun endBreakoutRooms() {
+        viewModelScope.launch {
+            val token = sessionManager.sessionToken.first() ?: return@launch
+            _uiState.value = _uiState.value.copy(breakoutBusy = true, breakoutError = null)
+            runCatching { apiService.endBreakoutRooms("Bearer $token", parentConferenceId) }
+                .onSuccess { resp ->
+                    if (resp.isSuccessful) {
+                        _uiState.value = _uiState.value.copy(breakoutActive = false)
+                        if (currentConferenceId != parentConferenceId) {
+                            switchRoom(parentConferenceId)
+                            _uiState.value = _uiState.value.copy(inBreakoutName = null)
+                        }
+                    } else {
+                        _uiState.value = _uiState.value.copy(breakoutError = "Failed to end breakout rooms")
+                    }
+                }
+                .onFailure { e -> _uiState.value = _uiState.value.copy(breakoutError = e.message ?: "Failed to end breakout rooms") }
+            _uiState.value = _uiState.value.copy(breakoutBusy = false)
         }
     }
 
@@ -131,8 +242,15 @@ class GalleryViewModel @Inject constructor(
     fun loadWaitingRoom(conferenceId: Int) {
         viewModelScope.launch {
             val token = sessionManager.sessionToken.first() ?: return@launch
-            runCatching { apiService.getWaitingRoom("Bearer $token", conferenceId).body()?.waiting.orEmpty() }
-                .onSuccess { _uiState.value = _uiState.value.copy(waiting = it) }
+            // 403s for a non-host (the backend is the real boundary) — a
+            // successful response is also how we learn we ARE the host, same
+            // as desktop's .then(... setIsHost(true)).catch(() => {}).
+            runCatching { apiService.getWaitingRoom("Bearer $token", conferenceId) }
+                .onSuccess { resp ->
+                    if (resp.isSuccessful) {
+                        _uiState.value = _uiState.value.copy(waiting = resp.body()?.waiting.orEmpty(), isHost = true)
+                    }
+                }
         }
     }
 
@@ -193,9 +311,20 @@ class GalleryViewModel @Inject constructor(
     }
 
     fun connect(conferenceId: Int, initialMicOn: Boolean = true, initialCamOn: Boolean = true, displayName: String? = null) {
-        currentConferenceId = conferenceId
-        _uiState.value = _uiState.value.copy(micOn = initialMicOn, camOn = initialCamOn)
+        parentConferenceId = conferenceId
+        lastMicOn = initialMicOn
+        lastCamOn = initialCamOn
+        lastDisplayName = displayName
+        // Waiting room / host status is always about the parent meeting, even
+        // after switching into a breakout room — mirrors desktop, which keys
+        // this effect on [token, conferenceId] (the prop), not activeConferenceId.
         loadWaitingRoom(conferenceId)
+        connectRoom(conferenceId, initialMicOn, initialCamOn, displayName)
+    }
+
+    private fun connectRoom(conferenceId: Int, initialMicOn: Boolean, initialCamOn: Boolean, displayName: String?) {
+        currentConferenceId = conferenceId
+        _uiState.value = _uiState.value.copy(micOn = initialMicOn, camOn = initialCamOn, connecting = true, error = null)
         viewModelScope.launch {
             val token = sessionManager.sessionToken.first() ?: return@launch
             runCatching {

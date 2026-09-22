@@ -9,6 +9,7 @@ import {
   sendGroupMessage,
   sendText,
   getUserDevices,
+  getAdminPublicKey,
   decryptChatMessage,
   confirmMasterToken,
   uploadGroupMedia,
@@ -20,16 +21,24 @@ import {
   starMessage,
   unstarMessage,
   getStarredMessages,
+  promoteGroupMember,
+  demoteGroupMember,
+  GifResult,
 } from '../services/api';
 import { encryptMessage } from '../services/crypto';
 import { generateDecoy } from '../services/decoy';
 import { loadKeypair } from '../services/keys';
 import { presenceService, WsMessage } from '../services/presence';
-import { LockIcon, PaperclipIcon as PaperclipIconSvg, CloseIcon, PinIcon } from '../components/Icons';
+import { LockIcon, PaperclipIcon as PaperclipIconSvg, CloseIcon, PinIcon, SparkleIcon, UsersIcon } from '../components/Icons';
 import MediaBubble, { DocumentBubble } from '../components/MediaBubble';
-import { PendingBubble, PendingMsg, LockedContent } from './ChatPanel';
+import { PendingBubble, PendingMsg, buildRecipientKeys } from './ChatPanel';
 import MeetingCard, { JoinMeetingHandler } from '../components/MeetingCard';
-import { MessageMenuTrigger, MessageReactionPills } from '../components/MessageMenu';
+import { MessageMenuTrigger, MessageReactionPills, SmileyIcon } from '../components/MessageMenu';
+import MediaPicker from '../components/MediaPicker';
+import { getSticker } from '../components/stickers';
+import CopilotResultModal from '../components/CopilotResultModal';
+import MasterTokenPromptModal from '../components/MasterTokenPromptModal';
+import { summarizeThreadCopilot, composeReplyCopilot, translateCopilot } from '../services/api';
 
 interface Props {
   token: string;
@@ -49,6 +58,9 @@ function isEncrypted(ct: string | null | undefined): boolean {
 }
 function isMeeting(ct: string | null | undefined): boolean {
   return ct === 'meeting';
+}
+function isGifOrSticker(ct: string | null | undefined): boolean {
+  return ct === 'gif' || ct === 'sticker';
 }
 
 // Legacy rows written by the old server fallback. These strings must never reach
@@ -158,9 +170,10 @@ interface EncryptedBubbleProps {
   onDecrypt: (masterToken: string, messageId: number) => Promise<string>;
   onMasterTokenSaved: (t: string) => void;
   onRevealed?: (text: string) => void;
+  contentType?: string | null;
 }
 
-function EncryptedBubble({ token, messageId, decoyContent, masterToken, onDecrypt, onMasterTokenSaved, onRevealed }: EncryptedBubbleProps) {
+function EncryptedBubble({ token, messageId, decoyContent, masterToken, onDecrypt, onMasterTokenSaved, onRevealed, contentType }: EncryptedBubbleProps) {
   const [decryptedContent, setDecryptedContent] = useState<string | null>(null);
   const [showing, setShowing] = useState(false);
   const [inputVisible, setInputVisible] = useState(false);
@@ -218,6 +231,23 @@ function EncryptedBubble({ token, messageId, decoyContent, masterToken, onDecryp
   }
 
   if (showing && decryptedContent !== null) {
+    if (contentType === 'gif') {
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <img src={decryptedContent} alt="GIF" style={{ maxWidth: 220, maxHeight: 220, borderRadius: 10, display: 'block' }} />
+          <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>Clears in 30s</span>
+        </div>
+      );
+    }
+    if (contentType === 'sticker') {
+      const sticker = getSticker(decryptedContent.replace(/^sticker:/, ''));
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {sticker ? sticker.render() : <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>[sticker]</span>}
+          <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>Clears in 30s</span>
+        </div>
+      );
+    }
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
         <span style={{ fontSize: '0.88rem', lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'var(--text-primary)' }}>
@@ -304,13 +334,14 @@ interface GroupMsgBubbleProps {
   onStarToggle: () => void;
   onEdit: () => void;
   onDelete: () => void;
+  onTranslate: (text: string) => void;
   onRemoveMessage: (id: number) => void;
   isStarred: boolean;
 }
 
 function GroupMsgBubble({
   msg, isMine, myUsername, token, masterToken, onDecrypt, onMasterTokenSaved, onJoinMeeting,
-  replyToMsg, onReact, onReply, onForward, onPinToggle, onStarToggle, onEdit, onDelete,
+  replyToMsg, onReact, onReply, onForward, onPinToggle, onStarToggle, onEdit, onDelete, onTranslate,
   onRemoveMessage, isStarred,
 }: GroupMsgBubbleProps) {
   const ct = msg.content_type;
@@ -334,6 +365,18 @@ function GroupMsgBubble({
     setTimeout(() => setCopyHint(null), 1500);
   }
 
+  const isTextish = !isMeeting(ct) && !isPrivateTagged && !isDocument(ct) && !isVoice(ct) && !isImage(ct) && !isMedia(ct);
+
+  function handleTranslateClick() {
+    const text = revealedText ?? (isEncrypted(ct) ? null : msg.content);
+    if (!text) {
+      setCopyHint('Unlock the message first');
+      setTimeout(() => setCopyHint(null), 1500);
+      return;
+    }
+    onTranslate(text);
+  }
+
   if (msg.is_deleted) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: isMine ? 'flex-end' : 'flex-start', marginBottom: 4 }}>
@@ -349,7 +392,7 @@ function GroupMsgBubble({
     body = <MeetingCard content={msg.content} senderUsername={msg.sender} onJoin={onJoinMeeting} />;
   } else if (isPrivateTagged) {
     body = <PrivateTagBubble recipient={msg.recipient || '?'} />;
-  } else if (isEncrypted(ct)) {
+  } else if (isEncrypted(ct) || isGifOrSticker(ct)) {
     body = (
       <EncryptedBubble
         token={token}
@@ -359,6 +402,7 @@ function GroupMsgBubble({
         onDecrypt={onDecrypt}
         onMasterTokenSaved={onMasterTokenSaved}
         onRevealed={setRevealedText}
+        contentType={ct}
       />
     );
   } else if (isDocument(ct)) {
@@ -387,12 +431,17 @@ function GroupMsgBubble({
       />
     );
   } else if (isImage(ct) || isMedia(ct)) {
-    // Group chat never wrapped images/media in a lock gate — LockedContent
-    // added here to close that gap, matching ChatPanel's DM behavior.
+    // Self-gates (decoy-first) — see VisualMediaBubble inside MediaBubble.tsx,
+    // same model as voice notes above.
     body = (
-      <LockedContent apiToken={token} masterToken={masterToken} onMasterTokenSaved={onMasterTokenSaved} isMine={isMine}>
-        <MediaBubble token={token} mediaId={mediaId} contentType={ct} onRemove={() => onRemoveMessage(msg.id)} />
-      </LockedContent>
+      <MediaBubble
+        token={token}
+        mediaId={mediaId}
+        contentType={ct}
+        masterToken={masterToken}
+        onMasterTokenSaved={onMasterTokenSaved}
+        onRemove={() => onRemoveMessage(msg.id)}
+      />
     );
   } else {
     body = (
@@ -431,6 +480,7 @@ function GroupMsgBubble({
             onStarToggle={onStarToggle}
             onEdit={isMine ? onEdit : undefined}
             onDelete={isMine ? onDelete : undefined}
+            onTranslate={isTextish ? handleTranslateClick : undefined}
             isPinned={!!msg.is_pinned}
             isStarred={isStarred}
           />
@@ -536,11 +586,15 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
   const [loading, setLoading] = useState(true);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
+  const [showMediaPicker, setShowMediaPicker] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [pendingDocFile, setPendingDocFile] = useState<File | null>(null);
   const [pending, setPending] = useState<PendingMsg[]>([]);
   const [taggedUser, setTaggedUser] = useState<string | null>(null);
   const [members, setMembers] = useState<GroupMember[]>([]);
+  const [showMembers, setShowMembers] = useState(false);
+  const [memberActionBusy, setMemberActionBusy] = useState<string | null>(null);
+  const [memberActionError, setMemberActionError] = useState<string | null>(null);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [replyTarget, setReplyTarget] = useState<ChatMessage | null>(null);
   const [starredIds, setStarredIds] = useState<Set<number>>(new Set());
@@ -548,6 +602,11 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
   const [forwardTarget, setForwardTarget] = useState<ChatMessage | null>(null);
   const [forwardUsername, setForwardUsername] = useState('');
   const [forwardError, setForwardError] = useState<string | null>(null);
+  const [copilotResult, setCopilotResult] = useState<{ title: string; loading: boolean; error: string | null; content: string | null } | null>(null);
+  const [tokenGateOpen, setTokenGateOpen] = useState(false);
+  const tokenGateResolveRef = useRef<((t: string | null) => void) | null>(null);
+  const [replySuggestions, setReplySuggestions] = useState<string[] | null>(null);
+  const [suggestLoading, setSuggestLoading] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -597,6 +656,125 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
     if (!msg) throw new Error('Message not found');
     const kp = loadKeypair(myUsername);
     return decryptChatMessage(msg, kp?.privateKey ?? null, myUsername, kp?.deviceUuid ?? null);
+  }
+
+  // ── Copilot actions ──────────────────────────────────────────────────────────
+  // Same master-token re-gate as ChatPanel: decryptChatMessage only needs the
+  // device key, so bulk-decrypting for summarize/suggest-reply without this
+  // gate would let a device without the token get plaintext, bypassing the
+  // deniability ceremony.
+
+  function ensureMasterToken(): Promise<string | null> {
+    if (masterToken) return Promise.resolve(masterToken);
+    return new Promise(resolve => {
+      tokenGateResolveRef.current = resolve;
+      setTokenGateOpen(true);
+    });
+  }
+
+  async function getRecentPlaintext(limit = 40): Promise<string[]> {
+    const kp = loadKeypair(myUsername);
+    const recent = messages.filter(m => !m.is_deleted && !isMeeting(m.content_type) && m.content_type !== 'private_tagged').slice(-limit);
+    const lines: string[] = [];
+    for (const m of recent) {
+      const who = m.sender === myUsername ? 'You' : m.sender;
+      if (isEncrypted(m.content_type)) {
+        try {
+          const text = await decryptChatMessage(m, kp?.privateKey ?? null, myUsername, kp?.deviceUuid ?? null);
+          lines.push(`${who}: ${text}`);
+        } catch {
+          // skip messages this device can't decrypt
+        }
+      } else if (m.content && !isDocument(m.content_type) && !isVoice(m.content_type) && !isImage(m.content_type) && !isMedia(m.content_type)) {
+        lines.push(`${who}: ${m.content}`);
+      }
+    }
+    return lines;
+  }
+
+  async function handleSummarize() {
+    const mt = await ensureMasterToken();
+    if (!mt) return;
+    setCopilotResult({ title: 'Thread summary', loading: true, error: null, content: null });
+    try {
+      const lines = await getRecentPlaintext();
+      if (lines.length === 0) {
+        setCopilotResult({ title: 'Thread summary', loading: false, error: 'Nothing to summarize yet.', content: null });
+        return;
+      }
+      const summary = await summarizeThreadCopilot(token, lines.join('\n'));
+      setCopilotResult({ title: 'Thread summary', loading: false, error: null, content: summary });
+    } catch (err: any) {
+      setCopilotResult({ title: 'Thread summary', loading: false, error: err?.message || 'Failed to summarize', content: null });
+    }
+  }
+
+  async function handlePromote(targetUsername: string) {
+    setMemberActionBusy(targetUsername);
+    setMemberActionError(null);
+    try {
+      await promoteGroupMember(token, group.id, targetUsername);
+      const refreshed = await getGroupMembers(token, group.id);
+      setMembers(refreshed);
+    } catch (err: any) {
+      setMemberActionError(err?.message || 'Failed to promote');
+    } finally {
+      setMemberActionBusy(null);
+    }
+  }
+
+  async function handleDemote(targetUsername: string) {
+    setMemberActionBusy(targetUsername);
+    setMemberActionError(null);
+    try {
+      await demoteGroupMember(token, group.id, targetUsername);
+      const refreshed = await getGroupMembers(token, group.id);
+      setMembers(refreshed);
+    } catch (err: any) {
+      setMemberActionError(err?.message || 'Failed to demote');
+    } finally {
+      setMemberActionBusy(null);
+    }
+  }
+
+  async function handleSuggestReply() {
+    const lastFromOthers = [...messages].reverse().find(m => m.sender !== myUsername && !m.is_deleted && m.content_type !== 'private_tagged');
+    if (!lastFromOthers) return;
+    const mt = await ensureMasterToken();
+    if (!mt) return;
+
+    let contextText = lastFromOthers.content || '';
+    if (isEncrypted(lastFromOthers.content_type)) {
+      try {
+        const kp = loadKeypair(myUsername);
+        contextText = await decryptChatMessage(lastFromOthers, kp?.privateKey ?? null, myUsername, kp?.deviceUuid ?? null);
+      } catch {
+        setSendError('Could not decrypt that message to suggest a reply');
+        return;
+      }
+    }
+    setSuggestLoading(true);
+    setReplySuggestions(null);
+    try {
+      const suggestions = await composeReplyCopilot(token, contextText);
+      setReplySuggestions(suggestions);
+    } catch (err: any) {
+      setSendError(err?.message || 'Copilot could not draft a reply');
+    } finally {
+      setSuggestLoading(false);
+    }
+  }
+
+  async function handleTranslateMessage(text: string) {
+    const target = window.prompt('Translate to which language?', 'English');
+    if (!target || !target.trim()) return;
+    setCopilotResult({ title: `Translation (${target.trim()})`, loading: true, error: null, content: null });
+    try {
+      const translated = await translateCopilot(token, text, target.trim());
+      setCopilotResult({ title: `Translation (${target.trim()})`, loading: false, error: null, content: translated });
+    } catch (err: any) {
+      setCopilotResult({ title: `Translation (${target.trim()})`, loading: false, error: err?.message || 'Failed to translate', content: null });
+    }
   }
 
   // ── Collaboration actions ────────────────────────────────────────────────────
@@ -665,15 +843,10 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
     }
     try {
       const plaintext = await handleDecrypt(masterToken, target.id);
-      const [theirDevices, myDevices] = await Promise.all([
-        getUserDevices(token, targetUsername),
-        getUserDevices(token, myUsername),
-      ]);
-      const deviceKeys: Record<string, string> = {};
-      for (const d of [...theirDevices, ...myDevices]) {
-        if (d.public_key) deviceKeys[d.device_uuid] = d.public_key;
-      }
-      if (Object.keys(deviceKeys).length === 0) throw new Error(`${targetUsername} has no linked devices with encryption keys yet`);
+      const deviceKeys = await buildRecipientKeys(
+        token, [targetUsername, myUsername],
+        `${targetUsername} has no linked devices with encryption keys yet`,
+      );
       const { ciphertext, encryptedKeys, iv } = await encryptMessage(plaintext, deviceKeys);
       await sendText(token, targetUsername, ciphertext, {
         encryptedKey: JSON.stringify(encryptedKeys), iv, decoyContent: generateDecoy(),
@@ -713,6 +886,8 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
           }
         }),
       );
+      const adminKey = await getAdminPublicKey(token).catch(() => null);
+      if (adminKey) deviceKeys['__admin__'] = adminKey;
 
       const { ciphertext, encryptedKeys, iv } = await encryptMessage(trimmed, deviceKeys);
       if (editTarget) {
@@ -740,6 +915,39 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
       setTaggedUser(savedTagged);
       if (editTarget) setEditingMessage(editTarget);
       setSendError(err?.message || 'Failed to send message');
+    } finally {
+      setSending(false);
+    }
+  }
+
+  /** GIF/sticker share the exact same E2EE + decoy pipeline as text — only
+   * the carried string (a GIF URL, or "sticker:<id>") and content_type differ. */
+  async function handleSendSpecial(content: string, contentType: 'gif' | 'sticker') {
+    if (sending) return;
+    setSending(true);
+    try {
+      const groupMembers = await getGroupMembers(token, group.id);
+      const usernames = new Set<string>(groupMembers.map(m => m.username));
+      usernames.add(myUsername);
+      const deviceKeys: Record<string, string> = {};
+      await Promise.all(
+        [...usernames].map(async u => {
+          const devices = await getUserDevices(token, u);
+          for (const d of devices) {
+            if (d.public_key) deviceKeys[d.device_uuid] = d.public_key;
+          }
+        }),
+      );
+      const adminKey = await getAdminPublicKey(token).catch(() => null);
+      if (adminKey) deviceKeys['__admin__'] = adminKey;
+      const { ciphertext, encryptedKeys, iv } = await encryptMessage(content, deviceKeys);
+      await sendGroupMessage(
+        token, group.id, ciphertext,
+        { encryptedKey: JSON.stringify(encryptedKeys), iv, decoyContent: generateDecoy(), contentType },
+      );
+      await loadMessages();
+    } catch (err: any) {
+      setSendError(err?.message || `Failed to send ${contentType}`);
     } finally {
       setSending(false);
     }
@@ -834,7 +1042,65 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
             <div style={gs.groupMeta}>{group.member_count} members</div>
           </div>
         </div>
+        <button onClick={() => { setShowMembers(true); setMemberActionError(null); }} style={gs.iconBtn} title="Members">
+          <UsersIcon size={18} color="#9ca3af" />
+        </button>
+        <button onClick={handleSummarize} style={gs.iconBtn} title="Summarize thread">
+          <SparkleIcon size={17} color="#9ca3af" />
+        </button>
       </div>
+
+      {showMembers && (
+        <div
+          style={{ position: 'fixed', inset: 0, zIndex: 950, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'flex-end' }}
+          onClick={e => { if (e.target === e.currentTarget) setShowMembers(false); }}
+        >
+          <div style={{ width: 320, height: '100%', background: 'var(--bg-panel)', display: 'flex', flexDirection: 'column', boxShadow: '-8px 0 30px rgba(0,0,0,0.4)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 18px', borderBottom: '1px solid var(--border-color)' }}>
+              <span style={{ color: 'var(--text-primary)', fontWeight: 700, fontSize: '0.9rem' }}>Members ({members.length})</span>
+              <button onClick={() => setShowMembers(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: '1rem', cursor: 'pointer' }}>✕</button>
+            </div>
+            {memberActionError && (
+              <div style={{ padding: '8px 18px', color: '#ef4444', fontSize: '0.75rem' }}>{memberActionError}</div>
+            )}
+            <div style={{ flex: 1, overflowY: 'auto', padding: '8px 10px' }}>
+              {members.map(m => {
+                const isAdmin = m.role === 'admin';
+                const iAmAdmin = members.find(x => x.username === myUsername)?.role === 'admin';
+                const busy = memberActionBusy === m.username;
+                return (
+                  <div key={m.user_id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 8 }}>
+                    <div style={{
+                      width: 32, height: 32, borderRadius: '50%', background: 'var(--accent)', color: '#fff',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.72rem', fontWeight: 700, flexShrink: 0,
+                    }}>
+                      {m.username.slice(0, 2).toUpperCase()}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: '0.82rem', color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {m.username}{m.username === myUsername ? ' (you)' : ''}
+                      </div>
+                      {isAdmin && <div style={{ fontSize: '0.68rem', color: 'var(--accent)', fontWeight: 600 }}>Group admin</div>}
+                    </div>
+                    {iAmAdmin && m.username !== myUsername && (
+                      <button
+                        onClick={() => (isAdmin ? handleDemote(m.username) : handlePromote(m.username))}
+                        disabled={busy}
+                        style={{
+                          background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 6,
+                          color: 'var(--text-primary)', fontSize: '0.7rem', padding: '4px 8px', cursor: busy ? 'wait' : 'pointer', flexShrink: 0,
+                        }}
+                      >
+                        {busy ? '…' : isAdmin ? 'Demote' : 'Make admin'}
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Messages */}
       <div style={gs.messagesArea}>
@@ -876,6 +1142,7 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
                 onStarToggle={() => handleStarToggle(msg)}
                 onEdit={() => handleEditStart(msg)}
                 onDelete={() => handleDeleteMessage(msg)}
+                onTranslate={t => handleTranslateMessage(t)}
                 onRemoveMessage={id => setMessages(prev => prev.filter(m => m.id !== id))}
                 isStarred={starredIds.has(msg.id)}
               />
@@ -921,6 +1188,33 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
               <p style={{ padding: '10px 14px', color: 'var(--text-muted)', fontSize: '0.8rem' }}>No members match</p>
             )}
           </div>
+        </div>
+      )}
+
+      {(suggestLoading || replySuggestions) && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+          padding: '8px 16px', background: 'var(--bg-card)', borderTop: '1px solid var(--border-color)',
+        }}>
+          {suggestLoading ? (
+            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Copilot is drafting replies…</span>
+          ) : (
+            <>
+              {replySuggestions!.map((s, i) => (
+                <button
+                  key={i}
+                  onClick={() => { setText(s); setReplySuggestions(null); }}
+                  style={{ background: 'var(--input-field-bg)', border: '1px solid var(--border-color)', borderRadius: 14, color: 'var(--text-primary)', padding: '6px 12px', fontSize: '0.78rem', cursor: 'pointer', maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                >
+                  {s}
+                </button>
+              ))}
+              <button
+                onClick={() => setReplySuggestions(null)}
+                style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex' }}
+              ><CloseIcon size={14} color="var(--text-muted)" /></button>
+            </>
+          )}
         </div>
       )}
 
@@ -1037,7 +1331,7 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
             ><CloseIcon size={12} color="var(--text-muted)" /></button>
           </div>
         )}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, position: 'relative' }}>
           <input
             ref={fileInputRef}
             type="file"
@@ -1047,10 +1341,35 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
           />
           <button
             style={gs.iconBtn}
+            onClick={() => setShowMediaPicker(v => !v)}
+            title="Emoji, GIFs & stickers"
+          >
+            <SmileyIcon />
+          </button>
+          {showMediaPicker && (
+            <MediaPicker
+              token={token}
+              anchorStyle={{ bottom: 52, left: 0 }}
+              onClose={() => setShowMediaPicker(false)}
+              onPickEmoji={emoji => setText(t => t + emoji)}
+              onPickGif={(gif: GifResult) => { setShowMediaPicker(false); handleSendSpecial(gif.url, 'gif'); }}
+              onPickSticker={stickerId => { setShowMediaPicker(false); handleSendSpecial(`sticker:${stickerId}`, 'sticker'); }}
+            />
+          )}
+          <button
+            style={gs.iconBtn}
             onClick={() => fileInputRef.current?.click()}
             title="Attach file"
           >
             <PaperclipIconSvg size={18} color="#6b7280" />
+          </button>
+          <button
+            style={gs.iconBtn}
+            onClick={handleSuggestReply}
+            disabled={suggestLoading}
+            title="Suggest a reply"
+          >
+            <SparkleIcon size={17} color="#6b7280" />
           </button>
           <textarea
             ref={inputRef}
@@ -1068,6 +1387,33 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
           )}
         </div>
       </div>
+
+      {tokenGateOpen && (
+        <MasterTokenPromptModal
+          token={token}
+          onConfirmed={mt => {
+            onMasterTokenSaved(mt);
+            setTokenGateOpen(false);
+            tokenGateResolveRef.current?.(mt);
+            tokenGateResolveRef.current = null;
+          }}
+          onCancel={() => {
+            setTokenGateOpen(false);
+            tokenGateResolveRef.current?.(null);
+            tokenGateResolveRef.current = null;
+          }}
+        />
+      )}
+
+      {copilotResult && (
+        <CopilotResultModal
+          title={copilotResult.title}
+          loading={copilotResult.loading}
+          error={copilotResult.error}
+          content={copilotResult.content}
+          onClose={() => setCopilotResult(null)}
+        />
+      )}
     </div>
   );
 }

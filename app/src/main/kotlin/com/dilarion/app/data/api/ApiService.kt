@@ -17,6 +17,23 @@ interface ApiService {
     @POST("auth/logout")
     suspend fun logout(@Header("Authorization") bearer: String): Response<Unit>
 
+    // Self-service signup — open, no verification (deliberate for this
+    // deployment). Response includes a one-time recovery_code.
+    @POST("register")
+    suspend fun signUp(@Body request: SignUpRequest): Response<SignUpResponse>
+
+    @POST("auth/reset-with-recovery-code")
+    suspend fun resetWithRecoveryCode(@Body request: RecoveryCodeResetRequest): Response<RecoveryCodeResetResponse>
+
+    @POST("users/me/recovery-code/regenerate")
+    suspend fun regenerateRecoveryCode(@Header("Authorization") bearer: String): Response<RecoveryCodeRegenerateResponse>
+
+    @PUT("users/me/username")
+    suspend fun updateUsername(
+        @Header("Authorization") bearer: String,
+        @Body request: UsernameUpdateRequest,
+    ): Response<UsernameUpdateResponse>
+
     // ─── Public key ────────────────────────────────────────────────────────────
 
     @POST("users/update_public_key")
@@ -214,6 +231,130 @@ interface ApiService {
         @Path("username") username: String,
     ): Response<Map<String, String>>
 
+    // ─── Profile picture ───────────────────────────────────────────────────────
+
+    @Multipart
+    @POST("users/me/profile-picture")
+    suspend fun uploadProfilePicture(
+        @Header("Authorization") bearer: String,
+        @Part file: MultipartBody.Part,
+    ): Response<com.google.gson.JsonObject>
+
+    @GET("users/{username}/profile-picture")
+    suspend fun getProfilePicture(
+        @Path("username") username: String,
+    ): Response<ResponseBody>
+
+    @DELETE("users/me/profile-picture")
+    suspend fun deleteProfilePicture(
+        @Header("Authorization") bearer: String,
+    ): Response<com.google.gson.JsonObject>
+
+    // ─── Availability status ────────────────────────────────────────────────────
+
+    @POST("users/me/availability")
+    suspend fun setAvailability(
+        @Header("Authorization") bearer: String,
+        @Body request: com.dilarion.app.data.model.AvailabilityUpdateRequest,
+    ): Response<com.google.gson.JsonObject>
+
+    // ─── Per-chat settings: archive / mute / lock / delete-for-me ──────────────
+
+    @GET("chats/settings")
+    suspend fun getChatSettings(
+        @Header("Authorization") bearer: String,
+    ): Response<com.dilarion.app.data.model.ChatSettingsListResponse>
+
+    @PUT("chats/settings")
+    suspend fun updateChatSettings(
+        @Header("Authorization") bearer: String,
+        @Body request: com.dilarion.app.data.model.ChatSettingsUpdateRequest,
+    ): Response<com.dilarion.app.data.model.ChatSettingsItem>
+
+    @POST("chats/delete")
+    suspend fun deleteChatForMe(
+        @Header("Authorization") bearer: String,
+        @Body request: com.dilarion.app.data.model.ChatDeleteRequestBody,
+    ): Response<com.google.gson.JsonObject>
+
+    // ─── Group admin ────────────────────────────────────────────────────────────
+
+    @POST("groups/{groupId}/members/{username}/promote")
+    suspend fun promoteGroupMember(
+        @Header("Authorization") bearer: String,
+        @Path("groupId") groupId: Int,
+        @Path("username") username: String,
+    ): Response<com.google.gson.JsonObject>
+
+    @POST("groups/{groupId}/members/{username}/demote")
+    suspend fun demoteGroupMember(
+        @Header("Authorization") bearer: String,
+        @Path("groupId") groupId: Int,
+        @Path("username") username: String,
+    ): Response<com.google.gson.JsonObject>
+
+    // ─── GIF (GIPHY proxy) ──────────────────────────────────────────────────────
+
+    @GET("integrations/giphy/search")
+    suspend fun searchGifs(
+        @Header("Authorization") bearer: String,
+        @Query("q") query: String,
+        @Query("limit") limit: Int = 24,
+    ): Response<com.dilarion.app.data.model.GifSearchResponse>
+
+    @GET("integrations/giphy/trending")
+    suspend fun getTrendingGifs(
+        @Header("Authorization") bearer: String,
+        @Query("limit") limit: Int = 24,
+    ): Response<com.dilarion.app.data.model.GifSearchResponse>
+
+    // ─── Tasks ──────────────────────────────────────────────────────────────────
+
+    @POST("tasks")
+    suspend fun createTask(
+        @Header("Authorization") bearer: String,
+        @Body request: com.dilarion.app.data.model.TaskCreateRequest,
+    ): Response<com.dilarion.app.data.model.TaskItem>
+
+    @GET("tasks")
+    suspend fun listTasks(
+        @Header("Authorization") bearer: String,
+    ): Response<com.dilarion.app.data.model.TaskListResponse>
+
+    @GET("tasks/{taskId}")
+    suspend fun getTask(
+        @Header("Authorization") bearer: String,
+        @Path("taskId") taskId: Int,
+    ): Response<com.dilarion.app.data.model.TaskItem>
+
+    @PUT("tasks/{taskId}/status")
+    suspend fun updateTaskStatus(
+        @Header("Authorization") bearer: String,
+        @Path("taskId") taskId: Int,
+        @Body request: com.dilarion.app.data.model.TaskStatusUpdateRequest,
+    ): Response<com.dilarion.app.data.model.TaskItem>
+
+    @PUT("tasks/{taskId}/my-status")
+    suspend fun updateMyTaskStatus(
+        @Header("Authorization") bearer: String,
+        @Path("taskId") taskId: Int,
+        @Body request: com.dilarion.app.data.model.TaskStatusUpdateRequest,
+    ): Response<com.dilarion.app.data.model.TaskItem>
+
+    @POST("tasks/{taskId}/groups/{groupId}/report")
+    suspend fun submitBreakoutReport(
+        @Header("Authorization") bearer: String,
+        @Path("taskId") taskId: Int,
+        @Path("groupId") groupId: Int,
+        @Body request: com.dilarion.app.data.model.TaskGroupReportSubmitRequest,
+    ): Response<com.dilarion.app.data.model.TaskItem>
+
+    @POST("tasks/{taskId}/compile")
+    suspend fun compileTask(
+        @Header("Authorization") bearer: String,
+        @Path("taskId") taskId: Int,
+    ): Response<com.dilarion.app.data.model.TaskItem>
+
     // ─── Calls ─────────────────────────────────────────────────────────────────
 
     /** Short-lived TURN credentials; falls back to built-in servers if this fails. */
@@ -362,6 +503,34 @@ interface ApiService {
         @Query("end") end: String,
     ): Response<com.dilarion.app.data.model.CalendarResponse>
 
+    // ─── Breakout rooms (host-only start/auto/end; any participant can list) ──
+
+    @POST("meetings/{id}/breakout/start")
+    suspend fun startBreakoutRooms(
+        @Header("Authorization") bearer: String,
+        @Path("id") conferenceId: Int,
+        @Body body: com.dilarion.app.data.model.BreakoutStartRequest,
+    ): Response<com.dilarion.app.data.model.BreakoutRoomsResponse>
+
+    @POST("meetings/{id}/breakout/auto")
+    suspend fun autoBreakoutRooms(
+        @Header("Authorization") bearer: String,
+        @Path("id") conferenceId: Int,
+        @Query("num_rooms") numRooms: Int,
+    ): Response<com.dilarion.app.data.model.BreakoutRoomsResponse>
+
+    @POST("meetings/{id}/breakout/end")
+    suspend fun endBreakoutRooms(
+        @Header("Authorization") bearer: String,
+        @Path("id") conferenceId: Int,
+    ): Response<com.google.gson.JsonObject>
+
+    @GET("meetings/{id}/breakout")
+    suspend fun listBreakoutRooms(
+        @Header("Authorization") bearer: String,
+        @Path("id") conferenceId: Int,
+    ): Response<com.dilarion.app.data.model.BreakoutRoomsResponse>
+
     // ─── Whiteboard ──────────────────────────────────────────────────────────
 
     @POST("whiteboard/stroke")
@@ -389,6 +558,39 @@ interface ApiService {
         @Header("Authorization") bearer: String,
         @Body body: com.dilarion.app.data.model.WhiteboardOpenRequest,
     ): Response<com.google.gson.JsonObject>
+
+    // ─── Copilot ───────────────────────────────────────────────────────────────
+
+    @POST("copilot/summarize")
+    suspend fun copilotSummarize(
+        @Header("Authorization") bearer: String,
+        @Body request: CopilotSummarizeRequest,
+    ): Response<CopilotSummarizeResponse>
+
+    @POST("copilot/compose")
+    suspend fun copilotCompose(
+        @Header("Authorization") bearer: String,
+        @Body request: CopilotComposeRequest,
+    ): Response<CopilotComposeResponse>
+
+    @POST("copilot/document-qa")
+    suspend fun copilotDocumentQA(
+        @Header("Authorization") bearer: String,
+        @Body request: CopilotDocumentQARequest,
+    ): Response<CopilotDocumentQAResponse>
+
+    @POST("copilot/translate")
+    suspend fun copilotTranslate(
+        @Header("Authorization") bearer: String,
+        @Body request: CopilotTranslateRequest,
+    ): Response<CopilotTranslateResponse>
+
+    @Multipart
+    @POST("copilot/transcribe")
+    suspend fun copilotTranscribe(
+        @Header("Authorization") bearer: String,
+        @Part file: MultipartBody.Part,
+    ): Response<CopilotTranscribeResponse>
 
     // ─── Media ─────────────────────────────────────────────────────────────────
 
@@ -419,6 +621,14 @@ interface ApiService {
 
     @GET("media/decoy-file/{mediaId}")
     suspend fun downloadDecoyFile(
+        @Header("Authorization") bearer: String,
+        @Path("mediaId") mediaId: String,
+    ): Response<ResponseBody>
+
+    // Stand-in still photo for a locked image/video — video has no fake-video
+    // equivalent, so this is what a locked video shows too until reveal.
+    @GET("media/decoy-image/{mediaId}")
+    suspend fun downloadDecoyImage(
         @Header("Authorization") bearer: String,
         @Path("mediaId") mediaId: String,
     ): Response<ResponseBody>

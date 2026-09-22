@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import { Room, RoomEvent, Track, RemoteParticipant, TrackPublication, Participant } from 'livekit-client';
 import { CloseIcon as SharedCloseIcon } from './Icons';
 import {
@@ -6,6 +7,8 @@ import {
   getWaitingRoom, admitFromWaitingRoom, denyFromWaitingRoom, WaitingParticipant,
   startConferenceRecording, stopConferenceRecording,
   sendWhiteboardOpen, sendWhiteboardClose,
+  requestRemoteControl, respondRemoteControl, endRemoteControl,
+  startBreakoutRooms, autoBreakoutRooms, endBreakoutRooms,
 } from '../services/api';
 import { presenceService, WsMessage } from '../services/presence';
 import WhiteboardModal from './WhiteboardModal';
@@ -75,6 +78,17 @@ export default function GalleryView({
   const [screenSharing, setScreenSharing] = useState(false);
   const [showReactionPicker, setShowReactionPicker] = useState(false);
   const [floatingReactions, setFloatingReactions] = useState<FloatingReaction[]>([]);
+  // Remote control (in-meeting "request access to control someone's PC"):
+  // controllingUsername = I've been approved to control that person's screen.
+  // controlledByUsername = I approved that person to control MY screen —
+  // real input injection only happens on the other machine, gated there by
+  // its own control_session_active Rust state (see inject_remote_input).
+  const [controllingUsername, setControllingUsername] = useState<string | null>(null);
+  const [controlledByUsername, setControlledByUsername] = useState<string | null>(null);
+  const [pendingControlRequestFrom, setPendingControlRequestFrom] = useState<string | null>(null);
+  const [controlRequestBusy, setControlRequestBusy] = useState(false);
+  const [controlError, setControlError] = useState<string | null>(null);
+  const [showControlPanel, setShowControlPanel] = useState(false);
   const videoRefs = useRef<Record<string, HTMLVideoElement | null>>({});
   // Whichever happens first — the track publishing, or the tile's <video>
   // element mounting — completes the attach. Without this, a track that
@@ -104,6 +118,19 @@ export default function GalleryView({
   const [recording, setRecording] = useState(false);
   const [recordingBusy, setRecordingBusy] = useState(false);
   const [recordingError, setRecordingError] = useState<string | null>(null);
+
+  // Breakout rooms — a breakout room is just another LiveKit room (its own
+  // conference_id), so "being in one" is just connecting activeConferenceId
+  // instead of the parent conferenceId prop. Orchestration calls always
+  // target the parent (conferenceId), never wherever the host currently is.
+  const [activeConferenceId, setActiveConferenceId] = useState(conferenceId);
+  const [inBreakoutName, setInBreakoutName] = useState<string | null>(null);
+  const [breakoutActive, setBreakoutActive] = useState(false);
+  const [showBreakoutPanel, setShowBreakoutPanel] = useState(false);
+  const [breakoutBusy, setBreakoutBusy] = useState(false);
+  const [breakoutError, setBreakoutError] = useState<string | null>(null);
+  const [breakoutNumRooms, setBreakoutNumRooms] = useState(2);
+  const [breakoutManualGroups, setBreakoutManualGroups] = useState<{ name: string; usernames: string[] }[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -161,10 +188,12 @@ export default function GalleryView({
       });
     }
 
+    setTiles({}); // stale tiles from a previous room (if switching in/out of a breakout) must not linger
+
     (async () => {
       try {
         const [{ url, token: lkToken }, iceServers] = await Promise.all([
-          getLiveKitToken(token, conferenceId, displayName),
+          getLiveKitToken(token, activeConferenceId, displayName),
           getIceServers(token),
         ]);
         if (cancelled) return;
@@ -237,6 +266,11 @@ export default function GalleryView({
                 const id = Date.now() + Math.random();
                 setFloatingReactions(prev => [...prev, { id, emoji: msg.emoji, from }]);
                 setTimeout(() => setFloatingReactions(prev => prev.filter(r => r.id !== id)), 2500);
+              } else if (msg?.type === 'remote_control_input' && msg.event) {
+                // Authority for whether this actually does anything lives in
+                // Rust (control_session_active) — no need to gate on React
+                // state here, and doing so would race a stale closure anyway.
+                invoke('inject_remote_input', { event: msg.event }).catch(() => {});
               }
             } catch {}
           });
@@ -264,7 +298,7 @@ export default function GalleryView({
       room?.disconnect();
       roomRef.current = null;
     };
-  }, [token, conferenceId]);
+  }, [token, activeConferenceId]);
 
   // Host-only in practice — the backend 403s admit/deny for non-hosts, so this
   // just silently finds nothing to show for a guest. Refreshes on load and on
@@ -290,6 +324,36 @@ export default function GalleryView({
         if (data.conference_id !== conferenceId) return;
         setWhiteboardOwner(null);
         setShowWhiteboard(false);
+      } else if (msg.type === 'breakout_assigned') {
+        const data = msg.data || {};
+        if (data.parent_conference_id !== conferenceId) return;
+        setInBreakoutName(data.name || 'Breakout room');
+        setActiveConferenceId(data.breakout_conference_id);
+      } else if (msg.type === 'breakout_ended') {
+        const data = msg.data || {};
+        if (data.parent_conference_id !== conferenceId) return;
+        setInBreakoutName(null);
+        setBreakoutActive(false);
+        setActiveConferenceId(conferenceId);
+      } else if (msg.type === 'remote_control_requested') {
+        const data = msg.data || {};
+        if (data.conference_id !== conferenceId) return;
+        setPendingControlRequestFrom(data.requester_username);
+      } else if (msg.type === 'remote_control_response') {
+        const data = msg.data || {};
+        if (data.conference_id !== conferenceId) return;
+        setControlRequestBusy(false);
+        if (data.approved) {
+          setControllingUsername(data.target_username);
+        } else {
+          setControlError(`${data.target_username} declined control`);
+        }
+      } else if (msg.type === 'remote_control_ended') {
+        const data = msg.data || {};
+        if (data.conference_id !== conferenceId) return;
+        setControllingUsername(null);
+        setControlledByUsername(null);
+        invoke('set_control_session_active', { active: false }).catch(() => {});
       }
     };
     presenceService.addListener(onMsg);
@@ -311,6 +375,59 @@ export default function GalleryView({
       setRecordingError(err?.message || 'Recording failed');
     }
     setRecordingBusy(false);
+  }
+
+  async function handleStartAutoBreakout() {
+    setBreakoutBusy(true);
+    setBreakoutError(null);
+    try {
+      await autoBreakoutRooms(token, conferenceId, breakoutNumRooms);
+      setBreakoutActive(true);
+      setShowBreakoutPanel(false);
+    } catch (err: any) {
+      setBreakoutError(err?.message || 'Failed to start breakout rooms');
+    } finally {
+      setBreakoutBusy(false);
+    }
+  }
+
+  async function handleStartManualBreakout() {
+    const groups = breakoutManualGroups.filter(g => g.usernames.length > 0);
+    if (groups.length === 0) return;
+    setBreakoutBusy(true);
+    setBreakoutError(null);
+    try {
+      await startBreakoutRooms(token, conferenceId, groups);
+      setBreakoutActive(true);
+      setShowBreakoutPanel(false);
+    } catch (err: any) {
+      setBreakoutError(err?.message || 'Failed to start breakout rooms');
+    } finally {
+      setBreakoutBusy(false);
+    }
+  }
+
+  async function handleEndBreakout() {
+    setBreakoutBusy(true);
+    setBreakoutError(null);
+    try {
+      await endBreakoutRooms(token, conferenceId);
+      setBreakoutActive(false);
+      setInBreakoutName(null);
+      setActiveConferenceId(conferenceId);
+    } catch (err: any) {
+      setBreakoutError(err?.message || 'Failed to end breakout rooms');
+    } finally {
+      setBreakoutBusy(false);
+    }
+  }
+
+  function toggleManualAssignment(groupIndex: number, username: string) {
+    setBreakoutManualGroups(prev => prev.map((g, i) => {
+      if (i !== groupIndex) return { ...g, usernames: g.usernames.filter(u => u !== username) };
+      const has = g.usernames.includes(username);
+      return { ...g, usernames: has ? g.usernames.filter(u => u !== username) : [...g.usernames, username] };
+    }));
   }
 
   async function admitGuest(userId: number) {
@@ -390,6 +507,60 @@ export default function GalleryView({
     room.localParticipant.publishData(payload, { reliable: false });
   }
 
+  // ── Remote control actions ─────────────────────────────────────────────────
+
+  async function requestControl(targetUsername: string) {
+    setControlError(null);
+    setControlRequestBusy(true);
+    try {
+      await requestRemoteControl(token, conferenceId, targetUsername);
+    } catch (err: any) {
+      setControlRequestBusy(false);
+      setControlError(err?.message || 'Failed to request control');
+    }
+  }
+
+  async function approveControlRequest() {
+    if (!pendingControlRequestFrom) return;
+    const requester = pendingControlRequestFrom;
+    setPendingControlRequestFrom(null);
+    setControlledByUsername(requester);
+    await invoke('set_control_session_active', { active: true }).catch(() => {});
+    await respondRemoteControl(token, conferenceId, requester, true);
+  }
+
+  function declineControlRequest() {
+    if (!pendingControlRequestFrom) return;
+    const requester = pendingControlRequestFrom;
+    setPendingControlRequestFrom(null);
+    respondRemoteControl(token, conferenceId, requester, false);
+  }
+
+  async function stopControlling() {
+    if (!controllingUsername) return;
+    const target = controllingUsername;
+    setControllingUsername(null);
+    await endRemoteControl(token, conferenceId, target);
+  }
+
+  async function revokeControl() {
+    if (!controlledByUsername) return;
+    const controller = controlledByUsername;
+    setControlledByUsername(null);
+    await invoke('set_control_session_active', { active: false }).catch(() => {});
+    await endRemoteControl(token, conferenceId, controller);
+  }
+
+  /** Publishes one input event to whoever I'm currently controlling — ignored
+   * by every other participant's DataReceived handler (they check msg.type
+   * but Rust-side inject_remote_input still gates on their own approval). */
+  function publishControlEvent(event: Record<string, unknown>) {
+    const room = roomRef.current;
+    if (!room || !controllingUsername) return;
+    const payload = new TextEncoder().encode(JSON.stringify({ type: 'remote_control_input', event }));
+    room.localParticipant.publishData(payload, { reliable: true });
+  }
+
   function leave() {
     roomRef.current?.disconnect();
     onClose();
@@ -458,7 +629,12 @@ export default function GalleryView({
         padding: '14px 20px', flexShrink: 0,
       }}>
         <span style={{ color: '#fff', fontWeight: 700, fontSize: '0.95rem', display: 'flex', alignItems: 'center', gap: 8 }}>
-          Group Video {tileList.length > 0 && `· ${tileList.length}`}
+          {inBreakoutName ? `Breakout: ${inBreakoutName}` : 'Group Video'} {tileList.length > 0 && `· ${tileList.length}`}
+          {inBreakoutName && (
+            <span style={{ background: 'rgba(124,58,237,0.25)', border: '1px solid rgba(124,58,237,0.5)', borderRadius: 20, padding: '2px 10px', fontSize: '0.68rem', color: '#c4b5fd', fontWeight: 700 }}>
+              in breakout room
+            </span>
+          )}
           {recording && (
             <span style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.4)', borderRadius: 20, padding: '2px 10px', fontSize: '0.7rem', color: '#ef4444', fontWeight: 700 }}>
               <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#ef4444' }} />
@@ -474,6 +650,19 @@ export default function GalleryView({
               title={recording ? 'Stop recording' : 'Start recording'}
               style={{ background: recording ? 'rgba(239,68,68,0.25)' : 'rgba(255,255,255,0.1)', border: 'none', borderRadius: 8, color: '#fff', width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: recordingBusy ? 'wait' : 'pointer', opacity: recordingBusy ? 0.6 : 1 }}
             ><RecordIcon active={recording} /></button>
+          )}
+          {isHost && (
+            <button
+              onClick={() => {
+                if (breakoutActive) { handleEndBreakout(); return; }
+                setBreakoutManualGroups(tileList.filter(t => !t.isScreenShare).length >= 2 ? [{ name: 'Room 1', usernames: [] }, { name: 'Room 2', usernames: [] }] : []);
+                setBreakoutError(null);
+                setShowBreakoutPanel(true);
+              }}
+              disabled={breakoutBusy}
+              title={breakoutActive ? 'End breakout rooms' : 'Breakout rooms'}
+              style={{ background: breakoutActive ? 'rgba(239,68,68,0.35)' : 'rgba(255,255,255,0.1)', border: 'none', borderRadius: 8, color: '#fff', width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: breakoutBusy ? 'wait' : 'pointer' }}
+            ><BreakoutIcon /></button>
           )}
           <button
             onClick={openParticipants}
@@ -505,6 +694,11 @@ export default function GalleryView({
             }
             style={{ background: whiteboardOwner ? 'rgba(109,94,252,0.35)' : 'rgba(255,255,255,0.1)', border: 'none', borderRadius: 8, color: '#fff', width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
           ><WhiteboardIcon /></button>
+          <button
+            onClick={() => setShowControlPanel(v => !v)}
+            title="Remote control"
+            style={{ background: (controllingUsername || controlledByUsername) ? 'rgba(239,68,68,0.35)' : 'rgba(255,255,255,0.1)', border: 'none', borderRadius: 8, color: '#fff', width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+          ><RemoteControlIcon /></button>
           {onMinimize && (
             <button
               onClick={onMinimize}
@@ -519,6 +713,84 @@ export default function GalleryView({
           ><CloseIcon /></button>
         </div>
       </div>
+
+      {/* Persistent banner while someone else controls THIS machine — never
+          silent, always one click away from revoking. */}
+      {controlledByUsername && (
+        <div style={{
+          background: '#7c2d12', color: '#fff', padding: '8px 16px', fontSize: '0.8rem',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+        }}>
+          <span><strong>{controlledByUsername}</strong> is controlling your screen right now.</span>
+          <button
+            onClick={revokeControl}
+            style={{ background: '#fff', color: '#7c2d12', border: 'none', borderRadius: 6, padding: '4px 12px', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer' }}
+          >Revoke</button>
+        </div>
+      )}
+      {controllingUsername && (
+        <div style={{
+          background: '#1e3a8a', color: '#fff', padding: '8px 16px', fontSize: '0.8rem',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+        }}>
+          <span>You are controlling <strong>{controllingUsername}</strong>'s screen.</span>
+          <button
+            onClick={stopControlling}
+            style={{ background: '#fff', color: '#1e3a8a', border: 'none', borderRadius: 6, padding: '4px 12px', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer' }}
+          >Stop</button>
+        </div>
+      )}
+
+      {/* Incoming request — interrupts regardless of what else is open */}
+      {pendingControlRequestFrom && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 3000, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: '#1e1e24', border: '1px solid #2a2a32', borderRadius: 14, padding: 22, width: 320, textAlign: 'center' }}>
+            <div style={{ color: '#fff', fontSize: '0.95rem', fontWeight: 700, marginBottom: 6 }}>Control request</div>
+            <div style={{ color: '#9ca3af', fontSize: '0.82rem', marginBottom: 18 }}>
+              <strong style={{ color: '#fff' }}>{pendingControlRequestFrom}</strong> wants to control your screen. They'll be able to move your mouse and type until you revoke it.
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                onClick={declineControlRequest}
+                style={{ flex: 1, background: 'transparent', border: '1px solid #374151', borderRadius: 8, color: '#fff', padding: '9px 0', fontSize: '0.82rem', cursor: 'pointer' }}
+              >Decline</button>
+              <button
+                onClick={approveControlRequest}
+                style={{ flex: 1, background: '#ef4444', border: 'none', borderRadius: 8, color: '#fff', padding: '9px 0', fontSize: '0.82rem', fontWeight: 700, cursor: 'pointer' }}
+              >Approve</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Request-control panel — pick who to request control from */}
+      {showControlPanel && (
+        <div style={{ position: 'absolute', top: 56, right: 16, zIndex: 2500, width: 260, background: '#1e1e24', border: '1px solid #2a2a32', borderRadius: 12, padding: 12, boxShadow: '0 12px 32px rgba(0,0,0,0.5)' }}>
+          <div style={{ color: '#fff', fontSize: '0.82rem', fontWeight: 700, marginBottom: 8 }}>Remote control</div>
+          {controlError && <div style={{ color: '#fca5a5', fontSize: '0.72rem', marginBottom: 8 }}>{controlError}</div>}
+          {controllingUsername ? (
+            <div style={{ color: '#9ca3af', fontSize: '0.78rem' }}>
+              Controlling <strong style={{ color: '#fff' }}>{controllingUsername}</strong>.
+              <button onClick={stopControlling} style={{ display: 'block', marginTop: 8, width: '100%', background: '#374151', border: 'none', borderRadius: 8, color: '#fff', padding: '7px 0', fontSize: '0.78rem', cursor: 'pointer' }}>Stop</button>
+            </div>
+          ) : tileList.filter(t => !t.isLocal).length === 0 ? (
+            <div style={{ color: '#6b7280', fontSize: '0.78rem' }}>No one else in this meeting yet.</div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {tileList.filter(t => !t.isLocal).map(t => (
+                <div key={t.identity} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                  <span style={{ color: '#fff', fontSize: '0.78rem' }}>{t.displayName}</span>
+                  <button
+                    onClick={() => requestControl(t.identity)}
+                    disabled={controlRequestBusy}
+                    style={{ background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: 6, color: '#fff', padding: '4px 10px', fontSize: '0.72rem', cursor: controlRequestBusy ? 'wait' : 'pointer' }}
+                  >Request</button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {connecting && (
         <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: '0.9rem' }}>
@@ -540,7 +812,11 @@ export default function GalleryView({
         if (tileList.length <= 1) {
           return tileList[0] ? (
             <div style={{ flex: 1, padding: 16, minHeight: 0 }}>
-              <TileCard tile={tileList[0]} videoRefs={videoRefs} trackRefs={trackRefs} fill />
+              <TileCard
+                tile={tileList[0]} videoRefs={videoRefs} trackRefs={trackRefs} fill
+                capturingControl={tileList[0].identity === controllingUsername}
+                onCapturedInput={publishControlEvent}
+              />
             </div>
           ) : null;
         }
@@ -550,14 +826,22 @@ export default function GalleryView({
             <div style={{ flex: 1, display: 'flex', gap: 10, padding: 16, minHeight: 0 }}>
               {tileList.map(tile => (
                 <div key={tile.identity} style={{ flex: 1, minWidth: 0 }}>
-                  <TileCard tile={tile} videoRefs={videoRefs} trackRefs={trackRefs} fill />
+                  <TileCard
+                    tile={tile} videoRefs={videoRefs} trackRefs={trackRefs} fill
+                    capturingControl={tile.identity === controllingUsername}
+                    onCapturedInput={publishControlEvent}
+                  />
                 </div>
               ))}
             </div>
           );
         }
 
+        // Whoever I'm actively controlling always wins the big slot — precise
+        // mouse mapping needs a large surface, and it's also just the tile you
+        // want to be looking at while you're driving their screen.
         const mainTile =
+          tileList.find(t => t.identity === controllingUsername) ??
           tileList.find(t => t.isScreenShare) ??
           tileList.find(t => t.isSpeaking && !t.isLocal) ??
           tileList.find(t => !t.isLocal) ??
@@ -578,7 +862,11 @@ export default function GalleryView({
             )}
             {mainTile && (
               <div style={{ flex: 1, minWidth: 0 }}>
-                <TileCard tile={mainTile} videoRefs={videoRefs} trackRefs={trackRefs} fill />
+                <TileCard
+                  tile={mainTile} videoRefs={videoRefs} trackRefs={trackRefs} fill
+                  capturingControl={mainTile.identity === controllingUsername}
+                  onCapturedInput={publishControlEvent}
+                />
               </div>
             )}
           </div>
@@ -629,6 +917,84 @@ export default function GalleryView({
           <button onClick={() => setShowReactionPicker(v => !v)} title="React" style={ctrlBtnStyle(true)}><ReactionIcon /></button>
           <button onClick={openParticipants} title="Add people" style={ctrlBtnStyle(true)}><PersonAddIcon /></button>
           <button onClick={leave} title="Leave" style={{ ...ctrlBtnStyle(false), background: '#ef4444' }}><HangupIcon /></button>
+        </div>
+      )}
+
+      {showBreakoutPanel && (
+        <div
+          style={{ position: 'fixed', inset: 0, zIndex: 970, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          onClick={e => { if (e.target === e.currentTarget) setShowBreakoutPanel(false); }}
+        >
+          <div style={{ width: 420, maxHeight: '80vh', overflowY: 'auto', background: '#16161c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 14, padding: 20, display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ color: '#fff', fontWeight: 700, fontSize: '0.95rem' }}>Breakout Rooms</div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ color: '#ccc', fontSize: '0.8rem' }}>Auto-shuffle into</span>
+              <input
+                type="number" min={2} max={Math.max(2, tileList.filter(t => !t.isScreenShare).length)}
+                value={breakoutNumRooms}
+                onChange={e => setBreakoutNumRooms(Math.max(2, Number(e.target.value) || 2))}
+                style={{ width: 50, background: '#0f0f14', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 6, color: '#fff', padding: '4px 8px', fontSize: '0.8rem' }}
+              />
+              <span style={{ color: '#ccc', fontSize: '0.8rem' }}>rooms</span>
+              <button
+                onClick={handleStartAutoBreakout}
+                disabled={breakoutBusy}
+                style={{ marginLeft: 'auto', background: 'var(--accent, #6d5efc)', border: 'none', borderRadius: 8, color: '#fff', padding: '6px 12px', fontSize: '0.78rem', fontWeight: 700, cursor: breakoutBusy ? 'wait' : 'pointer' }}
+              >
+                Auto-start
+              </button>
+            </div>
+
+            <div style={{ borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: 12 }}>
+              <div style={{ color: '#ccc', fontSize: '0.8rem', marginBottom: 8 }}>Or assign manually:</div>
+              {breakoutManualGroups.map((g, gi) => (
+                <div key={gi} style={{ marginBottom: 10 }}>
+                  <input
+                    value={g.name}
+                    onChange={e => setBreakoutManualGroups(prev => prev.map((x, i) => i === gi ? { ...x, name: e.target.value } : x))}
+                    style={{ background: '#0f0f14', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 6, color: '#fff', padding: '4px 8px', fontSize: '0.8rem', marginBottom: 6, width: '100%' }}
+                  />
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    {tileList.filter(t => !t.isLocal && !t.isScreenShare).map(t => {
+                      const checked = g.usernames.includes(t.identity);
+                      return (
+                        <button
+                          key={t.identity}
+                          onClick={() => toggleManualAssignment(gi, t.identity)}
+                          style={{
+                            background: checked ? 'var(--accent, #6d5efc)' : 'rgba(255,255,255,0.08)',
+                            border: 'none', borderRadius: 14, color: '#fff', padding: '3px 10px', fontSize: '0.72rem', cursor: 'pointer',
+                          }}
+                        >
+                          {t.displayName}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+              <button
+                onClick={() => setBreakoutManualGroups(prev => [...prev, { name: `Room ${prev.length + 1}`, usernames: [] }])}
+                style={{ background: 'transparent', border: 'none', color: 'var(--accent, #6d5efc)', fontSize: '0.78rem', cursor: 'pointer', padding: 0 }}
+              >
+                + Add room
+              </button>
+              <button
+                onClick={handleStartManualBreakout}
+                disabled={breakoutBusy}
+                style={{ display: 'block', marginTop: 10, background: 'var(--accent, #6d5efc)', border: 'none', borderRadius: 8, color: '#fff', padding: '7px 14px', fontSize: '0.8rem', fontWeight: 700, cursor: breakoutBusy ? 'wait' : 'pointer' }}
+              >
+                Start manual rooms
+              </button>
+            </div>
+
+            {breakoutError && <span style={{ fontSize: '0.75rem', color: '#ef4444' }}>{breakoutError}</span>}
+
+            <button onClick={() => setShowBreakoutPanel(false)} style={{ alignSelf: 'flex-end', background: 'transparent', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 8, color: '#ccc', padding: '6px 14px', fontSize: '0.78rem', cursor: 'pointer' }}>
+              Close
+            </button>
+          </div>
         </div>
       )}
 
@@ -742,18 +1108,24 @@ function TileCard({
   trackRefs,
   compact,
   fill,
+  capturingControl,
+  onCapturedInput,
 }: {
   tile: Tile;
   videoRefs: React.MutableRefObject<Record<string, HTMLVideoElement | null>>;
   trackRefs: React.MutableRefObject<Record<string, Track>>;
   compact?: boolean;
   fill?: boolean;
+  /** True while I've been approved to control this exact tile's owner. */
+  capturingControl?: boolean;
+  onCapturedInput?: (event: Record<string, unknown>) => void;
 }) {
+  const lastMoveSentRef = useRef(0);
   return (
     <div
       style={{
         position: 'relative', background: '#1a1a22', borderRadius: 12, overflow: 'hidden',
-        outline: tile.isSpeaking ? '2px solid #25d366' : 'none',
+        outline: tile.isSpeaking ? '2px solid #25d366' : capturingControl ? '2px solid #ef4444' : 'none',
         ...(fill ? { height: '100%' } : { aspectRatio: '16/9', flexShrink: 0 }),
       }}
     >
@@ -770,6 +1142,50 @@ function TileCard({
         muted={tile.isLocal}
         style={{ width: '100%', height: '100%', objectFit: tile.isScreenShare ? 'contain' : 'cover', display: tile.camOn ? 'block' : 'none' }}
       />
+      {capturingControl && onCapturedInput && (
+        // Transparent, focusable capture surface — every pointer/key event
+        // over this tile becomes one normalized remote-control event. Mapping
+        // assumes the video fills this box without letterboxing; for a
+        // screen-share (objectFit: contain) a wide-aspect target can leave
+        // small unmapped margins — a known, documented limitation, not a bug.
+        <div
+          tabIndex={0}
+          onPointerDown={e => {
+            e.currentTarget.focus();
+            const rect = e.currentTarget.getBoundingClientRect();
+            const x = (e.clientX - rect.left) / rect.width;
+            const y = (e.clientY - rect.top) / rect.height;
+            onCapturedInput({ kind: 'move', x, y });
+            onCapturedInput({ kind: 'click', button: e.button === 2 ? 'right' : e.button === 1 ? 'middle' : 'left', down: true });
+          }}
+          onPointerUp={e => {
+            onCapturedInput({ kind: 'click', button: e.button === 2 ? 'right' : e.button === 1 ? 'middle' : 'left', down: false });
+          }}
+          onPointerMove={e => {
+            const now = performance.now();
+            if (now - lastMoveSentRef.current < 33) return; // ~30fps cap
+            lastMoveSentRef.current = now;
+            const rect = e.currentTarget.getBoundingClientRect();
+            const x = (e.clientX - rect.left) / rect.width;
+            const y = (e.clientY - rect.top) / rect.height;
+            onCapturedInput({ kind: 'move', x, y });
+          }}
+          onWheel={e => {
+            e.preventDefault();
+            onCapturedInput({ kind: 'scroll', dx: e.deltaX, dy: e.deltaY });
+          }}
+          onKeyDown={e => {
+            e.preventDefault();
+            onCapturedInput({ kind: 'key', key: e.key, down: true });
+          }}
+          onKeyUp={e => {
+            e.preventDefault();
+            onCapturedInput({ kind: 'key', key: e.key, down: false });
+          }}
+          onContextMenu={e => e.preventDefault()}
+          style={{ position: 'absolute', inset: 0, cursor: 'crosshair', outline: 'none' }}
+        />
+      )}
       {!tile.camOn && (
         <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{
@@ -927,6 +1343,14 @@ function WhiteboardIcon() {
     </svg>
   );
 }
+function BreakoutIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2" y="3" width="9" height="7" rx="1.5" /><rect x="13" y="3" width="9" height="7" rx="1.5" />
+      <rect x="2" y="14" width="9" height="7" rx="1.5" /><rect x="13" y="14" width="9" height="7" rx="1.5" />
+    </svg>
+  );
+}
 function RecordIcon({ active }: { active: boolean }) {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
@@ -939,6 +1363,15 @@ function ChatIcon() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+    </svg>
+  );
+}
+function RemoteControlIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2" y="4" width="20" height="14" rx="2" />
+      <path d="M8 21h8M12 18v3" />
+      <path d="M9 10l2 2-2 2M14 14h1" />
     </svg>
   );
 }

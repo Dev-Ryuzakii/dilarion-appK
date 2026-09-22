@@ -12,6 +12,10 @@ import android.os.Build
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.dilarion.app.data.api.ApiService
+import com.dilarion.app.data.model.CopilotComposeRequest
+import com.dilarion.app.data.model.CopilotDocumentQARequest
+import com.dilarion.app.data.model.CopilotSummarizeRequest
+import com.dilarion.app.data.model.CopilotTranslateRequest
 import com.dilarion.app.data.model.GroupMember
 import com.dilarion.app.data.model.MediaItem
 import com.dilarion.app.data.model.Message
@@ -40,6 +44,8 @@ import javax.inject.Inject
 import kotlin.math.sqrt
 
 data class VoiceWaveform(val bars: List<Float>, val durationMs: Int)
+
+data class CopilotResultUi(val title: String, val loading: Boolean, val error: String?, val content: String?)
 
 enum class PendingUploadKind { IMAGE, DOCUMENT, VOICE }
 
@@ -109,6 +115,20 @@ data class ChatUiState(
     val forwardTarget: Message? = null,
     val forwardError: String? = null,
     val starredIds: Set<Int> = emptySet(),
+    val copilotResult: CopilotResultUi? = null,
+    val replySuggestions: List<String>? = null,
+    val suggestLoading: Boolean = false,
+    val showMembersSheet: Boolean = false,
+    val groupAdminBusy: Boolean = false,
+    val groupAdminError: String? = null,
+    // Chat settings (archive/mute/lock/delete-for-me) for THIS thread specifically.
+    val chatSettings: com.dilarion.app.data.model.ChatSettingsItem? = null,
+    val showChatMenu: Boolean = false,
+    val showContactInfo: Boolean = false,
+    val showMediaPicker: Boolean = false,
+    val gifs: List<com.dilarion.app.data.model.GifResult> = emptyList(),
+    val gifsLoading: Boolean = false,
+    val gifsError: String? = null,
 )
 
 @HiltViewModel
@@ -142,6 +162,7 @@ class ChatViewModel @Inject constructor(
             loadStarred()
             if (gId == null) loadMedia()
             else loadGroupMembers(gId)
+            loadChatSettings()
             observeWebSocket()
         }
     }
@@ -153,6 +174,115 @@ class ChatViewModel @Inject constructor(
                 val members = apiService.getGroupMembers("Bearer $token", gId).body() ?: emptyList()
                 _uiState.value = _uiState.value.copy(groupMembers = members)
             }
+        }
+    }
+
+    fun toggleMembersSheet(show: Boolean) {
+        _uiState.value = _uiState.value.copy(showMembersSheet = show, groupAdminError = null)
+    }
+
+    fun promoteMember(username: String) {
+        val gId = groupId ?: return
+        viewModelScope.launch {
+            val token = sessionManager.sessionToken.first() ?: return@launch
+            _uiState.value = _uiState.value.copy(groupAdminBusy = true, groupAdminError = null)
+            runCatching { apiService.promoteGroupMember("Bearer $token", gId, username) }
+                .onSuccess { response ->
+                    if (response.isSuccessful) loadGroupMembers(gId)
+                    else _uiState.value = _uiState.value.copy(groupAdminError = "Failed to promote $username")
+                }
+                .onFailure { e -> _uiState.value = _uiState.value.copy(groupAdminError = e.message ?: "Network error") }
+            _uiState.value = _uiState.value.copy(groupAdminBusy = false)
+        }
+    }
+
+    fun demoteMember(username: String) {
+        val gId = groupId ?: return
+        viewModelScope.launch {
+            val token = sessionManager.sessionToken.first() ?: return@launch
+            _uiState.value = _uiState.value.copy(groupAdminBusy = true, groupAdminError = null)
+            runCatching { apiService.demoteGroupMember("Bearer $token", gId, username) }
+                .onSuccess { response ->
+                    if (response.isSuccessful) loadGroupMembers(gId)
+                    else _uiState.value = _uiState.value.copy(groupAdminError = "Failed to demote $username — a group needs at least one admin")
+                }
+                .onFailure { e -> _uiState.value = _uiState.value.copy(groupAdminError = e.message ?: "Network error") }
+            _uiState.value = _uiState.value.copy(groupAdminBusy = false)
+        }
+    }
+
+    // ── Chat settings: archive / mute / lock / delete-for-me ────────────────────
+    // Purely local to this user — never visible to or affecting the other party.
+
+    fun toggleChatMenu(show: Boolean) {
+        _uiState.value = _uiState.value.copy(showChatMenu = show)
+    }
+
+    fun toggleContactInfo(show: Boolean) {
+        _uiState.value = _uiState.value.copy(showContactInfo = show)
+    }
+
+    fun toggleMediaPicker(show: Boolean) {
+        _uiState.value = _uiState.value.copy(showMediaPicker = show)
+        if (show && _uiState.value.gifs.isEmpty()) searchGifs("")
+    }
+
+    fun searchGifs(query: String) {
+        viewModelScope.launch {
+            val token = sessionManager.sessionToken.first() ?: return@launch
+            _uiState.value = _uiState.value.copy(gifsLoading = true, gifsError = null)
+            runCatching {
+                val resp = if (query.isBlank()) apiService.getTrendingGifs("Bearer $token")
+                else apiService.searchGifs("Bearer $token", query)
+                if (resp.isSuccessful) resp.body()?.results ?: emptyList() else throw Exception("GIF search failed")
+            }.onSuccess { results ->
+                _uiState.value = _uiState.value.copy(gifsLoading = false, gifs = results)
+            }.onFailure { e ->
+                _uiState.value = _uiState.value.copy(gifsLoading = false, gifsError = e.message ?: "GIF search unavailable")
+            }
+        }
+    }
+
+    private fun loadChatSettings() {
+        viewModelScope.launch {
+            val token = sessionManager.sessionToken.first() ?: return@launch
+            runCatching { apiService.getChatSettings("Bearer $token").body() }
+                .getOrNull()?.settings?.let { all ->
+                    val mine = if (groupId != null) all.find { it.groupId == groupId }
+                    else all.find { it.peerUsername == peerUsername }
+                    _uiState.value = _uiState.value.copy(chatSettings = mine)
+                }
+        }
+    }
+
+    private fun updateChatSettings(isArchived: Boolean? = null, isMuted: Boolean? = null, isLocked: Boolean? = null) {
+        viewModelScope.launch {
+            val token = sessionManager.sessionToken.first() ?: return@launch
+            val req = com.dilarion.app.data.model.ChatSettingsUpdateRequest(
+                peerUsername = if (groupId == null) peerUsername else null,
+                groupId = groupId,
+                isArchived = isArchived,
+                isMuted = isMuted,
+                isLocked = isLocked,
+            )
+            runCatching { apiService.updateChatSettings("Bearer $token", req) }
+                .onSuccess { response -> response.body()?.let { _uiState.value = _uiState.value.copy(chatSettings = it) } }
+        }
+    }
+
+    fun toggleArchive() = updateChatSettings(isArchived = !(_uiState.value.chatSettings?.isArchived ?: false))
+    fun toggleMute() = updateChatSettings(isMuted = !(_uiState.value.chatSettings?.isMuted ?: false))
+    fun toggleLock() = updateChatSettings(isLocked = !(_uiState.value.chatSettings?.isLocked ?: false))
+
+    fun deleteChatForMe(onDone: () -> Unit) {
+        viewModelScope.launch {
+            val token = sessionManager.sessionToken.first() ?: return@launch
+            val req = com.dilarion.app.data.model.ChatDeleteRequestBody(
+                peerUsername = if (groupId == null) peerUsername else null,
+                groupId = groupId,
+            )
+            runCatching { apiService.deleteChatForMe("Bearer $token", req) }
+                .onSuccess { onDone() }
         }
     }
 
@@ -460,6 +590,44 @@ class ChatViewModel @Inject constructor(
         }
     }
 
+    /** GIF/sticker share the exact same E2EE + decoy pipeline as text — only
+     * the carried string (a GIF URL, or "sticker:<id>") and content_type differ. */
+    fun sendSpecial(content: String, contentType: String) {
+        viewModelScope.launch {
+            val token = sessionManager.sessionToken.first() ?: return@launch
+            val bearer = "Bearer $token"
+            val me = _uiState.value.currentUsername
+            _uiState.value = _uiState.value.copy(isSending = true)
+            runCatching {
+                val decoy = listOf("hey are you free tonight", "what are you up to later", "just wanted to check in with you", "hope everything is going well with you").random()
+                val recipients: Set<String> = if (groupId != null) {
+                    (_uiState.value.groupMembers.map { it.username } + me).toSet()
+                } else {
+                    setOf(peerUsername, me)
+                }
+                val deviceKeys = mutableMapOf<String, String>()
+                for (u in recipients) {
+                    apiService.getUserDevices(bearer, u).body()?.devices?.forEach { d ->
+                        if (d.publicKey.isNotBlank()) deviceKeys[d.deviceUuid] = d.publicKey
+                    }
+                }
+                if (deviceKeys.isEmpty()) throw Exception("No linked devices with encryption keys")
+
+                val (ciphertext, encKeysMap, iv) = cryptoManager.encryptGroupMessage(content, deviceKeys)
+                val encryptedKeyJson = com.google.gson.Gson().toJson(encKeysMap)
+                if (groupId != null) {
+                    apiService.sendGroupMessage(bearer, SendGroupMessageRequest(groupId!!, ciphertext, null, encryptedKeyJson, iv, decoy, contentType = contentType))
+                } else {
+                    apiService.sendDm(bearer, SendDmRequest(peerUsername, ciphertext, encryptedKeyJson, iv, decoy, contentType = contentType))
+                }
+                loadMessages()
+            }.onFailure {
+                _uiState.value = _uiState.value.copy(error = it.message)
+            }
+            _uiState.value = _uiState.value.copy(isSending = false)
+        }
+    }
+
     /** Picked file's real name via the content resolver; ContentResolver's URI segment is not reliable. */
     private fun queryDisplayName(context: Context, uri: Uri): String? {
         return context.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)
@@ -751,13 +919,27 @@ class ChatViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Decoy-first, matching openDocument()'s pattern: locked shows a stand-in
+     * still photo (fetched from the server's decoy-image endpoint, same one
+     * whether the real attachment is a photo or a video — no fake-video
+     * exists), unlocked fetches the real file (one-time view, server deletes
+     * it after this read). Each state gets its own cache key so an earlier
+     * decoy view is never mistaken for the real file once unlocked.
+     */
     fun downloadImageForDisplay(mediaId: String, context: Context) {
-        val cacheKey = "img_$mediaId"
+        val useReal = _uiState.value.unlockedIds.contains("media_$mediaId")
+        val cacheKey = "${if (useReal) "imgreal" else "imgdecoy"}_$mediaId"
         if (_uiState.value.localFilePaths.containsKey(cacheKey)) return
         viewModelScope.launch {
             val token = sessionManager.sessionToken.first() ?: return@launch
             runCatching {
-                val bytes = apiService.downloadMedia("Bearer $token", mediaId).body()?.bytes() ?: return@launch
+                val resp = if (useReal) {
+                    apiService.downloadMedia("Bearer $token", mediaId)
+                } else {
+                    apiService.downloadDecoyImage("Bearer $token", mediaId)
+                }
+                val bytes = resp.body()?.bytes() ?: return@launch
                 val file = File(context.cacheDir, "$cacheKey.jpg")
                 file.writeBytes(bytes)
                 _uiState.value = _uiState.value.copy(
@@ -971,6 +1153,159 @@ class ChatViewModel @Inject constructor(
                         if (groupId == null) loadMedia()
                     }
                 }
+            }
+        }
+    }
+
+    // ── Copilot ──────────────────────────────────────────────────────────────────
+    // Summarize/suggest-reply need bulk plaintext, which decryptMessageText will
+    // hand over on just the device key — no master token required. Reusing the
+    // same per-item unlock() gate (targetKey "copilot_summarize"/"copilot_suggest")
+    // re-adds the ceremony so a device without the token can't get a plaintext
+    // summary that bypasses deniability, matching desktop's MasterTokenPromptModal.
+
+    private fun textContentType(m: Message) =
+        m.contentType != "private_tagged"
+
+    private fun isEncryptedMessage(m: Message) =
+        m.contentType == "encrypted" || m.encryptedKey != null || m.iv != null
+
+    fun requireMasterTokenSet(): Boolean {
+        if (_uiState.value.savedMasterToken != null) return true
+        _uiState.value = _uiState.value.copy(error = "Set up a master token first to use this.")
+        return false
+    }
+
+    fun clearCopilotResult() { _uiState.value = _uiState.value.copy(copilotResult = null) }
+    fun clearReplySuggestions() { _uiState.value = _uiState.value.copy(replySuggestions = null) }
+
+    fun summarizeThread() {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(copilotResult = CopilotResultUi("Thread summary", true, null, null))
+            val token = sessionManager.sessionToken.first() ?: return@launch
+            val me = _uiState.value.currentUsername
+            val recent = _uiState.value.messages.filter { !it.isDeleted && textContentType(it) }.takeLast(40)
+            val lines = mutableListOf<String>()
+            for (m in recent) {
+                val who = if (m.sender == me) "You" else (m.sender ?: "?")
+                if (isEncryptedMessage(m)) {
+                    val text = decryptMessageText(m) ?: continue
+                    lines.add("$who: $text")
+                } else if (!m.content.isNullOrBlank()) {
+                    lines.add("$who: ${m.content}")
+                }
+            }
+            if (lines.isEmpty()) {
+                _uiState.value = _uiState.value.copy(copilotResult = CopilotResultUi("Thread summary", false, "Nothing to summarize yet.", null))
+                return@launch
+            }
+            runCatching { apiService.copilotSummarize("Bearer $token", CopilotSummarizeRequest(lines.joinToString("\n"))) }
+                .onSuccess { resp ->
+                    val summary = resp.body()?.summary
+                    _uiState.value = _uiState.value.copy(
+                        copilotResult = CopilotResultUi("Thread summary", false, if (summary == null) "Copilot couldn't summarize that" else null, summary),
+                    )
+                }
+                .onFailure {
+                    _uiState.value = _uiState.value.copy(copilotResult = CopilotResultUi("Thread summary", false, it.message ?: "Failed to summarize", null))
+                }
+        }
+    }
+
+    fun suggestReply() {
+        val me = _uiState.value.currentUsername
+        val lastFromOther = _uiState.value.messages.lastOrNull { it.sender != me && !it.isDeleted && textContentType(it) } ?: return
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(suggestLoading = true, replySuggestions = null)
+            val token = sessionManager.sessionToken.first() ?: return@launch
+            val contextText = if (isEncryptedMessage(lastFromOther)) {
+                decryptMessageText(lastFromOther)
+            } else {
+                lastFromOther.content
+            }
+            if (contextText == null) {
+                _uiState.value = _uiState.value.copy(suggestLoading = false, error = "Could not decrypt that message to suggest a reply")
+                return@launch
+            }
+            runCatching { apiService.copilotCompose("Bearer $token", CopilotComposeRequest(contextText)) }
+                .onSuccess { resp ->
+                    _uiState.value = _uiState.value.copy(suggestLoading = false, replySuggestions = resp.body()?.suggestions)
+                }
+                .onFailure {
+                    _uiState.value = _uiState.value.copy(suggestLoading = false, error = it.message ?: "Copilot could not draft a reply")
+                }
+        }
+    }
+
+    /** Translate needs no fresh master-token gate — it only ever operates on text
+     * already revealed in the UI (decryptedTexts / plain content), same as desktop. */
+    fun translateMessage(text: String, targetLanguage: String) {
+        viewModelScope.launch {
+            val title = "Translation ($targetLanguage)"
+            _uiState.value = _uiState.value.copy(copilotResult = CopilotResultUi(title, true, null, null))
+            val token = sessionManager.sessionToken.first() ?: return@launch
+            runCatching { apiService.copilotTranslate("Bearer $token", CopilotTranslateRequest(text, targetLanguage)) }
+                .onSuccess { resp ->
+                    val translated = resp.body()?.translated
+                    _uiState.value = _uiState.value.copy(
+                        copilotResult = CopilotResultUi(title, false, if (translated == null) "Copilot couldn't translate that" else null, translated),
+                    )
+                }
+                .onFailure {
+                    _uiState.value = _uiState.value.copy(copilotResult = CopilotResultUi(title, false, it.message ?: "Failed to translate", null))
+                }
+        }
+    }
+
+    /** Only reachable once the document's already been unlocked (master-token
+     * revealed) to view — no separate gate needed, matching desktop. */
+    fun askDocumentQuestion(documentBytes: ByteArray, question: String) {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(copilotResult = CopilotResultUi("Document Q&A", true, null, null))
+            val token = sessionManager.sessionToken.first() ?: return@launch
+            val documentText = runCatching { String(documentBytes, Charsets.UTF_8) }.getOrNull()
+            if (documentText == null) {
+                _uiState.value = _uiState.value.copy(copilotResult = CopilotResultUi("Document Q&A", false, "Couldn't read this document as text", null))
+                return@launch
+            }
+            runCatching { apiService.copilotDocumentQA("Bearer $token", CopilotDocumentQARequest(documentText, question)) }
+                .onSuccess { resp ->
+                    val answer = resp.body()?.answer
+                    _uiState.value = _uiState.value.copy(
+                        copilotResult = CopilotResultUi("Document Q&A", false, if (answer == null) "Copilot couldn't answer that" else null, answer),
+                    )
+                }
+                .onFailure {
+                    _uiState.value = _uiState.value.copy(copilotResult = CopilotResultUi("Document Q&A", false, it.message ?: "Failed to answer", null))
+                }
+        }
+    }
+
+    /** Transcribes whichever audio (decoy or real) is currently cached for this
+     * voice note — same "operates on whatever's loaded" model as desktop. */
+    fun transcribeVoiceNote(mediaId: String, useRealAudio: Boolean) {
+        val cacheKey = "${if (useRealAudio) "real" else "fake"}_$mediaId"
+        val path = _uiState.value.localFilePaths[cacheKey]
+        if (path == null) {
+            _uiState.value = _uiState.value.copy(copilotResult = CopilotResultUi("Transcript", false, "Play the voice note first", null))
+            return
+        }
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(copilotResult = CopilotResultUi("Transcript", true, null, null))
+            val token = sessionManager.sessionToken.first() ?: return@launch
+            runCatching {
+                val file = File(path)
+                val body = file.asRequestBody("audio/mp4".toMediaTypeOrNull())
+                val part = MultipartBody.Part.createFormData("file", file.name, body)
+                apiService.copilotTranscribe("Bearer $token", part)
+            }.onSuccess { resp ->
+                val text = resp.body()?.transcript
+                _uiState.value = _uiState.value.copy(
+                    copilotResult = if (text == null) CopilotResultUi("Transcript", false, "Failed to transcribe", null)
+                    else CopilotResultUi("Transcript", false, null, text.ifBlank { "No speech detected." }),
+                )
+            }.onFailure {
+                _uiState.value = _uiState.value.copy(copilotResult = CopilotResultUi("Transcript", false, it.message ?: "Failed to transcribe", null))
             }
         }
     }

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { SparkleIcon } from './Icons';
 
 // Real line icons for message actions — WhatsApp's own menu uses icons, not
 // emoji, for everything except the reaction choices themselves (those stay
@@ -132,6 +133,7 @@ export function MessageMenuTrigger({
   onStarToggle,
   onEdit,
   onDelete,
+  onTranslate,
   isPinned,
   isStarred,
 }: {
@@ -145,6 +147,7 @@ export function MessageMenuTrigger({
   onStarToggle: () => void;
   onEdit?: () => void;
   onDelete?: () => void;
+  onTranslate?: () => void;
   isPinned: boolean;
   isStarred: boolean;
 }) {
@@ -158,6 +161,7 @@ export function MessageMenuTrigger({
     { key: 'pin', icon: <PinIcon filled={isPinned} />, label: isPinned ? 'Unpin' : 'Pin', onClick: onPinToggle },
     { key: 'forward', icon: <ForwardIcon />, label: 'Forward', onClick: onForward },
     { key: 'copy', icon: <CopyIcon />, label: 'Copy', onClick: onCopy },
+    ...(onTranslate ? [{ key: 'translate', icon: <SparkleIcon size={16} />, label: 'Translate', onClick: onTranslate }] : []),
     { key: 'info', icon: <InfoIcon />, label: 'Info', onClick: onInfo },
     ...(isMine && onEdit ? [{ key: 'edit', icon: <EditIcon />, label: 'Edit', onClick: onEdit }] : []),
     ...(isMine && onDelete ? [{ key: 'delete', icon: <TrashIcon />, label: 'Delete', onClick: onDelete, danger: true }] : []),

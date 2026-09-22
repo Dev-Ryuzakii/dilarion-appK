@@ -19,6 +19,46 @@ data class UpdatePublicKeyRequest(
     @SerializedName("public_key") val publicKey: String,
 )
 
+// ─── Self-service signup / recovery code ───────────────────────────────────────
+// Open signup, no verification (deliberate for this deployment). Every
+// recovery_code in a response is shown to the account holder exactly once —
+// it is never retrievable again after that response.
+
+data class SignUpRequest(
+    val username: String,
+    @SerializedName("phone_number") val phoneNumber: String,
+    val token: String,
+)
+
+data class SignUpResponse(
+    val username: String,
+    @SerializedName("phone_number") val phoneNumber: String,
+    @SerializedName("recovery_code") val recoveryCode: String,
+)
+
+data class RecoveryCodeResetRequest(
+    val username: String,
+    @SerializedName("recovery_code") val recoveryCode: String,
+    @SerializedName("new_token") val newToken: String,
+)
+
+data class RecoveryCodeResetResponse(
+    val username: String,
+    @SerializedName("recovery_code") val recoveryCode: String,
+)
+
+data class RecoveryCodeRegenerateResponse(
+    @SerializedName("recovery_code") val recoveryCode: String,
+)
+
+data class UsernameUpdateRequest(
+    @SerializedName("new_username") val newUsername: String,
+)
+
+data class UsernameUpdateResponse(
+    val username: String,
+)
+
 // ─── Multi-device linking ──────────────────────────────────────────────────────
 
 data class DeviceRegisterRequest(
@@ -108,6 +148,31 @@ data class InboxResponse(
     val count: Int = 0,
 )
 
+// ─── Copilot ───────────────────────────────────────────────────────────────
+// Opt-in, client-triggered, ephemeral: the backend only ever sees exactly
+// what's handed to it for one request (already-decrypted text the client
+// chose to share) — never pulled from history automatically, nothing stored.
+
+data class CopilotSummarizeRequest(val text: String)
+data class CopilotSummarizeResponse(val summary: String?)
+
+data class CopilotComposeRequest(val context: String, val instruction: String? = null)
+data class CopilotComposeResponse(val suggestions: List<String>?)
+
+data class CopilotDocumentQARequest(
+    @SerializedName("document_text") val documentText: String,
+    val question: String,
+)
+data class CopilotDocumentQAResponse(val answer: String?)
+
+data class CopilotTranslateRequest(
+    val text: String,
+    @SerializedName("target_language") val targetLanguage: String,
+)
+data class CopilotTranslateResponse(val translated: String?)
+
+data class CopilotTranscribeResponse(val transcript: String?)
+
 data class GroupMessagesResponse(
     val messages: List<Message>,
     val count: Int = 0,
@@ -123,6 +188,9 @@ data class SendDmRequest(
     @SerializedName("reply_to_message_id") val replyToMessageId: Int? = null,
     @SerializedName("forwarded_from_message_id") val forwardedFromMessageId: Int? = null,
     val mentions: List<String>? = null,
+    // Omit for normal text — "gif"/"sticker" still go through the same
+    // encryption/decoy pipeline, just render differently client-side.
+    @SerializedName("content_type") val contentType: String? = null,
 )
 
 // Send group: POST /messages/group/send → {group_id, message, addressed_to_username?}
@@ -136,7 +204,84 @@ data class SendGroupMessageRequest(
     @SerializedName("reply_to_message_id") val replyToMessageId: Int? = null,
     @SerializedName("forwarded_from_message_id") val forwardedFromMessageId: Int? = null,
     val mentions: List<String>? = null,
+    @SerializedName("content_type") val contentType: String? = null,
 )
+
+// ─── GIF (GIPHY proxy) ──────────────────────────────────────────────────────
+
+data class GifResult(
+    val id: String,
+    val title: String? = null,
+    val url: String? = null,
+    @SerializedName("preview_url") val previewUrl: String? = null,
+    val width: Int? = null,
+    val height: Int? = null,
+)
+
+data class GifSearchResponse(
+    val results: List<GifResult> = emptyList(),
+)
+
+// ─── Tasks ────────────────────────────────────────────────────────────────────
+
+data class TaskAssigneeItem(
+    @SerializedName("user_id") val userId: Int,
+    val username: String,
+    val status: String,
+    @SerializedName("assigned_at") val assignedAt: String? = null,
+    @SerializedName("completed_at") val completedAt: String? = null,
+)
+
+data class TaskBreakoutGroupItem(
+    @SerializedName("group_id") val groupId: Int,
+    val name: String? = null,
+    @SerializedName("member_usernames") val memberUsernames: List<String> = emptyList(),
+    @SerializedName("report_text") val reportText: String? = null,
+    @SerializedName("report_submitted_by") val reportSubmittedBy: String? = null,
+    @SerializedName("report_submitted_at") val reportSubmittedAt: String? = null,
+)
+
+data class TaskItem(
+    @SerializedName("task_id") val taskId: Int,
+    val title: String,
+    val description: String? = null,
+    @SerializedName("due_at") val dueAt: String? = null,
+    val status: String,
+    @SerializedName("is_breakout") val isBreakout: Boolean = false,
+    @SerializedName("group_id") val groupId: Int? = null,
+    @SerializedName("created_by") val createdBy: String? = null,
+    @SerializedName("created_at") val createdAt: String? = null,
+    val assignees: List<TaskAssigneeItem> = emptyList(),
+    @SerializedName("breakout_groups") val breakoutGroups: List<TaskBreakoutGroupItem> = emptyList(),
+    @SerializedName("compiled_report") val compiledReport: String? = null,
+    @SerializedName("compiled_report_at") val compiledReportAt: String? = null,
+    val recurrence: String? = null,
+)
+
+data class TaskListResponse(
+    val tasks: List<TaskItem> = emptyList(),
+    val count: Int = 0,
+)
+
+data class TaskBreakoutGroupCreate(
+    val name: String,
+    val usernames: List<String>,
+)
+
+data class TaskCreateRequest(
+    val title: String,
+    val description: String? = null,
+    @SerializedName("due_at") val dueAt: String? = null,
+    @SerializedName("group_id") val groupId: Int? = null,
+    @SerializedName("assignee_usernames") val assigneeUsernames: List<String> = emptyList(),
+    @SerializedName("is_breakout") val isBreakout: Boolean = false,
+    @SerializedName("breakout_groups") val breakoutGroups: List<TaskBreakoutGroupCreate>? = null,
+    val recurrence: String? = null,
+)
+
+data class TaskStatusUpdateRequest(val status: String)
+
+data class TaskGroupReportSubmitRequest(@SerializedName("report_text") val reportText: String)
 
 data class ConferenceMessagesResponse(
     val messages: List<Message>,
@@ -188,6 +333,48 @@ data class UserInfo(
     val username: String? = null,
     val registered: String? = null,
     @SerializedName("last_login") val lastLogin: String? = null,
+    @SerializedName("is_active") val isActive: Boolean = true,
+    @SerializedName("availability_status") val availabilityStatus: String? = null,
+    @SerializedName("status_text") val statusText: String? = null,
+    @SerializedName("has_profile_picture") val hasProfilePicture: Boolean = false,
+)
+
+// ─── Profile picture / availability ─────────────────────────────────────────
+
+data class AvailabilityUpdateRequest(
+    @SerializedName("availability_status") val availabilityStatus: String,
+    @SerializedName("status_text") val statusText: String? = null,
+)
+
+// ─── Per-chat settings: archive / mute / lock / delete-for-me ───────────────
+// Purely local to the caller — never visible to or affecting the other party.
+
+data class ChatSettingsItem(
+    @SerializedName("peer_username") val peerUsername: String? = null,
+    @SerializedName("group_id") val groupId: Int? = null,
+    @SerializedName("is_archived") val isArchived: Boolean = false,
+    @SerializedName("is_muted") val isMuted: Boolean = false,
+    @SerializedName("muted_until") val mutedUntil: String? = null,
+    @SerializedName("is_locked") val isLocked: Boolean = false,
+    @SerializedName("deleted_before") val deletedBefore: String? = null,
+)
+
+data class ChatSettingsListResponse(
+    val settings: List<ChatSettingsItem> = emptyList(),
+)
+
+data class ChatSettingsUpdateRequest(
+    @SerializedName("peer_username") val peerUsername: String? = null,
+    @SerializedName("group_id") val groupId: Int? = null,
+    @SerializedName("is_archived") val isArchived: Boolean? = null,
+    @SerializedName("is_muted") val isMuted: Boolean? = null,
+    @SerializedName("muted_until") val mutedUntil: String? = null,
+    @SerializedName("is_locked") val isLocked: Boolean? = null,
+)
+
+data class ChatDeleteRequestBody(
+    @SerializedName("peer_username") val peerUsername: String? = null,
+    @SerializedName("group_id") val groupId: Int? = null,
 )
 
 data class UsersResponse(
@@ -434,6 +621,25 @@ data class LiveKitTokenResponse(
     val url: String,
     val token: String,
     val room: String,
+)
+
+// ─── Breakout rooms ────────────────────────────────────────────────────────────
+// A breakout room is just another ConferenceSession (its own real LiveKit
+// room), tagged back to the parent meeting via parent_conference_id.
+
+data class BreakoutGroupInput(val name: String, val usernames: List<String>)
+
+data class BreakoutStartRequest(val groups: List<BreakoutGroupInput>)
+
+data class BreakoutRoomItem(
+    @SerializedName("breakout_conference_id") val breakoutConferenceId: Int,
+    val name: String? = null,
+    val usernames: List<String> = emptyList(),
+)
+
+data class BreakoutRoomsResponse(
+    val rooms: List<BreakoutRoomItem> = emptyList(),
+    val count: Int = 0,
 )
 
 // ─── Call History ──────────────────────────────────────────────────────────────

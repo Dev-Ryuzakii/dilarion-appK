@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "call",
+  "description": "Capability for the standalone call window — its own OS window (like WhatsApp Desktop), not a modal inside the main window",
+  "windows": ["call"],
+  "permissions": [
+    "core:default",
+    "core:event:default",
+    "http:default",
+    "notification:default"
+  ]
+}

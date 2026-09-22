@@ -1,7 +1,24 @@
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { createPortal } from 'react-dom';
-import { downloadMedia, downloadDecoyFile, downloadDecoyVoice, confirmMasterToken } from '../services/api';
-import { CameraIcon, LockIcon, MicIcon as MicIconSvg, PaperclipIcon as PaperclipIconSvg, SpinnerIcon, CloseIcon } from './Icons';
+import { downloadMedia, downloadDecoyFile, downloadDecoyVoice, downloadDecoyImage, confirmMasterToken, documentQACopilot, transcribeCopilot } from '../services/api';
+import { CameraIcon, LockIcon, MicIcon as MicIconSvg, PaperclipIcon as PaperclipIconSvg, SpinnerIcon, CloseIcon, SparkleIcon } from './Icons';
+import CopilotResultModal from './CopilotResultModal';
+
+/** Best-effort check that bytes are readable text, not binary — Document Q&A
+ * only makes sense for text content, and there's no server-side extraction
+ * for PDFs/images here (that would mean sending the real bytes off-device
+ * for OCR, a bigger privacy tradeoff than this pass takes on). */
+function looksLikeText(bytes: Uint8Array): boolean {
+  if (bytes.length === 0) return false;
+  const sample = bytes.subarray(0, Math.min(bytes.length, 8000));
+  let suspicious = 0;
+  for (let i = 0; i < sample.length; i++) {
+    const c = sample[i];
+    if (c === 0) return false;
+    if (c < 9 || (c > 13 && c < 32)) suspicious++;
+  }
+  return suspicious / sample.length < 0.01;
+}
 
 // Best-effort classification from the server's content_type, used only for the
 // pre-download placeholder icon. The real decision is made by sniffing bytes.
@@ -213,8 +230,13 @@ function VoiceBubble({ token, mediaId, masterToken, onMasterTokenSaved, onRemove
   const [error, setError] = useState<string | null>(null);
   const [tokenInputVisible, setTokenInputVisible] = useState(false);
   const [tokenValue, setTokenValue] = useState('');
+  const [transcribing, setTranscribing] = useState(false);
+  const [transcript, setTranscript] = useState<{ loading: boolean; error: string | null; content: string | null } | null>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const waveformBoxRef = useRef<HTMLDivElement>(null);
+  // Whichever audio is currently loaded (decoy or, post-reveal, real) — kept
+  // around so Transcribe can build a Blob without re-fetching.
+  const audioBufRef = useRef<{ buf: Uint8Array; mime: string } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -229,6 +251,7 @@ function VoiceBubble({ token, mediaId, masterToken, onMasterTokenSaved, onRemove
           extractWaveform(arrBuf),
         ]);
         if (cancelled) return;
+        audioBufRef.current = { buf, mime: mime.startsWith('audio/') ? mime : 'audio/mp4' };
         setVoiceUrl(url);
         setWaveform(wf.bars);
         setDurationMs(wf.durationMs);
@@ -296,6 +319,7 @@ function VoiceBubble({ token, mediaId, masterToken, onMasterTokenSaved, onRemove
         Promise.resolve(toDataUrl(buf, mime.startsWith('audio/') ? mime : 'audio/mp4')),
         extractWaveform(arrBuf),
       ]);
+      audioBufRef.current = { buf, mime: mime.startsWith('audio/') ? mime : 'audio/mp4' };
       setVoiceUrl(url);
       setWaveform(wf.bars);
       setDurationMs(wf.durationMs);
@@ -323,6 +347,22 @@ function VoiceBubble({ token, mediaId, masterToken, onMasterTokenSaved, onRemove
     const trimmed = tokenValue.trim();
     if (!trimmed) return;
     await reveal(trimmed);
+  }
+
+  async function handleTranscribe() {
+    const meta = audioBufRef.current;
+    if (!meta) return;
+    setTranscribing(true);
+    setTranscript({ loading: true, error: null, content: null });
+    try {
+      const blob = new Blob([meta.buf], { type: meta.mime });
+      const text = await transcribeCopilot(token, blob, `voice.${meta.mime.split('/')[1] || 'm4a'}`);
+      setTranscript({ loading: false, error: null, content: text || 'No speech detected.' });
+    } catch (err: any) {
+      setTranscript({ loading: false, error: err?.message || 'Failed to transcribe', content: null });
+    } finally {
+      setTranscribing(false);
+    }
   }
 
   if (stage === 'loading') {
@@ -441,6 +481,15 @@ function VoiceBubble({ token, mediaId, masterToken, onMasterTokenSaved, onRemove
             {revealing ? <SpinnerIcon size={14} /> : <LockIcon size={14} color={isMine ? 'rgba(255,255,255,0.8)' : '#9ca3af'} />}
           </button>
         )}
+
+        <button
+          onClick={handleTranscribe}
+          disabled={transcribing}
+          title="Transcribe"
+          style={{ background: 'transparent', border: 'none', cursor: transcribing ? 'wait' : 'pointer', padding: 4, display: 'flex', flexShrink: 0 }}
+        >
+          {transcribing ? <SpinnerIcon size={14} /> : <SparkleIcon size={14} color={isMine ? 'rgba(255,255,255,0.8)' : 'var(--accent)'} />}
+        </button>
       </div>
       {tokenInputVisible && !masterToken && !usingReal && (
         <div style={{ display: 'flex', gap: 6 }}>
@@ -462,6 +511,15 @@ function VoiceBubble({ token, mediaId, masterToken, onMasterTokenSaved, onRemove
         </div>
       )}
       {error && <span style={{ fontSize: '0.72rem', color: '#ef4444' }}>{error}</span>}
+      {transcript && (
+        <CopilotResultModal
+          title="Transcript"
+          loading={transcript.loading}
+          error={transcript.error}
+          content={transcript.content}
+          onClose={() => setTranscript(null)}
+        />
+      )}
     </div>
   );
 }
@@ -492,26 +550,54 @@ export default function MediaBubble({ token, mediaId, contentType, masterToken, 
       />
     );
   }
-  return <VisualMediaBubble token={token} mediaId={mediaId} contentType={contentType} onRemove={onRemove} />;
+  return (
+    <VisualMediaBubble
+      token={token}
+      mediaId={mediaId}
+      contentType={contentType}
+      masterToken={masterToken ?? null}
+      onMasterTokenSaved={onMasterTokenSaved ?? (() => {})}
+      onRemove={onRemove}
+    />
+  );
 }
+
+type VisStage = 'idle' | 'loading' | 'decoy' | 'revealing' | 'revealed';
 
 // Split out from the default export above purely so MediaBubble itself never
 // calls a hook before its early voice-routing return — this is the actual
 // hook-owning component for the image/video/fallback-file path.
-function VisualMediaBubble({ token, mediaId, contentType, onRemove }: { token: string; mediaId: string; contentType: string; onRemove?: () => void }) {
-  const [loaded, setLoaded] = useState(false);
+//
+// Decoy-first, mirroring DocumentBubble/VoiceBubble: a single tap loads and
+// shows a stand-in still photo (the same one anyone would see, no token
+// needed) — the pre-tap and decoy states must look identical to a plain
+// attachment. Only a double-tap + master token swaps in the real file. The
+// server only generates a still, never a fake video, so the decoy always
+// renders as an image even for a video attachment; the reveal produces the
+// real playable video.
+function VisualMediaBubble({
+  token, mediaId, contentType, masterToken, onMasterTokenSaved, onRemove,
+}: {
+  token: string; mediaId: string; contentType: string;
+  masterToken: string | null; onMasterTokenSaved: (t: string) => void; onRemove?: () => void;
+}) {
+  const [stage, setStage] = useState<VisStage>('idle');
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
-  const [kind, setKind] = useState<MediaKind>('file');
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [lightboxKind, setLightboxKind] = useState<MediaKind>('image');
+  const [error, setError] = useState<string | null>(null);
+  const [tokenInputVisible, setTokenInputVisible] = useState(false);
+  const [tokenValue, setTokenValue] = useState('');
   const [viewerOpen, setViewerOpen] = useState(false);
-  const [viewerMime, setViewerMime] = useState('application/octet-stream');
+  const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const removeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const viewable = kind === 'image' || kind === 'video';
+  const isVideoAttachment = isVideoCt(contentType);
 
   useEffect(() => {
-    return () => { if (removeTimerRef.current) clearTimeout(removeTimerRef.current); };
+    return () => {
+      if (removeTimerRef.current) clearTimeout(removeTimerRef.current);
+      if (clickTimerRef.current) clearTimeout(clickTimerRef.current);
+    };
   }, []);
 
   function scheduleRemoval() {
@@ -521,133 +607,175 @@ function VisualMediaBubble({ token, mediaId, contentType, onRemove }: { token: s
   }
 
   function closeViewer() {
+    const wasRevealed = stage === 'revealed';
     setViewerOpen(false);
-    scheduleRemoval();
+    // Decoy views are unlimited (nothing to burn); only a real reveal counts
+    // toward the one-time-view removal, and only once actually dismissed.
+    if (wasRevealed) scheduleRemoval();
   }
 
-  async function handleClick() {
-    if (loading) return;
-    if (loaded) {
-      if (viewable && objectUrl) setViewerOpen(true);
-      return;
-    }
-    setLoading(true);
+  async function loadDecoy() {
+    setStage('loading');
+    setError(null);
     try {
+      const blob = await downloadDecoyImage(token, mediaId);
+      const buf = new Uint8Array(await blob.arrayBuffer());
+      setObjectUrl(toDataUrl(buf, 'image/jpeg'));
+      setLightboxKind('image');
+      setStage('decoy');
+      setViewerOpen(true);
+    } catch {
+      setError('Failed to load');
+      setStage('idle');
+    }
+  }
+
+  async function reveal(mToken: string) {
+    setStage('revealing');
+    setError(null);
+    try {
+      const valid = masterToken === mToken ? true : await confirmMasterToken(token, mToken);
+      if (!valid) {
+        setError('Invalid master token');
+        setStage('decoy');
+        return;
+      }
+      onMasterTokenSaved(mToken);
       const blob = await downloadMedia(token, mediaId);
       const buf = new Uint8Array(await blob.arrayBuffer());
       const { kind: k, mime } = sniffMedia(buf);
-      setKind(k);
-      setViewerMime(mime);
-
-      // Data URL with the sniffed MIME — avoids both blob: protocol issues in the
-      // Tauri WebView and the server's unreliable content_type.
-      let b64 = '';
-      for (let i = 0; i < buf.length; i++) b64 += String.fromCharCode(buf[i]);
-      setObjectUrl(`data:${mime};base64,${btoa(b64)}`);
-      setLoaded(true);
-
-      if (k === 'image' || k === 'video') {
-        setViewerOpen(true);   // removal scheduled on close
-      } else {
-        scheduleRemoval();
-      }
+      setObjectUrl(toDataUrl(buf, mime));
+      setLightboxKind(k);
+      setStage('revealed');
+      setTokenInputVisible(false);
+      setTokenValue('');
+      setViewerOpen(true);
+      // Message removal happens on viewer close (closeViewer), matching
+      // DocumentBubble — closing here would unmount before anything paints.
     } catch (err: any) {
-      const status = err?.status;
-      if (status === 410 || status === 404) {
-        onRemove?.();
+      // 410/404: the real file is already gone (viewed elsewhere, or
+      // expired). The decoy is unaffected — fall back to it, not an error.
+      if (err?.status === 410 || err?.status === 404) {
+        setStage('decoy');
       } else {
-        setLoadError('Failed to load');
+        setError('Failed to reveal');
+        setStage('decoy');
       }
-    } finally {
-      setLoading(false);
     }
   }
 
-  if (loadError) {
+  function handleClick() {
+    // Delayed so a double-click's leading click doesn't race loadDecoy()
+    // against the reveal the trailing dblclick is about to trigger.
+    if (clickTimerRef.current) return;
+    clickTimerRef.current = setTimeout(() => {
+      clickTimerRef.current = null;
+      if (stage === 'idle') loadDecoy();
+      else if ((stage === 'decoy' || stage === 'revealed') && objectUrl) setViewerOpen(true);
+    }, 280);
+  }
+
+  function handleDoubleClick() {
+    if (clickTimerRef.current) {
+      clearTimeout(clickTimerRef.current);
+      clickTimerRef.current = null;
+    }
+    if (stage !== 'decoy') return;
+    if (masterToken) {
+      reveal(masterToken);
+    } else {
+      setTokenInputVisible(v => !v);
+    }
+  }
+
+  async function handleSubmitToken() {
+    const trimmed = tokenValue.trim();
+    if (!trimmed) return;
+    await reveal(trimmed);
+  }
+
+  const loading = stage === 'loading' || stage === 'revealing';
+
+  if (stage === 'idle' || loading) {
+    let label = loading ? (stage === 'revealing' ? 'Verifying...' : 'Loading...') : 'Tap to open';
+    let iconEl: React.ReactNode = <PaperclipIconSvg size={22} color="#9ca3af" />;
+    if (!loading) {
+      if (isImageCt(contentType)) { iconEl = <CameraIcon size={22} color="#9ca3af" />; label = 'Photo'; }
+      else if (isVideoAttachment) { iconEl = <CameraIcon size={22} color="#9ca3af" />; label = 'Video'; }
+    }
     return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', background: 'var(--input-field-bg)', border: '1px solid var(--border-color)', borderRadius: 10 }}>
-        {isVoice(contentType) ? <MicIconSvg size={18} color="#6b7280" /> : (isImageCt(contentType) || isVideoCt(contentType)) ? <CameraIcon size={18} color="#6b7280" /> : <PaperclipIconSvg size={18} color="#6b7280" />}
-        <span style={{ fontSize: '0.78rem', color: '#6b7280', fontStyle: 'italic' }}>{loadError}</span>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <button
+          onClick={handleClick}
+          disabled={loading}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 10, background: 'var(--bg-card)',
+            border: '1px solid var(--border-color)', borderRadius: 10, padding: '12px 16px',
+            cursor: loading ? 'wait' : 'pointer', color: 'var(--text-muted)', fontSize: '0.85rem',
+            opacity: loading ? 0.7 : 1,
+          }}
+        >
+          {loading ? <SpinnerIcon size={22} /> : iconEl}
+          <span>{label}</span>
+        </button>
+        {error && <span style={{ fontSize: '0.72rem', color: '#ef4444' }}>{error}</span>}
       </div>
     );
   }
 
-  if (loaded && objectUrl) {
-    if (viewable) {
-      return (
-        <>
-          <div
-            onClick={() => setViewerOpen(true)}
-            title="Tap to view"
-            style={{ position: 'relative', cursor: 'pointer', lineHeight: 0 }}
-          >
-            {kind === 'image' ? (
-              <img
-                src={objectUrl}
-                alt="photo"
-                style={{ maxWidth: 260, maxHeight: 260, borderRadius: 10, display: 'block' }}
-              />
-            ) : (
-              <video
-                src={objectUrl}
-                preload="metadata"
-                style={{ maxWidth: 260, maxHeight: 260, borderRadius: 10, display: 'block', background: '#000' }}
-              />
-            )}
-            {kind === 'video' && (
-              <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <div style={{
-                  width: 46, height: 46, borderRadius: '50%', background: 'rgba(0,0,0,0.55)',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  color: '#fff', fontSize: '1rem', paddingLeft: 3,
-                }}>
-                  ▶
-                </div>
-              </div>
-            )}
-          </div>
-          {viewerOpen && <MediaLightbox src={objectUrl} kind={kind} onClose={closeViewer} />}
-        </>
-      );
-    }
-    if (kind === 'audio') {
-      return <audio controls src={objectUrl} preload="auto" style={{ maxWidth: 240, display: 'block' }} />;
-    }
-    return (
-      <a href={objectUrl} download={mediaId} style={{ color: '#93c5fd', fontSize: '0.83rem', textDecoration: 'underline' }}>
-        Download {viewerMime === 'application/pdf' ? 'PDF' : 'file'}
-      </a>
-    );
-  }
-
-  // Icon placeholder (best-effort from content_type until we download and sniff).
-  let label = 'Tap to open';
-  let iconEl: React.ReactNode = <PaperclipIconSvg size={22} color="#9ca3af" />;
-  if (isImageCt(contentType)) { iconEl = <CameraIcon size={22} color="#9ca3af" />; label = 'Photo'; }
-  else if (isVideoCt(contentType)) { iconEl = <CameraIcon size={22} color="#9ca3af" />; label = 'Video'; }
-  else if (isVoice(contentType)) { iconEl = <MicIconSvg size={22} color="#9ca3af" />; label = 'Voice note'; }
-
+  // decoy / revealed — a thumbnail that looks the same either way, nothing
+  // in the UI hints which state it's in until the token prompt is opened.
   return (
-    <button
-      onClick={handleClick}
-      disabled={loading}
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 10,
-        background: 'var(--bg-card)',
-        border: '1px solid var(--border-color)',
-        borderRadius: 10,
-        padding: '12px 16px',
-        cursor: loading ? 'wait' : 'pointer',
-        color: 'var(--text-muted)',
-        fontSize: '0.85rem',
-        opacity: loading ? 0.7 : 1,
-      }}
-    >
-      {loading ? <SpinnerIcon size={22} /> : iconEl}
-      <span>{loading ? 'Loading...' : label}</span>
-    </button>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <div
+        onClick={handleClick}
+        onDoubleClick={handleDoubleClick}
+        title="Tap to view"
+        style={{ position: 'relative', cursor: 'pointer', lineHeight: 0 }}
+      >
+        <img
+          src={objectUrl!}
+          alt={isVideoAttachment ? 'video' : 'photo'}
+          style={{ maxWidth: 260, maxHeight: 260, borderRadius: 10, display: 'block' }}
+        />
+        {isVideoAttachment && stage === 'decoy' && (
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <div style={{
+              width: 46, height: 46, borderRadius: '50%', background: 'rgba(0,0,0,0.55)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              color: '#fff', fontSize: '1rem', paddingLeft: 3,
+            }}>
+              ▶
+            </div>
+          </div>
+        )}
+      </div>
+
+      {tokenInputVisible && !masterToken && (
+        <div style={{ display: 'flex', gap: 6 }}>
+          <input
+            type="password"
+            placeholder="Master token"
+            value={tokenValue}
+            onChange={e => setTokenValue(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') handleSubmitToken(); }}
+            style={{
+              flex: 1, background: 'var(--input-field-bg)', border: '1px solid var(--border-color)',
+              borderRadius: 8, color: 'var(--text-primary)', fontSize: '0.8rem', padding: '6px 10px',
+            }}
+            autoFocus
+          />
+          <button
+            style={{ background: 'var(--accent)', color: '#fff', fontSize: '0.75rem', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', border: 'none' }}
+            onClick={handleSubmitToken}
+          >
+            OK
+          </button>
+        </div>
+      )}
+      {error && <span style={{ fontSize: '0.72rem', color: '#ef4444' }}>{error}</span>}
+      {viewerOpen && objectUrl && <MediaLightbox src={objectUrl} kind={lightboxKind} onClose={closeViewer} />}
+    </div>
   );
 }
 
@@ -688,6 +816,8 @@ export function DocumentBubble({
   const [tokenInputVisible, setTokenInputVisible] = useState(false);
   const [tokenValue, setTokenValue] = useState('');
   const [viewerUrl, setViewerUrl] = useState<string | null>(null);
+  const [documentText, setDocumentText] = useState<string | null>(null);
+  const [qaResult, setQaResult] = useState<{ title: string; loading: boolean; error: string | null; content: string | null } | null>(null);
   const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -737,6 +867,7 @@ export function DocumentBubble({
       const buf = new Uint8Array(await blob.arrayBuffer());
       const { mime } = sniffMedia(buf);
       setViewerUrl(toDataUrl(buf, mime));
+      setDocumentText(mime === 'application/octet-stream' && looksLikeText(buf) ? new TextDecoder().decode(buf) : null);
       setStage('revealed');
       setTokenInputVisible(false);
       setTokenValue('');
@@ -779,6 +910,19 @@ export function DocumentBubble({
     }
   }
 
+  async function handleAskQuestion() {
+    if (!documentText) return;
+    const question = window.prompt('Ask a question about this document:');
+    if (!question || !question.trim()) return;
+    setQaResult({ title: 'Document Q&A', loading: true, error: null, content: null });
+    try {
+      const answer = await documentQACopilot(token, documentText, question.trim());
+      setQaResult({ title: 'Document Q&A', loading: false, error: null, content: answer });
+    } catch (err: any) {
+      setQaResult({ title: 'Document Q&A', loading: false, error: err?.message || 'Failed to answer', content: null });
+    }
+  }
+
   async function handleSubmitToken() {
     const trimmed = tokenValue.trim();
     if (!trimmed) return;
@@ -813,6 +957,15 @@ export function DocumentBubble({
         {loading ? <SpinnerIcon size={22} /> : <PaperclipIconSvg size={22} color="#9ca3af" />}
         <span>{label}</span>
       </button>
+
+      {stage === 'revealed' && documentText && (
+        <button
+          onClick={handleAskQuestion}
+          style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'transparent', border: '1px solid var(--border-color)', borderRadius: 8, padding: '6px 10px', color: 'var(--text-muted)', fontSize: '0.75rem', cursor: 'pointer', alignSelf: 'flex-start' }}
+        >
+          <SparkleIcon size={13} color="var(--accent)" /> Ask about this document
+        </button>
+      )}
 
       {tokenInputVisible && !masterToken && (
         <div style={{ display: 'flex', gap: 6 }}>
@@ -851,6 +1004,15 @@ export function DocumentBubble({
       )}
       {error && <span style={{ fontSize: '0.72rem', color: '#ef4444' }}>{error}</span>}
       {viewerUrl && <MediaLightbox src={viewerUrl} kind="file" onClose={closeViewer} />}
+      {qaResult && (
+        <CopilotResultModal
+          title={qaResult.title}
+          loading={qaResult.loading}
+          error={qaResult.error}
+          content={qaResult.content}
+          onClose={() => setQaResult(null)}
+        />
+      )}
     </div>
   );
 }

@@ -20,6 +20,7 @@ import kotlinx.coroutines.launch
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.asRequestBody
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.io.File
 import javax.inject.Inject
@@ -44,6 +45,26 @@ data class SettingsUiState(
     val voiceIdentityError: String? = null,
     val isRecordingVoiceIdentity: Boolean = false,
     val voiceIdentityRecordingSeconds: Int = 0,
+    // Username change — success forces a fresh login (see AccountViewModel
+    // notes) rather than trying to hot-swap username through every screen
+    // that already holds it in memory.
+    val usernameSaving: Boolean = false,
+    val usernameError: String? = null,
+    val usernameChanged: Boolean = false,
+    // Recovery code — regenerated on demand, shown once, never stored client-side.
+    val recoveryCodeBusy: Boolean = false,
+    val recoveryCodeError: String? = null,
+    val revealedRecoveryCode: String? = null,
+    // Profile picture
+    val hasProfilePicture: Boolean = false,
+    val profilePictureBusy: Boolean = false,
+    val profilePictureError: String? = null,
+    val profilePictureVersion: Long = 0L, // bumped on change so AsyncImage re-fetches instead of using a stale cache
+    // Availability status
+    val availabilityStatus: String = "available",
+    val statusText: String = "",
+    val availabilityBusy: Boolean = false,
+    val availabilityError: String? = null,
 )
 
 @HiltViewModel
@@ -282,6 +303,126 @@ class SettingsViewModel @Inject constructor(
 
     fun clearExportedKey() {
         _uiState.value = _uiState.value.copy(exportedKey = null, exportError = null)
+    }
+
+    fun updateUsername(newUsername: String) {
+        val trimmed = newUsername.trim()
+        if (trimmed.isBlank() || trimmed == _uiState.value.username) return
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(usernameSaving = true, usernameError = null)
+            val bearer = bearer()
+            if (bearer == null) {
+                _uiState.value = _uiState.value.copy(usernameSaving = false, usernameError = "Not signed in")
+                return@launch
+            }
+            runCatching {
+                apiService.updateUsername(bearer, com.dilarion.app.data.model.UsernameUpdateRequest(trimmed))
+            }.onSuccess { response ->
+                if (response.isSuccessful) {
+                    sessionManager.updateUsername(trimmed)
+                    _uiState.value = _uiState.value.copy(usernameSaving = false, usernameChanged = true)
+                } else {
+                    val msg = response.errorBody().parseErrorDetail("Failed to update username")
+                    _uiState.value = _uiState.value.copy(usernameSaving = false, usernameError = msg)
+                }
+            }.onFailure { e ->
+                _uiState.value = _uiState.value.copy(usernameSaving = false, usernameError = e.message ?: "Network error")
+            }
+        }
+    }
+
+    fun clearUsernameError() { _uiState.value = _uiState.value.copy(usernameError = null) }
+
+    fun regenerateRecoveryCode() {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(recoveryCodeBusy = true, recoveryCodeError = null)
+            val bearer = bearer()
+            if (bearer == null) {
+                _uiState.value = _uiState.value.copy(recoveryCodeBusy = false, recoveryCodeError = "Not signed in")
+                return@launch
+            }
+            runCatching { apiService.regenerateRecoveryCode(bearer) }
+                .onSuccess { response ->
+                    if (response.isSuccessful) {
+                        _uiState.value = _uiState.value.copy(
+                            recoveryCodeBusy = false,
+                            revealedRecoveryCode = response.body()?.recoveryCode,
+                        )
+                    } else {
+                        _uiState.value = _uiState.value.copy(recoveryCodeBusy = false, recoveryCodeError = "Failed to generate a new recovery code")
+                    }
+                }
+                .onFailure { e ->
+                    _uiState.value = _uiState.value.copy(recoveryCodeBusy = false, recoveryCodeError = e.message ?: "Network error")
+                }
+        }
+    }
+
+    fun clearRevealedRecoveryCode() { _uiState.value = _uiState.value.copy(revealedRecoveryCode = null) }
+
+    // ── Profile picture ──────────────────────────────────────────────────────────
+
+    fun uploadProfilePicture(context: Context, uri: android.net.Uri) {
+        viewModelScope.launch {
+            val bearer = bearer() ?: return@launch
+            _uiState.value = _uiState.value.copy(profilePictureBusy = true, profilePictureError = null)
+            runCatching {
+                val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                    ?: throw IllegalStateException("Could not read image")
+                val mime = context.contentResolver.getType(uri) ?: "image/jpeg"
+                val requestFile = bytes.toRequestBody(mime.toMediaTypeOrNull())
+                val filePart = MultipartBody.Part.createFormData("file", "profile.jpg", requestFile)
+                val resp = apiService.uploadProfilePicture(bearer, filePart)
+                if (!resp.isSuccessful) {
+                    throw IllegalStateException(resp.errorBody().parseErrorDetail("Failed to upload (${resp.code()})"))
+                }
+                _uiState.value = _uiState.value.copy(
+                    profilePictureBusy = false,
+                    hasProfilePicture = true,
+                    profilePictureVersion = _uiState.value.profilePictureVersion + 1,
+                )
+            }.onFailure { e ->
+                _uiState.value = _uiState.value.copy(profilePictureBusy = false, profilePictureError = e.message)
+            }
+        }
+    }
+
+    fun removeProfilePicture() {
+        viewModelScope.launch {
+            val bearer = bearer() ?: return@launch
+            _uiState.value = _uiState.value.copy(profilePictureBusy = true, profilePictureError = null)
+            runCatching { apiService.deleteProfilePicture(bearer) }
+                .onSuccess {
+                    _uiState.value = _uiState.value.copy(
+                        profilePictureBusy = false,
+                        hasProfilePicture = false,
+                        profilePictureVersion = _uiState.value.profilePictureVersion + 1,
+                    )
+                }
+                .onFailure { e -> _uiState.value = _uiState.value.copy(profilePictureBusy = false, profilePictureError = e.message) }
+        }
+    }
+
+    fun clearProfilePictureError() { _uiState.value = _uiState.value.copy(profilePictureError = null) }
+
+    // ── Availability status ──────────────────────────────────────────────────────
+
+    fun setAvailability(status: String, statusText: String?) {
+        viewModelScope.launch {
+            val bearer = bearer() ?: return@launch
+            _uiState.value = _uiState.value.copy(availabilityBusy = true, availabilityError = null)
+            runCatching {
+                apiService.setAvailability(bearer, com.dilarion.app.data.model.AvailabilityUpdateRequest(status, statusText?.ifBlank { null }))
+            }.onSuccess { resp ->
+                if (resp.isSuccessful) {
+                    _uiState.value = _uiState.value.copy(availabilityBusy = false, availabilityStatus = status, statusText = statusText ?: "")
+                } else {
+                    _uiState.value = _uiState.value.copy(availabilityBusy = false, availabilityError = "Failed to update status")
+                }
+            }.onFailure { e ->
+                _uiState.value = _uiState.value.copy(availabilityBusy = false, availabilityError = e.message)
+            }
+        }
     }
 
     fun logout(onDone: () -> Unit) {

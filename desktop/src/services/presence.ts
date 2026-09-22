@@ -1,6 +1,20 @@
 import { invoke } from '@tauri-apps/api/core';
+import { getCurrentWindow } from '@tauri-apps/api/window';
+import { emitTo, listen } from '@tauri-apps/api/event';
 
 const WS_BASE = (import.meta.env.VITE_WS_BASE as string | undefined) || 'wss://apidilarion.eibstratoc.com/ws';
+
+// The call window never opens its own WebSocket — a second connection under
+// the same device_id would fight the main window's for the "current"
+// connection on the backend. Instead the main window forwards just the
+// message types the call UI needs (see bottom of this file for both halves
+// of the bridge) over a Tauri cross-window event.
+export const CALL_RELEVANT_WS_TYPES = new Set([
+  'call_status_update', 'ice_candidate', 'call_media_state', 'call_end',
+  'conference_invite', 'conference_peer_connect', 'conference_signal',
+  'conference_participant_left', 'auth_expired',
+]);
+const WS_FORWARD_EVENT = 'dilarion://ws-forward';
 
 export type WsMessage = {
   type: string;
@@ -94,6 +108,11 @@ class PresenceService {
       try {
         const msg: WsMessage = JSON.parse(e.data);
         this.listeners.forEach(l => l(msg));
+        if (CALL_RELEVANT_WS_TYPES.has(msg.type)) {
+          // Best-effort — if no call window is open this just fails silently
+          // (emitTo throws when the target label doesn't exist).
+          emitTo('call', WS_FORWARD_EVENT, msg).catch(() => {});
+        }
       } catch {}
     };
 
@@ -132,6 +151,9 @@ class PresenceService {
   addListener(fn: Listener) { this.listeners.push(fn); }
   removeListener(fn: Listener) { this.listeners = this.listeners.filter(l => l !== fn); }
 
+  /** Used only by the call window's forward bridge — see startCallWindowForwardBridge below. */
+  injectMessage(msg: WsMessage) { this.listeners.forEach(l => l(msg)); }
+
   send(payload: object) {
     if (this.isConnected) this.ws!.send(JSON.stringify(payload));
   }
@@ -147,3 +169,26 @@ class PresenceService {
 }
 
 export const presenceService = new PresenceService();
+
+/**
+ * Called once by the call window's bootstrap (never the main window) instead
+ * of presenceService.connect() — feeds forwarded messages into the exact
+ * same listener list any CallModal instance already reads from, so nothing
+ * inside CallModal.tsx has to know it's running in a second window.
+ */
+export function startCallWindowForwardBridge(): () => void {
+  let unlisten: (() => void) | null = null;
+  listen<WsMessage>(WS_FORWARD_EVENT, (event) => {
+    presenceService.injectMessage(event.payload);
+  }).then(fn => { unlisten = fn; });
+  return () => { unlisten?.(); };
+}
+
+/** True when running as the standalone call window, not the main app window. */
+export function isCallWindow(): boolean {
+  try {
+    return getCurrentWindow().label === 'call';
+  } catch {
+    return false;
+  }
+}

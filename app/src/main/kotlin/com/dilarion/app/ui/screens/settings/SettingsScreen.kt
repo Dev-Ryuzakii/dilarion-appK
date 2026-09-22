@@ -25,6 +25,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import coil.compose.SubcomposeAsyncImageContent
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -114,6 +116,9 @@ fun SettingsScreen(
         ) {
 
             // ── Profile header ────────────────────────────────────────────────
+            val pfpPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+                if (uri != null) viewModel.uploadProfilePicture(context, uri)
+            }
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -126,22 +131,88 @@ fun SettingsScreen(
                         modifier = Modifier
                             .size(80.dp)
                             .clip(CircleShape)
-                            .background(DilarionRed),
+                            .background(DilarionRed)
+                            .clickable { pfpPicker.launch("image/*") },
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text(
-                            uiState.username.firstOrNull()?.uppercaseChar()?.toString() ?: "?",
-                            color = SurfaceWhite,
-                            fontSize = 32.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                        )
+                        coil.compose.SubcomposeAsyncImage(
+                            model = coil.request.ImageRequest.Builder(context)
+                                .data("${com.dilarion.app.BuildConfig.BASE_URL}users/${uiState.username}/profile-picture?v=${uiState.profilePictureVersion}")
+                                .build(),
+                            contentDescription = "Profile picture",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize(),
+                        ) {
+                            val state = painter.state
+                            if (state is coil.compose.AsyncImagePainter.State.Success) {
+                                SubcomposeAsyncImageContent()
+                            } else {
+                                Text(
+                                    uiState.username.firstOrNull()?.uppercaseChar()?.toString() ?: "?",
+                                    color = SurfaceWhite,
+                                    fontSize = 32.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                )
+                            }
+                        }
+                        if (uiState.profilePictureBusy) {
+                            Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.4f)), contentAlignment = Alignment.Center) {
+                                CircularProgressIndicator(modifier = Modifier.size(24.dp), color = SurfaceWhite, strokeWidth = 2.dp)
+                            }
+                        }
                     }
-                    Spacer(Modifier.height(12.dp))
+                    Spacer(Modifier.height(10.dp))
+                    Row {
+                        TextButton(onClick = { pfpPicker.launch("image/*") }) { Text("Change photo", fontSize = 12.sp) }
+                        TextButton(onClick = { viewModel.removeProfilePicture() }) { Text("Remove", fontSize = 12.sp, color = DilarionRed) }
+                    }
+                    uiState.profilePictureError?.let {
+                        Text(it, color = DilarionRed, style = MaterialTheme.typography.bodySmall)
+                    }
+                    Spacer(Modifier.height(4.dp))
                     Text(
                         uiState.username,
                         style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.Bold,
                     )
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            // ── Availability status ─────────────────────────────────────────────
+            SettingsSectionHeader("Availability")
+            var statusTextInput by remember { mutableStateOf(uiState.statusText) }
+            SettingsCard {
+                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+                    val statuses = listOf("available" to "Available", "busy" to "Busy", "dnd" to "Do Not Disturb", "away" to "Away", "offline" to "Appear Offline")
+                    Row(modifier = Modifier.fillMaxWidth()) {
+                        statuses.forEach { (value, label) ->
+                            val selected = uiState.availabilityStatus == value
+                            FilterChip(
+                                selected = selected,
+                                onClick = { viewModel.setAvailability(value, statusTextInput) },
+                                label = { Text(label, fontSize = 11.sp) },
+                                modifier = Modifier.padding(end = 6.dp, bottom = 6.dp),
+                            )
+                        }
+                    }
+                    OutlinedTextField(
+                        value = statusTextInput,
+                        onValueChange = { statusTextInput = it },
+                        placeholder = { Text("Custom status (optional)") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        trailingIcon = {
+                            TextButton(onClick = { viewModel.setAvailability(uiState.availabilityStatus, statusTextInput) }) {
+                                Text("Save", fontSize = 12.sp)
+                            }
+                        },
+                    )
+                    uiState.availabilityError?.let {
+                        Text(it, color = DilarionRed, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp))
+                    }
                 }
             }
 
@@ -416,6 +487,98 @@ fun SettingsScreen(
                         )
                     }
                     Icon(Icons.Default.ChevronRight, null, tint = TextSecondary, modifier = Modifier.size(20.dp))
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            // ── Username + recovery code ────────────────────────────────────────
+            SettingsSectionHeader("Username")
+
+            var newUsername by remember { mutableStateOf("") }
+            LaunchedEffect(uiState.usernameChanged) {
+                if (uiState.usernameChanged) {
+                    kotlinx.coroutines.delay(1500)
+                    viewModel.logout { onLogout?.invoke() }
+                }
+            }
+            SettingsCard {
+                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+                    if (uiState.usernameChanged) {
+                        Text("Username updated — signing you out to apply everywhere…", color = OnlineGreen)
+                    } else {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            OutlinedTextField(
+                                value = newUsername,
+                                onValueChange = { newUsername = it },
+                                placeholder = { Text(uiState.username) },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(12.dp),
+                            )
+                            Spacer(Modifier.width(10.dp))
+                            Button(
+                                onClick = { viewModel.updateUsername(newUsername) },
+                                enabled = !uiState.usernameSaving && newUsername.isNotBlank() && newUsername != uiState.username,
+                                colors = ButtonDefaults.buttonColors(containerColor = DilarionRed),
+                            ) {
+                                if (uiState.usernameSaving) {
+                                    CircularProgressIndicator(modifier = Modifier.size(16.dp), color = SurfaceWhite, strokeWidth = 2.dp)
+                                } else {
+                                    Text("Save")
+                                }
+                            }
+                        }
+                        uiState.usernameError?.let {
+                            Text(it, color = DilarionRed, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp))
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+            SettingsSectionHeader("Recovery Code")
+
+            SettingsCard {
+                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+                    Text(
+                        "Lets you reset your access token yourself if you forget it, without an admin. " +
+                            "Generating a new one invalidates any earlier code.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextSecondary,
+                        modifier = Modifier.padding(bottom = 10.dp),
+                    )
+                    if (uiState.revealedRecoveryCode != null) {
+                        var ack by remember { mutableStateOf(false) }
+                        Text(
+                            uiState.revealedRecoveryCode!!,
+                            fontWeight = FontWeight.Bold,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(BackgroundGrey, RoundedCornerShape(10.dp))
+                                .padding(vertical = 12.dp),
+                        )
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
+                            Checkbox(checked = ack, onCheckedChange = { ack = it })
+                            Text("I've saved this code somewhere safe", style = MaterialTheme.typography.bodySmall)
+                        }
+                        TextButton(
+                            onClick = { viewModel.clearRevealedRecoveryCode(); ack = false },
+                            enabled = ack,
+                        ) { Text("Done") }
+                    } else {
+                        OutlinedButton(onClick = { viewModel.regenerateRecoveryCode() }, enabled = !uiState.recoveryCodeBusy) {
+                            if (uiState.recoveryCodeBusy) {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                            } else {
+                                Text("Generate new recovery code")
+                            }
+                        }
+                    }
+                    uiState.recoveryCodeError?.let {
+                        Text(it, color = DilarionRed, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp))
+                    }
                 }
             }
 

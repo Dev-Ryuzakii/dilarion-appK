@@ -103,9 +103,12 @@ private fun isVoiceMedia(item: MediaItem): Boolean =
 private fun isImageMedia(item: MediaItem): Boolean =
     item.contentType?.startsWith("image/") == true || item.mediaType.contains("photo", ignoreCase = true)
 
+private fun isVideoMedia(item: MediaItem): Boolean =
+    item.contentType?.startsWith("video/") == true || item.mediaType.contains("video", ignoreCase = true)
+
 /** Generic files/documents — get a decoy on first open rather than the plain lock icon. */
 private fun isDocumentMedia(item: MediaItem): Boolean {
-    if (isVoiceMedia(item) || isImageMedia(item)) return false
+    if (isVoiceMedia(item) || isImageMedia(item) || isVideoMedia(item)) return false
     val ct = item.contentType
     return ct?.startsWith("application/") == true || ct?.startsWith("media/") == true || item.mediaType == "raw"
 }
@@ -113,6 +116,21 @@ private fun isDocumentMedia(item: MediaItem): Boolean {
 /** Classifies a picked file's MIME type before upload — documents get a decoy-kind prompt. */
 private fun isDocumentMime(mime: String?): Boolean =
     mime != null && !mime.startsWith("image/") && !mime.startsWith("video/") && !mime.startsWith("audio/")
+
+/** Best-effort check that bytes are readable text, not binary — Document Q&A
+ * only makes sense for text content; there's no on-device PDF text extraction
+ * here, so a PDF (the common case) just won't offer the Ask button. */
+private fun looksLikeText(bytes: ByteArray): Boolean {
+    if (bytes.isEmpty()) return false
+    val sample = bytes.take(8000)
+    var suspicious = 0
+    for (b in sample) {
+        val c = b.toInt() and 0xFF
+        if (c == 0) return false
+        if (c < 9 || (c in 14..31)) suspicious++
+    }
+    return suspicious.toFloat() / sample.size < 0.01f
+}
 
 /** Must match DECOY_KINDS in the backend. */
 private val DECOY_KIND_LABELS = listOf(
@@ -144,6 +162,7 @@ fun ChatScreen(
     var unlockTarget by remember { mutableStateOf<String?>(null) }
     var unlockError by remember { mutableStateOf<String?>(null) }
     var viewerImagePath by remember { mutableStateOf<String?>(null) }
+    var videoViewerPath by remember { mutableStateOf<String?>(null) }
     var pendingDocUri by remember { mutableStateOf<Uri?>(null) }
 
     val combinedItems = remember(uiState.messages, uiState.mediaItems) {
@@ -184,21 +203,88 @@ fun ChatScreen(
             onDismiss = { unlockTarget = null; unlockError = null },
             onConfirm = { token ->
                 val ok = viewModel.unlock(token, target)
-                if (ok) { unlockTarget = null; unlockError = null }
-                else unlockError = "Incorrect master token"
+                if (ok) {
+                    unlockTarget = null; unlockError = null
+                    when (target) {
+                        "copilot_summarize" -> viewModel.summarizeThread()
+                        "copilot_suggest" -> viewModel.suggestReply()
+                    }
+                } else unlockError = "Incorrect master token"
             },
+        )
+    }
+
+    uiState.copilotResult?.let { result ->
+        CopilotResultDialog(result = result, onDismiss = viewModel::clearCopilotResult)
+    }
+
+    if (uiState.showMediaPicker) {
+        com.dilarion.app.ui.components.MediaPickerSheet(
+            gifs = uiState.gifs,
+            gifsLoading = uiState.gifsLoading,
+            gifsError = uiState.gifsError,
+            onSearchGifs = { q -> viewModel.searchGifs(q) },
+            onPickEmoji = { emoji -> inputText += emoji },
+            onPickGif = { gif -> viewModel.toggleMediaPicker(false); viewModel.sendSpecial(gif.url ?: "", "gif") },
+            onPickSticker = { id -> viewModel.toggleMediaPicker(false); viewModel.sendSpecial("sticker:$id", "sticker") },
+            onDismiss = { viewModel.toggleMediaPicker(false) },
+        )
+    }
+
+    if (uiState.showContactInfo) {
+        ContactInfoDialog(
+            username = displayName,
+            mediaCount = uiState.mediaItems.size,
+            starredCount = uiState.starredIds.size,
+            isMuted = uiState.chatSettings?.isMuted ?: false,
+            isArchived = uiState.chatSettings?.isArchived ?: false,
+            isLocked = uiState.chatSettings?.isLocked ?: false,
+            onCall = { if (onCall != null) { viewModel.toggleContactInfo(false); onCall(username) } },
+            onToggleMute = { viewModel.toggleMute() },
+            onToggleArchive = { viewModel.toggleArchive() },
+            onToggleLock = { viewModel.toggleLock() },
+            onDelete = { viewModel.toggleContactInfo(false); viewModel.deleteChatForMe { onBack() } },
+            onDismiss = { viewModel.toggleContactInfo(false) },
+        )
+    }
+
+    if (uiState.showMembersSheet) {
+        MembersSheetDialog(
+            members = uiState.groupMembers,
+            currentUsername = uiState.currentUsername,
+            busy = uiState.groupAdminBusy,
+            error = uiState.groupAdminError,
+            onPromote = viewModel::promoteMember,
+            onDemote = viewModel::demoteMember,
+            onDismiss = { viewModel.toggleMembersSheet(false) },
+        )
+    }
+
+    var translateTargetText by remember { mutableStateOf<String?>(null) }
+    translateTargetText?.let { text ->
+        TranslateLanguageDialog(
+            onDismiss = { translateTargetText = null },
+            onConfirm = { lang -> viewModel.translateMessage(text, lang); translateTargetText = null },
         )
     }
 
     uiState.viewingDocumentKey?.let { key ->
         val bytes = viewModel.getDocumentBytes(key)
         if (bytes != null) {
-            DocumentViewerDialog(bytes = bytes, onDismiss = { viewModel.closeDocumentViewer() })
+            DocumentViewerDialog(
+                bytes = bytes,
+                onDismiss = { viewModel.closeDocumentViewer() },
+                onAsk = if (looksLikeText(bytes)) { q -> viewModel.askDocumentQuestion(bytes, q) } else null,
+            )
         }
     }
 
     viewerImagePath?.let { path ->
         FullScreenImageViewer(imagePath = path, onDismiss = { viewerImagePath = null })
+    }
+
+    videoViewerPath?.let { path ->
+        FullScreenVideoViewer(videoPath = path, onDismiss = { videoViewerPath = null })
     }
 
     pendingDocUri?.let { uri ->
@@ -244,7 +330,10 @@ fun ChatScreen(
                     }
                 },
                 title = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = if (groupId == null) Modifier.clickable { viewModel.toggleContactInfo(true) } else Modifier,
+                    ) {
                         Box(
                             modifier = Modifier.size(36.dp).clip(CircleShape).background(DilarionRedDark),
                             contentAlignment = Alignment.Center,
@@ -266,9 +355,49 @@ fun ChatScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = {
+                        if (viewModel.requireMasterTokenSet()) unlockTarget = "copilot_summarize"
+                    }) {
+                        Icon(Icons.Default.AutoAwesome, "Summarize thread", tint = SurfaceWhite)
+                    }
                     if (groupId == null && onCall != null) {
                         IconButton(onClick = { onCall(username) }) {
                             Icon(Icons.Default.Call, "Call", tint = SurfaceWhite)
+                        }
+                    }
+                    if (groupId != null) {
+                        IconButton(onClick = { viewModel.toggleMembersSheet(true) }) {
+                            Icon(Icons.Default.Group, "Members", tint = SurfaceWhite)
+                        }
+                    }
+                    Box {
+                        IconButton(onClick = { viewModel.toggleChatMenu(true) }) {
+                            Icon(Icons.Default.MoreVert, "Chat options", tint = SurfaceWhite)
+                        }
+                        DropdownMenu(
+                            expanded = uiState.showChatMenu,
+                            onDismissRequest = { viewModel.toggleChatMenu(false) },
+                        ) {
+                            val cs = uiState.chatSettings
+                            DropdownMenuItem(
+                                text = { Text(if (cs?.isArchived == true) "Unarchive chat" else "Archive chat") },
+                                onClick = { viewModel.toggleArchive(); viewModel.toggleChatMenu(false) },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(if (cs?.isMuted == true) "Unmute notifications" else "Mute notifications") },
+                                onClick = { viewModel.toggleMute(); viewModel.toggleChatMenu(false) },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(if (cs?.isLocked == true) "Unlock chat" else "Lock chat") },
+                                onClick = { viewModel.toggleLock(); viewModel.toggleChatMenu(false) },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Delete chat", color = DilarionRed) },
+                                onClick = {
+                                    viewModel.toggleChatMenu(false)
+                                    viewModel.deleteChatForMe { onBack() }
+                                },
+                            )
                         }
                     }
                 },
@@ -346,6 +475,7 @@ fun ChatScreen(
                                     onPinToggle = { viewModel.togglePin(message) },
                                     onStar = { viewModel.toggleStar(message) },
                                     isStarred = uiState.starredIds.contains(message.id),
+                                    onTranslate = { text -> translateTargetText = text },
                                     onEdit = {
                                         viewModel.startEdit(
                                             message,
@@ -371,10 +501,14 @@ fun ChatScreen(
                                         onLockTap = { unlockTarget = "media_${mediaItem.mediaId}" },
                                     )
                                 } else {
-                                    val imgKey = "img_${mediaItem.mediaId}"
+                                    val isVideo = isVideoMedia(mediaItem)
+                                    // Decoy-first: the still photo loads immediately regardless of
+                                    // unlock state (it's the same thing anyone would see, no gate) —
+                                    // only the real file behind it waits for mediaUnlocked.
+                                    val imgKey = "${if (mediaUnlocked) "imgreal" else "imgdecoy"}_${mediaItem.mediaId}"
                                     val localPath = uiState.localFilePaths[imgKey]
-                                    if (!isVoice && localPath == null && mediaUnlocked) {
-                                        LaunchedEffect(mediaItem.mediaId) {
+                                    if (!isVoice && localPath == null) {
+                                        LaunchedEffect(mediaItem.mediaId, mediaUnlocked) {
                                             viewModel.downloadImageForDisplay(mediaItem.mediaId, context)
                                         }
                                     }
@@ -393,6 +527,7 @@ fun ChatScreen(
                                         item = mediaItem,
                                         isMine = isMine,
                                         isVoice = isVoice,
+                                        isVideo = isVideo,
                                         isUnlocked = mediaUnlocked,
                                         isPlaying = isThisPlaying,
                                         localImagePath = if (!isVoice) localPath else null,
@@ -409,8 +544,9 @@ fun ChatScreen(
                                         },
                                         onSeek = { ms -> if (isThisPlaying) viewModel.seekVoice(ms) },
                                         onSpeedTap = { viewModel.cyclePlaybackSpeed() },
-                                        onImageTap = { path -> viewerImagePath = path },
+                                        onImageTap = { path -> if (mediaUnlocked && isVideo) videoViewerPath = path else viewerImagePath = path },
                                         onLockTap = { unlockTarget = "media_${mediaItem.mediaId}" },
+                                        onTranscribeTap = { viewModel.transcribeVoiceNote(mediaItem.mediaId, mediaUnlocked) },
                                     )
                                 }
                             }
@@ -442,7 +578,48 @@ fun ChatScreen(
                                 Icon(Icons.Default.AttachFile, "Attach", tint = TextSecondary)
                             }
                         }
+                        IconButton(
+                            onClick = { viewModel.toggleMediaPicker(true) },
+                            modifier = Modifier.size(44.dp),
+                        ) {
+                            Icon(Icons.Default.EmojiEmotions, "Emoji, GIFs & stickers", tint = TextSecondary)
+                        }
+                        IconButton(
+                            onClick = {
+                                if (viewModel.requireMasterTokenSet()) unlockTarget = "copilot_suggest"
+                            },
+                            enabled = !uiState.suggestLoading,
+                            modifier = Modifier.size(44.dp),
+                        ) {
+                            Icon(Icons.Default.AutoAwesome, "Suggest a reply", tint = TextSecondary)
+                        }
                         Column(modifier = Modifier.weight(1f)) {
+                            if (uiState.suggestLoading || uiState.replySuggestions != null) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                ) {
+                                    if (uiState.suggestLoading) {
+                                        Text("Copilot is drafting replies…", color = TextSecondary, fontSize = 12.sp)
+                                    } else {
+                                        androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.weight(1f)) {
+                                            items(uiState.replySuggestions ?: emptyList()) { s ->
+                                                Surface(
+                                                    shape = RoundedCornerShape(14.dp),
+                                                    color = Color(0xFF1A1A1A),
+                                                    border = androidx.compose.foundation.BorderStroke(1.dp, BorderGrey),
+                                                    modifier = Modifier.clickable { inputText = s; viewModel.clearReplySuggestions() },
+                                                ) {
+                                                    Text(s, color = SurfaceWhite, fontSize = 12.sp, maxLines = 1, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
+                                                }
+                                            }
+                                        }
+                                        IconButton(onClick = { viewModel.clearReplySuggestions() }, modifier = Modifier.size(20.dp)) {
+                                            Icon(Icons.Default.Close, null, tint = TextSecondary, modifier = Modifier.size(14.dp))
+                                        }
+                                    }
+                                }
+                            }
                             // @mention dropdown
                             val mentionQuery = uiState.mentionQuery
                             if (groupId != null && mentionQuery != null) {
@@ -652,6 +829,7 @@ private fun VoiceMessageBubble(
     onSeek: (Int) -> Unit,
     onSpeedTap: () -> Unit,
     onLockTap: () -> Unit,
+    onTranscribeTap: () -> Unit,
 ) {
     val bars = waveform ?: List(40) { 0.3f }
     val progress = if (durationMs > 0) (positionMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
@@ -749,6 +927,10 @@ private fun VoiceMessageBubble(
                 Icon(Icons.Default.Lock, "Unlock real audio", tint = if (isMine) SurfaceWhite.copy(alpha = 0.85f) else TextSecondary, modifier = Modifier.size(14.dp))
             }
         }
+        Spacer(Modifier.width(2.dp))
+        IconButton(onClick = onTranscribeTap, modifier = Modifier.size(24.dp)) {
+            Icon(Icons.Default.AutoAwesome, "Transcribe", tint = if (isMine) SurfaceWhite.copy(alpha = 0.85f) else DilarionRed, modifier = Modifier.size(14.dp))
+        }
     }
 }
 
@@ -757,6 +939,7 @@ private fun MediaBubble(
     item: MediaItem,
     isMine: Boolean,
     isVoice: Boolean,
+    isVideo: Boolean = false,
     isUnlocked: Boolean,
     isPlaying: Boolean,
     localImagePath: String?,
@@ -769,6 +952,7 @@ private fun MediaBubble(
     onSpeedTap: () -> Unit,
     onImageTap: (String) -> Unit,
     onLockTap: () -> Unit,
+    onTranscribeTap: () -> Unit = {},
 ) {
     val bubbleColor = if (isMine) ChatBubbleSelf else ChatBubbleOther
     val bubbleShape = if (isMine) {
@@ -802,41 +986,55 @@ private fun MediaBubble(
                     onSeek = onSeek,
                     onSpeedTap = onSpeedTap,
                     onLockTap = onLockTap,
+                    onTranscribeTap = onTranscribeTap,
                 )
             } else {
-                // Image
-                if (!isUnlocked) {
-                    // Locked — show placeholder icon only, never load real content
-                    Box(
-                        Modifier
-                            .size(width = 160.dp, height = 110.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(BorderGrey)
-                            .clickable { onLockTap() },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(Icons.Default.Image, null, tint = TextSecondary, modifier = Modifier.size(36.dp))
-                            Spacer(Modifier.height(4.dp))
-                            Icon(Icons.Default.Lock, null, tint = DilarionRed, modifier = Modifier.size(14.dp))
+                // Image/video — decoy-first: a stand-in still photo loads and is
+                // shown immediately, same as anyone would see, no token needed.
+                // Only the small lock icon (while !isUnlocked) prompts for the
+                // real reveal; nothing here may hint a decoy exists until then.
+                if (localImagePath != null) {
+                    Box {
+                        AsyncImage(
+                            model = ImageRequest.Builder(LocalContext.current)
+                                .data(File(localImagePath))
+                                .crossfade(true)
+                                .build(),
+                            contentDescription = "Image",
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 200.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable { onImageTap(localImagePath) },
+                            contentScale = ContentScale.Crop,
+                        )
+                        if (isVideo && (isUnlocked)) {
+                            Box(
+                                Modifier
+                                    .matchParentSize()
+                                    .clip(RoundedCornerShape(12.dp)),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Box(
+                                    Modifier.size(46.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.55f)),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Icon(Icons.Default.PlayArrow, "Play video", tint = Color.White, modifier = Modifier.size(26.dp))
+                                }
+                            }
+                        }
+                        if (!isUnlocked) {
+                            IconButton(
+                                onClick = onLockTap,
+                                modifier = Modifier.align(Alignment.TopEnd).size(28.dp)
+                                    .background(Color.Black.copy(alpha = 0.35f), CircleShape),
+                            ) {
+                                Icon(Icons.Default.Lock, "Unlock real content", tint = Color.White, modifier = Modifier.size(14.dp))
+                            }
                         }
                     }
-                } else if (localImagePath != null) {
-                    AsyncImage(
-                        model = ImageRequest.Builder(LocalContext.current)
-                            .data(File(localImagePath))
-                            .crossfade(true)
-                            .build(),
-                        contentDescription = "Image",
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = 200.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .clickable { onImageTap(localImagePath) },
-                        contentScale = ContentScale.Crop,
-                    )
                 } else {
-                    // Unlocked but still downloading
+                    // Still loading the decoy (or the real file, once unlocked)
                     Box(
                         Modifier.size(width = 200.dp, height = 140.dp).clip(RoundedCornerShape(12.dp)).background(BorderGrey),
                         contentAlignment = Alignment.Center,
@@ -957,11 +1155,12 @@ private fun PendingUploadBubble(upload: PendingUpload) {
  * a file browser, a crash dump) can ever see or open it.
  */
 @Composable
-private fun DocumentViewerDialog(bytes: ByteArray, onDismiss: () -> Unit) {
+private fun DocumentViewerDialog(bytes: ByteArray, onDismiss: () -> Unit, onAsk: ((String) -> Unit)? = null) {
     val context = LocalContext.current
     var pages by remember { mutableStateOf<List<android.graphics.Bitmap>>(emptyList()) }
     var error by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(true) }
+    var showAskDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(bytes) {
         val result = withContext(Dispatchers.IO) {
@@ -1025,7 +1224,45 @@ private fun DocumentViewerDialog(bytes: ByteArray, onDismiss: () -> Unit) {
             ) {
                 Icon(Icons.Default.Close, "Close", tint = Color.White)
             }
+            if (onAsk != null) {
+                IconButton(
+                    onClick = { showAskDialog = true },
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .statusBarsPadding()
+                        .padding(12.dp)
+                        .background(Color.White.copy(alpha = 0.15f), CircleShape),
+                ) {
+                    Icon(Icons.Default.AutoAwesome, "Ask about this document", tint = Color.White)
+                }
+            }
         }
+    }
+
+    if (showAskDialog && onAsk != null) {
+        var question by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { showAskDialog = false },
+            icon = { Icon(Icons.Default.AutoAwesome, null, tint = DilarionRed) },
+            title = { Text("Ask about this document", textAlign = TextAlign.Center) },
+            text = {
+                OutlinedTextField(
+                    value = question,
+                    onValueChange = { question = it },
+                    placeholder = { Text("Your question") },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = DilarionRed),
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = { onAsk(question); showAskDialog = false },
+                    enabled = question.isNotBlank(),
+                    colors = ButtonDefaults.buttonColors(containerColor = DilarionRed),
+                ) { Text("Ask") }
+            },
+            dismissButton = { TextButton(onClick = { showAskDialog = false }) { Text("Cancel") } },
+        )
     }
 }
 
@@ -1089,6 +1326,41 @@ private fun FullScreenImageViewer(imagePath: String, onDismiss: () -> Unit) {
     }
 }
 
+// ── Full-screen video viewer ──────────────────────────────────────────────────
+// Android's built-in VideoView — no new player-library dependency needed for
+// a one-shot "play the file that's already on disk" viewer.
+
+@Composable
+private fun FullScreenVideoViewer(videoPath: String, onDismiss: () -> Unit) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
+            androidx.compose.ui.viewinterop.AndroidView(
+                factory = { ctx ->
+                    android.widget.VideoView(ctx).apply {
+                        setVideoURI(android.net.Uri.fromFile(File(videoPath)))
+                        setOnPreparedListener { it.isLooping = false; start() }
+                        setMediaController(android.widget.MediaController(ctx).also { it.setAnchorView(this) })
+                    }
+                },
+                modifier = Modifier.fillMaxSize(),
+            )
+            IconButton(
+                onClick = onDismiss,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .statusBarsPadding()
+                    .padding(12.dp)
+                    .background(Color.White.copy(alpha = 0.15f), CircleShape),
+            ) {
+                Icon(Icons.Default.Close, "Close", tint = Color.White)
+            }
+        }
+    }
+}
+
 @Composable
 private fun UnlockDialog(
     error: String?,
@@ -1136,6 +1408,53 @@ private fun UnlockDialog(
                 enabled = token.isNotBlank(),
                 colors = ButtonDefaults.buttonColors(containerColor = DilarionRed),
             ) { Text("Unlock") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+/** Shared "thinking… / error / content" popup for one-shot copilot actions
+ * (summarize, translate, document Q&A, transcribe) — one dialog reused
+ * instead of four near-identical ones. */
+@Composable
+private fun CopilotResultDialog(result: CopilotResultUi, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Default.AutoAwesome, null, tint = DilarionRed) },
+        title = { Text(result.title, textAlign = TextAlign.Center) },
+        text = {
+            when {
+                result.loading -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = DilarionRed)
+                    Text("Thinking…", color = TextSecondary)
+                }
+                result.error != null -> Text(result.error, color = Color(0xFFEF4444))
+                else -> Text(result.content ?: "", style = MaterialTheme.typography.bodyMedium)
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
+    )
+}
+
+@Composable
+private fun TranslateLanguageDialog(onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
+    var lang by remember { mutableStateOf("English") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Default.AutoAwesome, null, tint = DilarionRed) },
+        title = { Text("Translate to which language?", textAlign = TextAlign.Center) },
+        text = {
+            OutlinedTextField(
+                value = lang,
+                onValueChange = { lang = it },
+                singleLine = true,
+                shape = RoundedCornerShape(12.dp),
+                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = DilarionRed),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        },
+        confirmButton = {
+            Button(onClick = { onConfirm(lang) }, enabled = lang.isNotBlank(), colors = ButtonDefaults.buttonColors(containerColor = DilarionRed)) { Text("Translate") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
@@ -1243,6 +1562,7 @@ private fun MessageActionsPopup(
     onStarToggle: () -> Unit,
     onEdit: (() -> Unit)?,
     onDelete: (() -> Unit)?,
+    onTranslate: (() -> Unit)?,
 ) {
     androidx.compose.ui.window.Popup(
         alignment = Alignment.Center,
@@ -1279,6 +1599,7 @@ private fun MessageActionsPopup(
                 ActionRow(Icons.Default.Reply, "Reply") { onReply(); onDismiss() }
                 ActionRow(Icons.Default.Forward, "Forward") { onForward(); onDismiss() }
                 ActionRow(Icons.Default.ContentCopy, "Copy") { onCopy(); onDismiss() }
+                if (onTranslate != null) ActionRow(Icons.Default.AutoAwesome, "Translate") { onTranslate(); onDismiss() }
                 ActionRow(Icons.Default.Info, "Info") { onInfo(); onDismiss() }
                 ActionRow(if (isStarred) Icons.Default.Star else Icons.Default.StarBorder, if (isStarred) "Unstar" else "Star") { onStarToggle(); onDismiss() }
                 ActionRow(Icons.Default.PushPin, if (isPinned) "Unpin" else "Pin") { onPinToggle(); onDismiss() }
@@ -1322,6 +1643,7 @@ private fun MessageBubble(
     onStar: () -> Unit = {},
     onEdit: () -> Unit = {},
     onDelete: () -> Unit = {},
+    onTranslate: ((String) -> Unit)? = null,
     isStarred: Boolean = false,
 ) {
     var showMenu by remember { mutableStateOf(false) }
@@ -1483,6 +1805,15 @@ private fun MessageBubble(
                             color = TextPrimary.copy(alpha = 0.65f),
                             style = MaterialTheme.typography.bodyMedium,
                         )
+                    } else if (message.contentType == "gif" && decryptedText != null) {
+                        AsyncImage(
+                            model = ImageRequest.Builder(LocalContext.current).data(decryptedText).crossfade(true).build(),
+                            contentDescription = "GIF",
+                            modifier = Modifier.widthIn(max = 220.dp).heightIn(max = 220.dp).clip(RoundedCornerShape(10.dp)),
+                        )
+                    } else if (message.contentType == "sticker" && decryptedText != null) {
+                        val sticker = com.dilarion.app.ui.components.stickerById(decryptedText.removePrefix("sticker:"))
+                        Text(sticker?.glyph ?: "[sticker]", fontSize = 56.sp)
                     } else {
                         Text(decryptedText ?: message.content ?: "", color = TextPrimary, style = MaterialTheme.typography.bodyMedium)
                     }
@@ -1537,6 +1868,10 @@ private fun MessageBubble(
                             onStarToggle = onStar,
                             onEdit = if (isMine) onEdit else null,
                             onDelete = if (isMine) onDelete else null,
+                            onTranslate = onTranslate?.let { cb ->
+                                val text = decryptedText ?: message.content?.takeIf { !isEncrypted && !looksLikeCiphertext(it) }
+                                if (text != null) ({ cb(text) }) else null
+                            },
                         )
                     }
                 }
@@ -1589,4 +1924,130 @@ private fun DateSeparator(timestamp: String) {
                 .padding(horizontal = 14.dp, vertical = 5.dp),
         )
     }
+}
+
+@Composable
+private fun ContactInfoDialog(
+    username: String,
+    mediaCount: Int,
+    starredCount: Int,
+    isMuted: Boolean,
+    isArchived: Boolean,
+    isLocked: Boolean,
+    onCall: () -> Unit,
+    onToggleMute: () -> Unit,
+    onToggleArchive: () -> Unit,
+    onToggleLock: () -> Unit,
+    onDelete: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var confirmDelete by remember { mutableStateOf(false) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                Box(
+                    modifier = Modifier.size(64.dp).clip(CircleShape).background(DilarionRed),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(usernameInitials(username), color = SurfaceWhite, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                }
+                Spacer(Modifier.height(8.dp))
+                Text(username, style = MaterialTheme.typography.titleMedium)
+            }
+        },
+        text = {
+            Column {
+                Button(onClick = onCall, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = DilarionRed)) {
+                    Icon(Icons.Default.Call, null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Call")
+                }
+                Spacer(Modifier.height(16.dp))
+                ContactInfoRow(Icons.Default.Photo, "Media, links and docs", mediaCount.toString())
+                ContactInfoRow(Icons.Default.Star, "Starred", if (starredCount > 0) starredCount.toString() else "None")
+                Spacer(Modifier.height(8.dp))
+                ContactInfoActionRow(if (isMuted) "Unmute notifications" else "Mute notifications", onToggleMute)
+                ContactInfoActionRow(if (isArchived) "Unarchive chat" else "Archive chat", onToggleArchive)
+                ContactInfoActionRow(if (isLocked) "Unlock chat" else "Lock chat", onToggleLock)
+                if (confirmDelete) {
+                    ContactInfoActionRow("Confirm delete chat", onDelete, danger = true)
+                } else {
+                    ContactInfoActionRow("Delete chat", { confirmDelete = true }, danger = true)
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
+    )
+}
+
+@Composable
+private fun ContactInfoRow(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, value: String) {
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+        Icon(icon, null, tint = TextSecondary, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(12.dp))
+        Text(label, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+        Text(value, color = TextSecondary, style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+@Composable
+private fun ContactInfoActionRow(label: String, onClick: () -> Unit, danger: Boolean = false) {
+    Text(
+        label,
+        color = if (danger) DilarionRed else MaterialTheme.colorScheme.onSurface,
+        style = MaterialTheme.typography.bodyMedium,
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 10.dp),
+    )
+}
+
+@Composable
+private fun MembersSheetDialog(
+    members: List<com.dilarion.app.data.model.GroupMember>,
+    currentUsername: String,
+    busy: Boolean,
+    error: String?,
+    onPromote: (String) -> Unit,
+    onDemote: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val amIAdmin = members.find { it.username == currentUsername }?.role == "admin"
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Group members") },
+        text = {
+            Column {
+                error?.let { Text(it, color = DilarionRed, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 8.dp)) }
+                members.forEach { member ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                    ) {
+                        Box(
+                            modifier = Modifier.size(32.dp).clip(CircleShape).background(avatarColorFor(member.username)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(usernameInitials(member.username), color = SurfaceWhite, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Spacer(Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(member.username, style = MaterialTheme.typography.bodyMedium)
+                            if (member.role == "admin") {
+                                Text("Admin", style = MaterialTheme.typography.labelSmall, color = DilarionRed)
+                            }
+                        }
+                        if (amIAdmin && member.username != currentUsername) {
+                            TextButton(
+                                onClick = { if (member.role == "admin") onDemote(member.username) else onPromote(member.username) },
+                                enabled = !busy,
+                            ) {
+                                Text(if (member.role == "admin") "Demote" else "Promote", fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
+    )
 }

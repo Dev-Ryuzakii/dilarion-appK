@@ -21,6 +21,10 @@ data class AuthUiState(
     val isLoading: Boolean = false,
     val error: String? = null,
     val success: Boolean = false,
+    // Shown once after signup or a recovery-code reset — same reveal screen
+    // either way, since both hand back a fresh code that never comes back.
+    val revealedUsername: String? = null,
+    val revealedRecoveryCode: String? = null,
 )
 
 @HiltViewModel
@@ -92,4 +96,69 @@ class AuthViewModel @Inject constructor(
     }
 
     fun clearError() { _uiState.value = _uiState.value.copy(error = null) }
+
+    fun clearRevealedCode() {
+        _uiState.value = _uiState.value.copy(revealedUsername = null, revealedRecoveryCode = null)
+    }
+
+    fun signUp(username: String, phoneNumber: String, token: String) {
+        if (username.isBlank() || phoneNumber.isBlank() || token.isBlank()) {
+            _uiState.value = AuthUiState(error = "All fields are required")
+            return
+        }
+        viewModelScope.launch {
+            _uiState.value = AuthUiState(isLoading = true)
+            runCatching {
+                val response = apiService.signUp(
+                    com.dilarion.app.data.model.SignUpRequest(username.trim(), phoneNumber.trim(), token.trim())
+                )
+                if (!response.isSuccessful) {
+                    val msg = errorBody(response.errorBody()?.string()) ?: "Failed to create account (${response.code()})"
+                    _uiState.value = AuthUiState(error = msg)
+                    return@launch
+                }
+                val body = response.body()!!
+                _uiState.value = AuthUiState(
+                    revealedUsername = body.username,
+                    revealedRecoveryCode = body.recoveryCode,
+                )
+            }.onFailure { e ->
+                _uiState.value = AuthUiState(error = e.message ?: "Network error")
+            }
+        }
+    }
+
+    fun resetWithRecoveryCode(username: String, recoveryCode: String, newToken: String) {
+        if (username.isBlank() || recoveryCode.isBlank() || newToken.isBlank()) {
+            _uiState.value = AuthUiState(error = "All fields are required")
+            return
+        }
+        viewModelScope.launch {
+            _uiState.value = AuthUiState(isLoading = true)
+            runCatching {
+                val response = apiService.resetWithRecoveryCode(
+                    com.dilarion.app.data.model.RecoveryCodeResetRequest(username.trim(), recoveryCode.trim(), newToken.trim())
+                )
+                if (!response.isSuccessful) {
+                    val msg = errorBody(response.errorBody()?.string()) ?: "Invalid username or recovery code"
+                    _uiState.value = AuthUiState(error = msg)
+                    return@launch
+                }
+                val body = response.body()!!
+                _uiState.value = AuthUiState(
+                    revealedUsername = body.username,
+                    revealedRecoveryCode = body.recoveryCode,
+                )
+            }.onFailure { e ->
+                _uiState.value = AuthUiState(error = e.message ?: "Network error")
+            }
+        }
+    }
+
+    private fun errorBody(raw: String?): String? {
+        if (raw.isNullOrBlank()) return null
+        return runCatching {
+            com.google.gson.JsonParser.parseString(raw).asJsonObject.get("detail")?.asString
+        }.getOrNull()
+    }
 }

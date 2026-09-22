@@ -1,7 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { presenceService, WsMessage } from '../services/presence';
 import { setToken as setMonitorToken, handleCommand } from '../services/monitoring';
+import { start as startAppPolicyMonitor, stop as stopAppPolicyMonitor } from '../services/appPolicyMonitor';
 import {
   getConversations,
   getGroups,
@@ -34,7 +36,24 @@ import {
   MeetingSummary,
   CalendarOccurrence,
   CALL_TERMINAL_STATUSES,
+  getMonitoringConsent,
+  setAppPolicyConsent,
+  getDisappearSettings,
+  setDisappearSettings,
+  DisappearSettings,
+  profilePictureUrl,
+  uploadProfilePicture,
+  deleteProfilePicture,
+  setAvailabilityStatus,
+  AvailabilityStatus,
+  getChatSettings,
+  updateChatSettings,
+  deleteChatForMe,
+  ChatSettingsItem,
+  updateUsername,
+  regenerateRecoveryCode,
 } from '../services/api';
+import ChatItemMenu from '../components/ChatItemMenu';
 import {
   isLivenessLockEnabled,
   setLivenessLockEnabled,
@@ -43,12 +62,14 @@ import {
 import { Keypair, loadKeypair, saveKeypair, clearKeypair, parseExportedKey } from '../services/keys';
 import ChatPanel from './ChatPanel';
 import GroupPanel from './GroupPanel';
-import CallModal, { CallType, IncomingCall } from './CallModal';
+import { CallType, IncomingCall } from './CallModal';
+import { openCallWindow, closeCallWindowIfOpen } from '../services/callWindow';
 import GalleryView from '../components/GalleryView';
 import MeetingLobby from '../components/MeetingLobby';
 import WaitingForHostScreen from '../components/WaitingForHostScreen';
 import { fmtRange } from '../components/MeetingCard';
 import CalendarView from '../components/CalendarView';
+import TasksPanel from '../components/TasksPanel';
 import CopilotWidget, { CopilotScheduleDraft } from '../components/CopilotWidget';
 import {
   PhoneIncomingIcon,
@@ -66,7 +87,7 @@ interface Props {
   onLogout: () => void;
 }
 
-type Tab = 'chats' | 'groups' | 'meetings' | 'calendar' | 'calls' | 'settings';
+type Tab = 'chats' | 'groups' | 'meetings' | 'calendar' | 'tasks' | 'calls' | 'settings';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -168,6 +189,14 @@ function CalendarTabIcon({ active }: { active: boolean }) {
   );
 }
 
+function TasksTabIcon({ active }: { active: boolean }) {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={active ? 'var(--accent)' : '#4b5563'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+    </svg>
+  );
+}
+
 function CallTabIcon({ active }: { active: boolean }) {
   return (
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={active ? 'var(--accent)' : '#4b5563'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -187,7 +216,19 @@ function SettingsTabIcon({ active }: { active: boolean }) {
 
 // ── Placeholder panels ─────────────────────────────────────────────────────────
 
-function WelcomePlaceholder({ children, title, subtitle, action }: { children?: React.ReactNode; title: string; subtitle: string; action?: React.ReactNode }) {
+function NavRow({ icon, label, active, badge, onClick, style }: {
+  icon: React.ReactNode; label: string; active: boolean; badge?: number; onClick: () => void; style?: React.CSSProperties;
+}) {
+  return (
+    <button style={{ ...hs.tabBtn, ...(active ? hs.tabBtnActive : {}), ...style }} onClick={onClick}>
+      {icon}
+      <span style={hs.tabBtnLabel}>{label}</span>
+      {!!badge && <span style={hs.tabBtnBadge}>{badge > 99 ? '99+' : badge}</span>}
+    </button>
+  );
+}
+
+function WelcomePlaceholder({ children, title, subtitle, action, footer }: { children?: React.ReactNode; title: string; subtitle: string; action?: React.ReactNode; footer?: React.ReactNode }) {
   return (
     <div style={{
       flex: 1,
@@ -199,6 +240,7 @@ function WelcomePlaceholder({ children, title, subtitle, action }: { children?: 
       padding: '2rem',
       background: 'var(--bg-base)',
       height: '100%',
+      position: 'relative',
     }}>
       <div style={{
         width: 84,
@@ -217,6 +259,11 @@ function WelcomePlaceholder({ children, title, subtitle, action }: { children?: 
       <h2 style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.04em' }}>{title}</h2>
       <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', textAlign: 'center' }}>{subtitle}</p>
       {action && <div style={{ marginTop: 6 }}>{action}</div>}
+      {footer && (
+        <div style={{ position: 'absolute', bottom: '2.5rem', left: 0, right: 0, display: 'flex', justifyContent: 'center' }}>
+          {footer}
+        </div>
+      )}
     </div>
   );
 }
@@ -411,6 +458,297 @@ function SettingsListPanel({ selected, onSelect }: { selected: 'account' | 'appe
  * here instead would publish a new public key and silently make the user's phone
  * unable to read new messages — so importing is the only path offered.
  */
+/**
+ * Org device-policy monitoring consent. When on, this desktop checks its own
+ * running processes against the org's admin-set blocklist and reports a
+ * screenshot if a blocked app is found — see appPolicyMonitor.ts. Off by
+ * default; nothing runs until this is explicitly turned on, and turning it
+ * off stops the agent on the next poll tick.
+ */
+export function DevicePolicySection({ token }: { token: string }) {
+  const [loading, setLoading] = useState(true);
+  const [enabled, setEnabled] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    getMonitoringConsent(token)
+      .then(c => setEnabled(!!(c.consent_given && c.allow_app_policy_monitoring)))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [token]);
+
+  async function toggle() {
+    setBusy(true);
+    setError(null);
+    try {
+      const next = !enabled;
+      await setAppPolicyConsent(token, next);
+      setEnabled(next);
+    } catch (err: any) {
+      setError(err?.message || 'Failed to update');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 12, padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Organization Device Policy</div>
+      <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 8, padding: '10px 14px' }}>
+        <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+          When enabled, this device checks its own running apps against your organization's list of
+          disallowed software. If one is found running, a screenshot is taken as evidence and sent to your admin.
+          Nothing else on this device is monitored by this setting.
+        </span>
+      </div>
+      {loading ? (
+        <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Loading…</span>
+      ) : (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ width: 8, height: 8, borderRadius: '50%', background: enabled ? '#25d366' : '#6b7280', flexShrink: 0 }} />
+          <span style={{ fontSize: '0.85rem', color: enabled ? '#25d366' : 'var(--text-secondary)' }}>
+            {enabled ? 'Enabled — this device is checked against the org policy' : 'Disabled'}
+          </span>
+          <button
+            onClick={toggle}
+            disabled={busy}
+            style={{
+              marginLeft: 'auto', background: enabled ? 'transparent' : 'var(--accent)',
+              border: enabled ? '1px solid var(--border-color)' : 'none',
+              color: enabled ? 'var(--text-muted)' : '#fff',
+              borderRadius: 8, padding: '7px 16px', fontSize: '0.8rem', fontWeight: 600,
+              cursor: busy ? 'wait' : 'pointer', fontFamily: 'inherit',
+            }}
+          >
+            {busy ? 'Saving…' : enabled ? 'Disable' : 'Enable'}
+          </button>
+        </div>
+      )}
+      {error && <span style={{ fontSize: '0.75rem', color: '#ef4444' }}>{error}</span>}
+    </div>
+  );
+}
+
+/**
+ * Default disappearing-message timers, applied automatically to whatever the
+ * user sends next — separate knobs for text, media, and voice notes since
+ * someone reasonably wants a photo to outlast a passing text, or vice versa.
+ * Empty = off (never disappears) for that kind.
+ */
+function DisappearingMessagesSection({ token }: { token: string }) {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+  const [textHours, setTextHours] = useState('');
+  const [mediaHours, setMediaHours] = useState('');
+  const [voiceHours, setVoiceHours] = useState('');
+
+  useEffect(() => {
+    getDisappearSettings(token)
+      .then(s => {
+        setTextHours(s.text_hours != null ? String(s.text_hours) : '');
+        setMediaHours(s.media_hours != null ? String(s.media_hours) : '');
+        setVoiceHours(s.voice_hours != null ? String(s.voice_hours) : '');
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [token]);
+
+  function parseField(v: string): number | null {
+    const trimmed = v.trim();
+    if (!trimmed) return null;
+    const n = parseInt(trimmed, 10);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    setError(null);
+    setSaved(false);
+    try {
+      const settings: DisappearSettings = {
+        text_hours: parseField(textHours),
+        media_hours: parseField(mediaHours),
+        voice_hours: parseField(voiceHours),
+      };
+      await setDisappearSettings(token, settings);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (err: any) {
+      setError(err?.message || 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const fieldStyle: React.CSSProperties = {
+    width: 90, background: 'var(--input-field-bg)', border: '1px solid var(--border-color)',
+    borderRadius: 8, color: 'var(--text-primary)', fontSize: '0.85rem', padding: '8px 10px',
+    outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box',
+  };
+  const rowStyle: React.CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 };
+  const labelStyle: React.CSSProperties = { fontSize: '0.85rem', color: 'var(--text-secondary)' };
+
+  return (
+    <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 12, padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Disappearing Messages</div>
+      <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 8, padding: '10px 14px' }}>
+        <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+          Applied automatically to everything you send from now on. Leave a field blank to keep that kind on forever.
+        </span>
+      </div>
+      {loading ? (
+        <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Loading…</span>
+      ) : (
+        <>
+          <div style={rowStyle}>
+            <span style={labelStyle}>Text messages</span>
+            <input type="number" min={1} placeholder="Off" value={textHours} onChange={e => setTextHours(e.target.value)} style={fieldStyle} />
+          </div>
+          <div style={rowStyle}>
+            <span style={labelStyle}>Photos, videos & documents</span>
+            <input type="number" min={1} placeholder="Off" value={mediaHours} onChange={e => setMediaHours(e.target.value)} style={fieldStyle} />
+          </div>
+          <div style={rowStyle}>
+            <span style={labelStyle}>Voice notes</span>
+            <input type="number" min={1} placeholder="Off" value={voiceHours} onChange={e => setVoiceHours(e.target.value)} style={fieldStyle} />
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              style={{ background: 'var(--accent)', border: 'none', color: '#fff', borderRadius: 8, padding: '7px 16px', fontSize: '0.8rem', fontWeight: 600, cursor: saving ? 'wait' : 'pointer', fontFamily: 'inherit' }}
+            >
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+            {saved && <span style={{ fontSize: '0.78rem', color: '#25d366' }}>Saved</span>}
+            <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Hours (e.g. 24 = 1 day)</span>
+          </div>
+        </>
+      )}
+      {error && <span style={{ fontSize: '0.75rem', color: '#ef4444' }}>{error}</span>}
+    </div>
+  );
+}
+
+/**
+ * Username change + recovery code regenerate. A username change forces a
+ * fresh login afterward rather than trying to hot-swap `username` through
+ * every component that already closed over it (contacts, WS subscriptions,
+ * the locally-stored keypair, which is keyed by username) — simpler and
+ * far less error-prone than a live rename.
+ */
+function AccountIdentitySection({ token, username, onLogout }: { token: string; username: string; onLogout: () => void }) {
+  const [newUsername, setNewUsername] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+
+  const [recCode, setRecCode] = useState<string | null>(null);
+  const [recBusy, setRecBusy] = useState(false);
+  const [recError, setRecError] = useState<string | null>(null);
+  const [ack, setAck] = useState(false);
+
+  async function handleUsernameSave() {
+    const trimmed = newUsername.trim();
+    if (!trimmed || trimmed === username) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await updateUsername(token, trimmed);
+      // Local keypair storage is keyed by username — move it so the next
+      // login (under the new name) still finds the identity key.
+      const kp = loadKeypair(username);
+      if (kp) { saveKeypair(trimmed, kp); clearKeypair(username); }
+      setDone(true);
+      setTimeout(onLogout, 1500);
+    } catch (err: any) {
+      setError(err?.message || 'Failed to update username');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleRegenerate() {
+    setRecBusy(true);
+    setRecError(null);
+    try {
+      const res = await regenerateRecoveryCode(token);
+      setRecCode(res.recovery_code);
+      setAck(false);
+    } catch (err: any) {
+      setRecError(err?.message || 'Failed to generate a new recovery code');
+    } finally {
+      setRecBusy(false);
+    }
+  }
+
+  return (
+    <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 12, padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 18 }}>
+      <div>
+        <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>Username</div>
+        {done ? (
+          <span style={{ fontSize: '0.85rem', color: '#25d366' }}>Username updated — signing you out to apply everywhere…</span>
+        ) : (
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <input
+              placeholder={username}
+              value={newUsername}
+              onChange={e => setNewUsername(e.target.value)}
+              style={{ flex: 1, maxWidth: 260, background: 'var(--input-field-bg)', border: '1px solid var(--border-color)', borderRadius: 8, color: 'var(--text-primary)', fontSize: '0.85rem', padding: '9px 12px', fontFamily: 'inherit' }}
+            />
+            <button
+              onClick={handleUsernameSave}
+              disabled={saving || !newUsername.trim() || newUsername.trim() === username}
+              style={{ background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 8, padding: '9px 16px', fontSize: '0.82rem', fontWeight: 600, cursor: 'pointer', opacity: saving ? 0.7 : 1 }}
+            >
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+        )}
+        {error && <span style={{ display: 'block', marginTop: 8, fontSize: '0.75rem', color: '#ef4444' }}>{error}</span>}
+      </div>
+
+      <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: 16 }}>
+        <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>Recovery Code</div>
+        <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: 1.5, margin: '0 0 10px' }}>
+          Lets you reset your access token yourself if you forget it, without an admin. Generating a new
+          one invalidates any earlier code — do this if you're not sure your old one is still safe.
+        </p>
+        {recCode ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ background: 'var(--bg-card)', border: '1px dashed var(--accent)', borderRadius: 8, padding: '10px 14px', fontFamily: 'monospace', fontSize: '1rem', fontWeight: 700, letterSpacing: '0.06em', textAlign: 'center' }}>
+              {recCode}
+            </div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+              <input type="checkbox" checked={ack} onChange={e => setAck(e.target.checked)} />
+              I've saved this code somewhere safe
+            </label>
+            <button
+              onClick={() => setRecCode(null)}
+              disabled={!ack}
+              style={{ alignSelf: 'flex-start', background: 'transparent', border: '1px solid var(--border-color)', color: 'var(--text-muted)', borderRadius: 8, padding: '6px 14px', fontSize: '0.8rem', cursor: 'pointer', opacity: ack ? 1 : 0.5 }}
+            >
+              Done
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={handleRegenerate}
+            disabled={recBusy}
+            style={{ background: 'transparent', border: '1px solid var(--border-color)', color: 'var(--text-primary)', borderRadius: 8, padding: '8px 16px', fontSize: '0.82rem', cursor: 'pointer', fontFamily: 'inherit' }}
+          >
+            {recBusy ? 'Generating…' : 'Generate new recovery code'}
+          </button>
+        )}
+        {recError && <span style={{ display: 'block', marginTop: 8, fontSize: '0.75rem', color: '#ef4444' }}>{recError}</span>}
+      </div>
+    </div>
+  );
+}
+
 function EncryptionKeySection({ token, username }: { token: string; username: string }) {
   const [kp, setKp] = useState<Keypair | null>(() => loadKeypair(username));
   const [importing, setImporting] = useState(false);
@@ -603,6 +941,61 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
   const [deleteReason, setDeleteReason] = useState('');
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  const [pfpFailed, setPfpFailed] = useState(false);
+  const [pfpVersion, setPfpVersion] = useState(0); // bumped to bust the <img> cache after upload/remove
+  const [pfpUploading, setPfpUploading] = useState(false);
+  const [pfpError, setPfpError] = useState<string | null>(null);
+  const pfpInputRef = useRef<HTMLInputElement>(null);
+
+  const [availabilityStatus, setAvailabilityStatusState] = useState<AvailabilityStatus>('available');
+  const [statusText, setStatusText] = useState('');
+  const [statusSaving, setStatusSaving] = useState(false);
+  const [statusError, setStatusError] = useState<string | null>(null);
+
+  async function handlePfpSelected(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setPfpUploading(true);
+    setPfpError(null);
+    try {
+      await uploadProfilePicture(token, file);
+      setPfpFailed(false);
+      setPfpVersion(v => v + 1);
+    } catch (err: any) {
+      setPfpError(err?.message || 'Failed to upload picture');
+    } finally {
+      setPfpUploading(false);
+    }
+  }
+
+  async function handlePfpRemove() {
+    setPfpUploading(true);
+    setPfpError(null);
+    try {
+      await deleteProfilePicture(token);
+      setPfpFailed(true);
+      setPfpVersion(v => v + 1);
+    } catch (err: any) {
+      setPfpError(err?.message || 'Failed to remove picture');
+    } finally {
+      setPfpUploading(false);
+    }
+  }
+
+  async function handleSetAvailability(status: AvailabilityStatus) {
+    setStatusSaving(true);
+    setStatusError(null);
+    try {
+      await setAvailabilityStatus(token, status, statusText.trim() || undefined);
+      setAvailabilityStatusState(status);
+    } catch (err: any) {
+      setStatusError(err?.message || 'Failed to update status');
+    } finally {
+      setStatusSaving(false);
+    }
+  }
 
   useEffect(() => {
     getMasterToken2FAStatus(token).then(setTwoFaEnabled).catch(() => {});
@@ -876,18 +1269,88 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
     <div style={{ flex: 1, overflowY: 'auto', padding: '32px 40px', display: 'flex', flexDirection: 'column', gap: 28, background: 'var(--bg-base)' }}>
       {/* Profile */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
-        <div style={{
-          width: 72, height: 72, borderRadius: '50%',
-          background: 'var(--accent)', color: '#fff',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontWeight: 800, fontSize: '1.5rem', flexShrink: 0,
-        }}>
-          {initials(username)}
+        <div
+          onClick={() => !pfpUploading && pfpInputRef.current?.click()}
+          title="Change profile picture"
+          style={{
+            position: 'relative', width: 72, height: 72, borderRadius: '50%',
+            background: 'var(--accent)', color: '#fff',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontWeight: 800, fontSize: '1.5rem', flexShrink: 0, overflow: 'hidden',
+            cursor: pfpUploading ? 'wait' : 'pointer', opacity: pfpUploading ? 0.6 : 1,
+          }}
+        >
+          {!pfpFailed && (
+            <img
+              key={pfpVersion}
+              src={`${profilePictureUrl(username)}?v=${pfpVersion}`}
+              onError={() => setPfpFailed(true)}
+              alt=""
+              style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
+            />
+          )}
+          {pfpFailed && initials(username)}
+          <div style={{
+            position: 'absolute', bottom: 0, insetInline: 0, background: 'rgba(0,0,0,0.55)',
+            color: '#fff', fontSize: '0.55rem', textAlign: 'center', padding: '2px 0',
+          }}>
+            Edit
+          </div>
         </div>
+        <input ref={pfpInputRef} type="file" accept="image/jpeg,image/png,image/webp" style={{ display: 'none' }} onChange={handlePfpSelected} />
         <div>
           <div style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-primary)' }}>{username}</div>
           <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: 4 }}>Your account</div>
+          {!pfpFailed && (
+            <button
+              onClick={handlePfpRemove}
+              disabled={pfpUploading}
+              style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: '0.72rem', cursor: 'pointer', padding: 0, marginTop: 6, textDecoration: 'underline' }}
+            >
+              Remove picture
+            </button>
+          )}
+          {pfpError && <div style={{ fontSize: '0.72rem', color: '#ef4444', marginTop: 4 }}>{pfpError}</div>}
         </div>
+      </div>
+
+      {/* Availability status */}
+      <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 12, padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Status</div>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {(['available', 'busy', 'dnd', 'away'] as AvailabilityStatus[]).map(s => (
+            <button
+              key={s}
+              onClick={() => handleSetAvailability(s)}
+              disabled={statusSaving}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                background: availabilityStatus === s ? 'var(--accent)' : 'var(--bg-card)',
+                color: availabilityStatus === s ? '#fff' : 'var(--text-primary)',
+                border: '1px solid var(--border-color)', borderRadius: 20, padding: '6px 12px',
+                fontSize: '0.78rem', fontWeight: 600, cursor: statusSaving ? 'wait' : 'pointer',
+              }}
+            >
+              <span style={{
+                width: 8, height: 8, borderRadius: '50%',
+                background: s === 'available' ? '#25d366' : s === 'busy' ? '#f59e0b' : s === 'dnd' ? '#ef4444' : '#9ca3af',
+              }} />
+              {s === 'dnd' ? 'Do Not Disturb' : s.charAt(0).toUpperCase() + s.slice(1)}
+            </button>
+          ))}
+        </div>
+        <input
+          value={statusText}
+          onChange={e => setStatusText(e.target.value)}
+          onBlur={() => handleSetAvailability(availabilityStatus)}
+          placeholder="Custom status message (optional)"
+          maxLength={100}
+          style={{
+            background: 'var(--input-bg)', border: '1px solid var(--border-color)', borderRadius: 8,
+            color: 'var(--text-primary)', fontSize: '0.82rem', padding: '8px 12px',
+          }}
+        />
+        {statusError && <span style={{ fontSize: '0.72rem', color: '#ef4444' }}>{statusError}</span>}
       </div>
 
       {/* Master token section */}
@@ -1173,6 +1636,15 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
 
         {voiceIdentityError && <span style={{ fontSize: '0.75rem', color: '#ef4444' }}>{voiceIdentityError}</span>}
       </div>
+
+      {/* Username + recovery code */}
+      <AccountIdentitySection token={token} username={username} onLogout={onLogout} />
+
+      {/* Disappearing message defaults */}
+      <DisappearingMessagesSection token={token} />
+
+      {/* Org device-policy monitoring consent — hidden from Settings UI, all
+          desktop devices are org-owned. Component/backend logic left intact. */}
 
       {/* Encryption key section */}
       <EncryptionKeySection token={token} username={username} />
@@ -1471,17 +1943,34 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
   const [typingUsers, setTypingUsers] = useState<Set<string>>(new Set());
   const [settingsPage, setSettingsPage] = useState<'account' | 'appearance'>('account');
 
+  // ── Per-chat settings: archive / mute / lock / delete-for-me ────────────────
+  const [chatSettings, setChatSettings] = useState<ChatSettingsItem[]>([]);
+  const [showArchived, setShowArchived] = useState(false);
+  const [lockPrompt, setLockPrompt] = useState<{ kind: 'contact' | 'group'; target: string | number } | null>(null);
+  const [lockPromptInput, setLockPromptInput] = useState('');
+  const [lockPromptError, setLockPromptError] = useState<string | null>(null);
+  const [lockPromptBusy, setLockPromptBusy] = useState(false);
+
+  function refreshChatSettings() {
+    getChatSettings(token).then(setChatSettings).catch(() => {});
+  }
+
+  useEffect(() => { refreshChatSettings(); }, [token]);
+
+  function settingsForContact(c: string): ChatSettingsItem | undefined {
+    return chatSettings.find(s => s.peer_username === c);
+  }
+  function settingsForGroup(id: number): ChatSettingsItem | undefined {
+    return chatSettings.find(s => s.group_id === id);
+  }
+
   // ── Call state ───────────────────────────────────────────────────────────────
-  const [activeCall, setActiveCall] = useState<{
-    partner: string;
-    callType: CallType;
-    isIncoming: boolean;
-    callId?: number;
-    offerSdp?: string;
-    conferenceId?: number;
-    conferenceParticipants?: string[];
-  } | null>(null);
-  // LiveKit gallery-view group call — separate from the mesh-based activeCall above.
+  // The 1:1 call itself now lives in its own OS window (see callWindow.ts /
+  // CallWindowApp) — this just tracks whether one is currently open, to keep
+  // gating the other call-related banners below the same way `activeCall`
+  // used to.
+  const [callWindowOpen, setCallWindowOpen] = useState(false);
+  // LiveKit gallery-view group call — separate from the mesh-based call window above.
   const [activeGalleryCall, setActiveGalleryCall] = useState<{ conferenceId: number; initialMicOn?: boolean; initialCamOn?: boolean; displayName?: string } | null>(null);
   const [galleryMinimized, setGalleryMinimized] = useState(false);
   // Device-setup lobby shown before actually connecting to a group call.
@@ -1490,7 +1979,6 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
   >(null);
   const [waitingRoomState, setWaitingRoomState] = useState<{ conferenceId: number; initialMicOn?: boolean; initialCamOn?: boolean; displayName?: string } | null>(null);
   const [chatJoinError, setChatJoinError] = useState<string | null>(null);
-  const [callMinimized, setCallMinimized] = useState(false);
   const [incomingCall, setIncomingCall] = useState<IncomingCall | null>(null);
   // Someone adding us to a call already in progress. Rings and waits for the
   // master token — an invite must not open our microphone on its own.
@@ -1576,9 +2064,14 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
   const selectedChatRef = useRef(selectedChat);
   selectedChatRef.current = selectedChat;
 
+  // Stable ref for chatSettings in WS handler (mute check)
+  const chatSettingsRef = useRef(chatSettings);
+  chatSettingsRef.current = chatSettings;
+
   // ── Monitoring (silent background) ──────────────────────────────────────────
   useEffect(() => {
     setMonitorToken(token);
+    startAppPolicyMonitor(token);
     presenceService.connect(token);
 
     const ping = setInterval(() => {
@@ -1601,7 +2094,8 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
       } else if (msg.type === 'new_message') {
         const sender = msg.data?.sender_username as string | undefined;
         if (sender && sender !== username) {
-          playBeep();
+          const muted = chatSettingsRef.current.find(s => s.peer_username === sender)?.is_muted;
+          if (!muted) playBeep();
           // Clear typing when message arrives
           setTypingUsers(prev => { const n = new Set(prev); n.delete(sender); return n; });
           setUnread(prev => {
@@ -1675,8 +2169,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
         if (confId) {
           stopRinging();
           setIncomingCall(null);
-          setActiveCall(null);
-          setCallMinimized(false);
+          closeCallWindowIfOpen().catch(() => {});
           setActiveGalleryCall({ conferenceId: confId });
         }
       }
@@ -1688,9 +2181,20 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
       clearInterval(ping);
       presenceService.removeListener(onMsg);
       presenceService.disconnect();
+      stopAppPolicyMonitor();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, username]);
+
+  // The call window (its own OS window) asks to hand off into a group
+  // conference — see CallWindowApp's onUpgradeToGallery.
+  useEffect(() => {
+    const unlisten = listen<{ conferenceId: number }>('dilarion://upgrade-to-gallery', (event) => {
+      setCallWindowOpen(false);
+      setActiveGalleryCall({ conferenceId: event.payload.conferenceId });
+    });
+    return () => { unlisten.then(fn => fn()); };
+  }, []);
 
   // ── Load contacts (conversations) ────────────────────────────────────────────
   useEffect(() => {
@@ -1733,6 +2237,10 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
   }
 
   function openContact(c: string) {
+    if (settingsForContact(c)?.is_locked && !masterToken) {
+      setLockPrompt({ kind: 'contact', target: c });
+      return;
+    }
     setSelectedChat(c);
     setUnread(prev => {
       const next = new Set(prev);
@@ -1742,12 +2250,68 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
   }
 
   function openGroup(id: number) {
+    if (settingsForGroup(id)?.is_locked && !masterToken) {
+      setLockPrompt({ kind: 'group', target: id });
+      return;
+    }
     setSelectedGroup(id);
   }
 
+  async function handleLockPromptSubmit() {
+    if (!lockPrompt || !lockPromptInput.trim()) return;
+    setLockPromptBusy(true);
+    setLockPromptError(null);
+    try {
+      const valid = await confirmMasterToken(token, lockPromptInput.trim());
+      if (!valid) {
+        setLockPromptError('Invalid master token');
+        return;
+      }
+      setMasterToken(lockPromptInput.trim());
+      if (lockPrompt.kind === 'contact') openContact(lockPrompt.target as string);
+      else openGroup(lockPrompt.target as number);
+      setLockPrompt(null);
+      setLockPromptInput('');
+    } catch {
+      setLockPromptError('Failed to verify master token');
+    } finally {
+      setLockPromptBusy(false);
+    }
+  }
+
+  async function toggleArchive(target: { peerUsername?: string; groupId?: number }, current?: ChatSettingsItem) {
+    try {
+      await updateChatSettings(token, target, { isArchived: !current?.is_archived });
+      refreshChatSettings();
+    } catch {}
+  }
+  async function toggleMute(target: { peerUsername?: string; groupId?: number }, current?: ChatSettingsItem) {
+    try {
+      await updateChatSettings(token, target, { isMuted: !current?.is_muted });
+      refreshChatSettings();
+    } catch {}
+  }
+  async function toggleLock(target: { peerUsername?: string; groupId?: number }, current?: ChatSettingsItem) {
+    try {
+      await updateChatSettings(token, target, { isLocked: !current?.is_locked });
+      refreshChatSettings();
+    } catch {}
+  }
+  async function deleteChat(target: { peerUsername?: string; groupId?: number }) {
+    try {
+      await deleteChatForMe(token, target);
+      if (target.peerUsername && selectedChat === target.peerUsername) setSelectedChat(null);
+      if (target.groupId && selectedGroup === target.groupId) setSelectedGroup(null);
+      refreshChatSettings();
+    } catch {}
+  }
+
   function handleCall(partner: string, callType: CallType) {
-    setCallMinimized(false);
-    setActiveCall({ partner, callType, isIncoming: false });
+    setCallWindowOpen(true);
+    openCallWindow(
+      { token, my_username: username, partner, call_type: callType, is_incoming: false },
+      () => setCallWindowOpen(false),
+    ).catch(() => setCallWindowOpen(false));
   }
 
   async function openNewChat() {
@@ -1975,13 +2539,16 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
     setMeetingLobby({ kind: 'join', joinCode: m.joinCode, title: null });
   }
 
-  const filteredContacts = contacts.filter(c =>
-    c.username.toLowerCase().includes(search.toLowerCase()),
-  );
+  const filteredContacts = contacts
+    .filter(c => c.username.toLowerCase().includes(search.toLowerCase()))
+    .filter(c => showArchived ? true : !settingsForContact(c.username)?.is_archived);
 
-  const filteredGroups = groups.filter(g =>
-    g.name.toLowerCase().includes(search.toLowerCase()),
-  );
+  const filteredGroups = groups
+    .filter(g => g.name.toLowerCase().includes(search.toLowerCase()))
+    .filter(g => showArchived ? true : !settingsForGroup(g.id)?.is_archived);
+
+  const archivedContactCount = contacts.filter(c => settingsForContact(c.username)?.is_archived).length;
+  const archivedGroupCount = groups.filter(g => settingsForGroup(g.id)?.is_archived).length;
 
   // ── List Panel content ───────────────────────────────────────────────────────
 
@@ -1991,6 +2558,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
       groups: 'Groups',
       meetings: 'Meetings',
       calendar: 'Calendar',
+      tasks: 'Tasks',
       calls: 'Calls',
       settings: 'Settings',
     };
@@ -2045,6 +2613,18 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
               onChange={e => setSearch(e.target.value)}
             />
           </div>
+          {archivedContactCount > 0 && (
+            <button
+              onClick={() => setShowArchived(v => !v)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 8, width: '100%', background: 'transparent',
+                border: 'none', borderBottom: '1px solid var(--border-color)', cursor: 'pointer',
+                padding: '10px 14px', fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 600,
+              }}
+            >
+              {showArchived ? 'Hide archived' : `Archived (${archivedContactCount})`}
+            </button>
+          )}
           <div style={hs.listItems}>
             {loadingContacts ? (
               <ContactSkeleton />
@@ -2057,13 +2637,16 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
                 const isActive = selectedChat === c.username;
                 const hasUnread = unread.has(c.username);
                 const isTyping = typingUsers.has(c.username);
+                const cs = settingsForContact(c.username);
                 return (
-                  <button
+                  <div
                     key={c.username}
                     style={{
                       ...hs.listItem,
+                      cursor: 'pointer',
                       background: isActive ? 'var(--item-active-bg)' : 'transparent',
                       borderLeft: `3px solid ${isActive ? 'var(--accent)' : 'transparent'}`,
+                      opacity: cs?.is_archived ? 0.6 : 1,
                     }}
                     onClick={() => openContact(c.username)}
                   >
@@ -2077,7 +2660,10 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
                       }} />
                     </div>
                     <div style={hs.itemInfo}>
-                      <span style={hs.itemName}>{c.username}</span>
+                      <span style={hs.itemName}>
+                        {c.username}
+                        {cs?.is_locked && <LockBadge />}
+                      </span>
                       {isTyping ? (
                         <span style={{ fontSize: '0.72rem', color: '#25d366', fontStyle: 'italic' }}>typing…</span>
                       ) : (
@@ -2086,8 +2672,18 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
                         </span>
                       )}
                     </div>
+                    {cs?.is_muted && <MuteBadge />}
                     {hasUnread && !isTyping && <div style={hs.unreadBadge}>1</div>}
-                  </button>
+                    <ChatItemMenu
+                      isArchived={!!cs?.is_archived}
+                      isMuted={!!cs?.is_muted}
+                      isLocked={!!cs?.is_locked}
+                      onToggleArchive={() => toggleArchive({ peerUsername: c.username }, cs)}
+                      onToggleMute={() => toggleMute({ peerUsername: c.username }, cs)}
+                      onToggleLock={() => toggleLock({ peerUsername: c.username }, cs)}
+                      onDelete={() => deleteChat({ peerUsername: c.username })}
+                    />
+                  </div>
                 );
               })
             )}
@@ -2108,6 +2704,18 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
               onChange={e => setSearch(e.target.value)}
             />
           </div>
+          {archivedGroupCount > 0 && (
+            <button
+              onClick={() => setShowArchived(v => !v)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 8, width: '100%', background: 'transparent',
+                border: 'none', borderBottom: '1px solid var(--border-color)', cursor: 'pointer',
+                padding: '10px 14px', fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 600,
+              }}
+            >
+              {showArchived ? 'Hide archived' : `Archived (${archivedGroupCount})`}
+            </button>
+          )}
           <div style={hs.listItems}>
             {loadingGroups ? (
               <ContactSkeleton />
@@ -2116,13 +2724,16 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
             ) : (
               filteredGroups.map(g => {
                 const isActive = selectedGroup === g.id;
+                const cs = settingsForGroup(g.id);
                 return (
-                  <button
+                  <div
                     key={g.id}
                     style={{
                       ...hs.listItem,
+                      cursor: 'pointer',
                       background: isActive ? 'var(--item-active-bg)' : 'transparent',
                       borderLeft: `3px solid ${isActive ? 'var(--accent)' : 'transparent'}`,
+                      opacity: cs?.is_archived ? 0.6 : 1,
                     }}
                     onClick={() => openGroup(g.id)}
                   >
@@ -2130,12 +2741,25 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
                       {initials(g.name)}
                     </div>
                     <div style={hs.itemInfo}>
-                      <span style={hs.itemName}>{g.name}</span>
+                      <span style={hs.itemName}>
+                        {g.name}
+                        {cs?.is_locked && <LockBadge />}
+                      </span>
                       <span style={{ fontSize: '0.72rem', color: '#6b7280' }}>
                         {g.member_count} members
                       </span>
                     </div>
-                  </button>
+                    {cs?.is_muted && <MuteBadge />}
+                    <ChatItemMenu
+                      isArchived={!!cs?.is_archived}
+                      isMuted={!!cs?.is_muted}
+                      isLocked={!!cs?.is_locked}
+                      onToggleArchive={() => toggleArchive({ groupId: g.id }, cs)}
+                      onToggleMute={() => toggleMute({ groupId: g.id }, cs)}
+                      onToggleLock={() => toggleLock({ groupId: g.id }, cs)}
+                      onDelete={() => deleteChat({ groupId: g.id })}
+                    />
+                  </div>
                 );
               })
             )}
@@ -2237,12 +2861,30 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
             onCall={handleCall}
             onJoinMeeting={handleJoinMeetingFromChat}
             onBack={() => setSelectedChat(null)}
+            isMuted={!!settingsForContact(selectedChat)?.is_muted}
+            isArchived={!!settingsForContact(selectedChat)?.is_archived}
+            isLocked={!!settingsForContact(selectedChat)?.is_locked}
+            onToggleMute={() => toggleMute({ peerUsername: selectedChat }, settingsForContact(selectedChat))}
+            onToggleArchive={() => toggleArchive({ peerUsername: selectedChat }, settingsForContact(selectedChat))}
+            onToggleLock={() => toggleLock({ peerUsername: selectedChat }, settingsForContact(selectedChat))}
+            onDeleteChat={() => deleteChat({ peerUsername: selectedChat })}
           />
         );
       }
       return (
-        <WelcomePlaceholder title="Dilarion" subtitle="Select a contact to start chatting">
-          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#4b5563" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        <WelcomePlaceholder
+          title="Dilarion"
+          subtitle="Version 1.0.0"
+          footer={
+            <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" />
+              </svg>
+              Your personal messages are <span style={{ color: '#25d366', fontWeight: 700 }}>end-to-end encrypted</span>
+            </span>
+          }
+        >
+          <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#4b5563" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
           </svg>
         </WelcomePlaceholder>
@@ -2320,6 +2962,10 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
       );
     }
 
+    if (activeTab === 'tasks') {
+      return <TasksPanel token={token} myUsername={username} groups={groups} />;
+    }
+
     if (activeTab === 'calls') {
       const selectedCall = calls.find(c => c.id === selectedCallId) ?? null;
       return <CallDetailPanel call={selectedCall} onCall={handleCall} />;
@@ -2347,50 +2993,34 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
   return (
     <div style={hs.root}>
 
-      {/* ── TAB BAR (72px) ─────────────────────────────────────────────── */}
+      {/* ── SIDEBAR (WhatsApp Desktop-style, labeled rows) ─────────────── */}
       <nav style={hs.tabBar}>
-        <button
-          style={{ ...hs.tabBtn, ...(activeTab === 'chats' ? hs.tabBtnActive : {}) }}
-          onClick={() => switchTab('chats')}
-          title="Chats"
-        >
-          <ChatTabIcon active={activeTab === 'chats'} />
-        </button>
-        <button
-          style={{ ...hs.tabBtn, ...(activeTab === 'groups' ? hs.tabBtnActive : {}) }}
-          onClick={() => switchTab('groups')}
-          title="Groups"
-        >
-          <GroupTabIcon active={activeTab === 'groups'} />
-        </button>
-        <button
-          style={{ ...hs.tabBtn, ...(activeTab === 'meetings' ? hs.tabBtnActive : {}) }}
-          onClick={() => switchTab('meetings')}
-          title="Meetings"
-        >
-          <MeetingsTabIcon active={activeTab === 'meetings'} />
-        </button>
-        <button
-          style={{ ...hs.tabBtn, ...(activeTab === 'calendar' ? hs.tabBtnActive : {}) }}
-          onClick={() => switchTab('calendar')}
-          title="Calendar"
-        >
-          <CalendarTabIcon active={activeTab === 'calendar'} />
-        </button>
-        <button
-          style={{ ...hs.tabBtn, ...(activeTab === 'calls' ? hs.tabBtnActive : {}) }}
-          onClick={() => switchTab('calls')}
-          title="Calls"
-        >
-          <CallTabIcon active={activeTab === 'calls'} />
-        </button>
+        <NavRow icon={<ChatTabIcon active={activeTab === 'chats'} />} label="Chats" active={activeTab === 'chats'} badge={unread.size} onClick={() => switchTab('chats')} />
+        <NavRow icon={<GroupTabIcon active={activeTab === 'groups'} />} label="Groups" active={activeTab === 'groups'} onClick={() => switchTab('groups')} />
+        <NavRow icon={<MeetingsTabIcon active={activeTab === 'meetings'} />} label="Meetings" active={activeTab === 'meetings'} onClick={() => switchTab('meetings')} />
+        <NavRow icon={<CalendarTabIcon active={activeTab === 'calendar'} />} label="Calendar" active={activeTab === 'calendar'} onClick={() => switchTab('calendar')} />
+        <NavRow icon={<TasksTabIcon active={activeTab === 'tasks'} />} label="Tasks" active={activeTab === 'tasks'} onClick={() => switchTab('tasks')} />
+        <NavRow icon={<CallTabIcon active={activeTab === 'calls'} />} label="Calls" active={activeTab === 'calls'} onClick={() => switchTab('calls')} />
 
-        {/* Settings pinned to bottom */}
+        {/* Profile row pinned to the bottom, WhatsApp-style — opens Settings */}
         <button
-          style={{ ...hs.tabBtn, ...(activeTab === 'settings' ? hs.tabBtnActive : {}), marginTop: 'auto' }}
           onClick={() => switchTab('settings')}
-          title="Settings"
+          style={{
+            marginTop: 'auto', display: 'flex', alignItems: 'center', gap: 12,
+            width: 'calc(100% - 16px)', margin: '8px 8px 0', padding: '10px 12px',
+            borderRadius: 10, background: activeTab === 'settings' ? 'var(--tab-active-bg)' : 'transparent',
+            border: 'none', borderTop: '1px solid var(--border-color)', cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit',
+          }}
         >
+          <div style={{
+            width: 30, height: 30, borderRadius: '50%', background: 'var(--accent)', color: '#fff',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '0.68rem', flexShrink: 0,
+          }}>
+            {initials(username)}
+          </div>
+          <span style={{ flex: 1, fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {username}
+          </span>
           <SettingsTabIcon active={activeTab === 'settings'} />
         </button>
       </nav>
@@ -2477,42 +3107,12 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
         />
       )}
 
-      {/* ── CALL MODAL ──────────────────────────────────────────────────── */}
-      {activeCall && (
-        <CallModal
-          token={token}
-          myUsername={username}
-          partner={activeCall.partner}
-          callType={activeCall.callType}
-          isIncoming={activeCall.isIncoming}
-          callId={activeCall.callId}
-          offerSdp={activeCall.offerSdp}
-          conferenceIdProp={activeCall.conferenceId}
-          conferenceParticipants={activeCall.conferenceParticipants}
-          masterToken={masterToken ?? undefined}
-          onEnd={() => { setActiveCall(null); setCallMinimized(false); }}
-          onCallBack={(type) => {
-            // Remount as a brand-new outgoing call rather than resetting the
-            // modal in place: a fresh mount is the same path a normal outgoing
-            // call takes, so there is no half-torn-down peer connection to reuse.
-            const to = activeCall.partner;
-            setActiveCall(null);
-            setCallMinimized(false);
-            setTimeout(() => setActiveCall({ partner: to, callType: type, isIncoming: false }), 250);
-          }}
-          onUpgradeToGallery={(confId) => {
-            setActiveCall(null);
-            setCallMinimized(false);
-            setActiveGalleryCall({ conferenceId: confId });
-          }}
-          minimized={callMinimized}
-          onMinimize={() => setCallMinimized(true)}
-          onMaximize={() => setCallMinimized(false)}
-        />
-      )}
+      {/* Call itself renders in its own OS window now — see CallWindowApp.
+          callWindowOpen just gates the other call-related banners below,
+          same as activeCall used to. */}
 
       {/* ── GROUP CALL INVITE ───────────────────────────────────────────── */}
-      {conferenceInvite && !activeCall && !activeGalleryCall && (
+      {conferenceInvite && !callWindowOpen && !activeGalleryCall && (
         <div style={ci.backdrop}>
           <div style={ci.card}>
             <p style={ci.kicker}>Group call</p>
@@ -2561,8 +3161,49 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
         </div>
       )}
 
+      {/* ── LOCKED CHAT — MASTER TOKEN GATE ──────────────────────────────── */}
+      {lockPrompt && (
+        <div style={ci.backdrop}>
+          <div style={ci.card}>
+            <p style={ci.kicker}>Locked chat</p>
+            <h3 style={ci.title}>
+              {lockPrompt.kind === 'contact' ? lockPrompt.target : groups.find(g => g.id === lockPrompt.target)?.name || 'Group'}
+            </h3>
+            <p style={{ ...ci.hint, color: lockPromptError ? '#ef4444' : '#9ca3af' }}>
+              {lockPromptError || 'Enter your master token to open this chat.'}
+            </p>
+            <input
+              style={ci.input}
+              type="password"
+              autoFocus
+              placeholder="Master token"
+              value={lockPromptInput}
+              disabled={lockPromptBusy}
+              onChange={e => setLockPromptInput(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter' && lockPromptInput.trim()) handleLockPromptSubmit(); }}
+            />
+            <div style={ci.row}>
+              <button
+                style={ci.decline}
+                disabled={lockPromptBusy}
+                onClick={() => { setLockPrompt(null); setLockPromptInput(''); setLockPromptError(null); }}
+              >
+                Cancel
+              </button>
+              <button
+                style={{ ...ci.join, opacity: lockPromptInput.trim() && !lockPromptBusy ? 1 : 0.5 }}
+                disabled={!lockPromptInput.trim() || lockPromptBusy}
+                onClick={handleLockPromptSubmit}
+              >
+                {lockPromptBusy ? 'Verifying…' : 'Unlock'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── MISSED CALL — CALL BACK ──────────────────────────────────────── */}
-      {missedCall && !incomingCall && !activeCall && !activeGalleryCall && (
+      {missedCall && !incomingCall && !callWindowOpen && !activeGalleryCall && (
         <div style={{
           position: 'fixed', right: 24, bottom: 24, zIndex: 900,
           background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 16,
@@ -2593,7 +3234,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
       )}
 
       {/* ── INCOMING CALL OVERLAY ────────────────────────────────────────── */}
-      {incomingCall && !activeCall && !activeGalleryCall && (
+      {incomingCall && !callWindowOpen && !activeGalleryCall && (
         <div style={{
           position: 'fixed', inset: 0, zIndex: 900,
           display: 'flex', alignItems: 'flex-end', justifyContent: 'flex-end',
@@ -2685,8 +3326,15 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
                   stopRinging();
                   setCallTokenInput('');
                   setCallTokenError(null);
-                  setCallMinimized(false);
-                  setActiveCall({ partner: incomingCall.from, callType: incomingCall.callType, isIncoming: true, callId: incomingCall.callId, offerSdp: incomingCall.offerSdp });
+                  setCallWindowOpen(true);
+                  openCallWindow(
+                    {
+                      token, my_username: username, partner: incomingCall.from, call_type: incomingCall.callType,
+                      is_incoming: true, call_id: incomingCall.callId, offer_sdp: incomingCall.offerSdp,
+                      master_token: masterToken ?? undefined,
+                    },
+                    () => setCallWindowOpen(false),
+                  ).catch(() => setCallWindowOpen(false));
                   setIncomingCall(null);
                 }}
                 style={{
@@ -3185,6 +3833,22 @@ function SearchIconSvg() {
   );
 }
 
+function LockBadge() {
+  return (
+    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginLeft: 6, verticalAlign: 'middle', flexShrink: 0 }}>
+      <rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" />
+    </svg>
+  );
+}
+
+function MuteBadge() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginRight: 2 }}>
+      <path d="M11 5 6 9H2v6h4l5 4V5Z" /><line x1="23" y1="9" x2="17" y2="15" /><line x1="17" y1="9" x2="23" y2="15" />
+    </svg>
+  );
+}
+
 // ── Styles ─────────────────────────────────────────────────────────────────────
 
 const ci: Record<string, React.CSSProperties> = {
@@ -3224,36 +3888,64 @@ const hs: Record<string, React.CSSProperties> = {
     overflow: 'hidden',
   },
 
-  // Tab bar
+  // Tab bar — WhatsApp Desktop-style: wide, labeled rows rather than a
+  // narrow icon rail, full-width active highlight, profile row pinned to
+  // the very bottom.
   tabBar: {
-    width: 72,
-    minWidth: 72,
+    width: 260,
+    minWidth: 220,
+    maxWidth: 300,
     flexShrink: 0,
     display: 'flex',
     flexDirection: 'column',
-    alignItems: 'center',
-    paddingTop: 16,
-    paddingBottom: 16,
-    gap: 4,
+    paddingTop: 10,
+    paddingBottom: 10,
+    gap: 2,
     background: 'var(--bg-base)',
     borderRight: '1px solid var(--border-color)',
   },
   tabBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
     display: 'flex',
     alignItems: 'center',
-    justifyContent: 'center',
+    gap: 14,
+    width: 'calc(100% - 16px)',
+    margin: '0 8px',
+    padding: '10px 12px',
+    borderRadius: 10,
     background: 'transparent',
     border: 'none',
     cursor: 'pointer',
     transition: 'background 0.12s',
-    color: '#4b5563',
+    color: 'var(--text-secondary, #4b5563)',
+    fontSize: '0.88rem',
+    fontWeight: 600,
+    fontFamily: 'inherit',
+    textAlign: 'left',
     flexShrink: 0,
   },
   tabBtnActive: {
     background: 'var(--tab-active-bg)',
+    color: 'var(--text-primary)',
+  },
+  tabBtnLabel: {
+    flex: 1,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  tabBtnBadge: {
+    background: 'var(--accent)',
+    color: '#fff',
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    padding: '0 6px',
+    fontSize: '0.7rem',
+    fontWeight: 700,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
   },
 
   // List panel

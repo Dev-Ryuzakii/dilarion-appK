@@ -7,6 +7,7 @@ import {
   uploadMedia,
   markRead,
   getUserDevices,
+  getAdminPublicKey,
   decryptChatMessage,
   confirmMasterToken,
   toggleReaction,
@@ -22,10 +23,16 @@ import { encryptMessage } from '../services/crypto';
 import { generateDecoy } from '../services/decoy';
 import { loadKeypair } from '../services/keys';
 import { presenceService, WsMessage } from '../services/presence';
-import { LockIcon, MicIcon as MicIconSvg, PaperclipIcon as PaperclipIconSvg, CameraIcon, CloseIcon, PinIcon } from '../components/Icons';
+import { LockIcon, MicIcon as MicIconSvg, PaperclipIcon as PaperclipIconSvg, CameraIcon, CloseIcon, PinIcon, SparkleIcon } from '../components/Icons';
 import MediaBubble, { DocumentBubble } from '../components/MediaBubble';
 import MeetingCard, { JoinMeetingHandler } from '../components/MeetingCard';
-import { MessageMenuTrigger, MessageReactionPills } from '../components/MessageMenu';
+import { MessageMenuTrigger, MessageReactionPills, TrashIcon, SmileyIcon } from '../components/MessageMenu';
+import CopilotResultModal from '../components/CopilotResultModal';
+import MasterTokenPromptModal from '../components/MasterTokenPromptModal';
+import MediaPicker from '../components/MediaPicker';
+import { getSticker } from '../components/stickers';
+import ContactInfoPanel from '../components/ContactInfoPanel';
+import { summarizeThreadCopilot, composeReplyCopilot, translateCopilot, clearConversation, GifResult } from '../services/api';
 
 interface Props {
   token: string;
@@ -38,6 +45,15 @@ interface Props {
   onJoinMeeting: JoinMeetingHandler;
   /** Leave the conversation and go back to the list. */
   onBack?: () => void;
+  /** Contact-info panel state/actions — owned by HomeScreen so the chat list
+      stays in sync with changes made from inside the chat too. */
+  isMuted?: boolean;
+  isArchived?: boolean;
+  isLocked?: boolean;
+  onToggleMute?: () => void;
+  onToggleArchive?: () => void;
+  onToggleLock?: () => void;
+  onDeleteChat?: () => void;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -47,6 +63,12 @@ function isEncrypted(ct: string | null | undefined): boolean {
 }
 function isMeeting(ct: string | null | undefined): boolean {
   return ct === 'meeting';
+}
+// GIF/sticker carry the exact same encrypted_content/key/iv/decoy shape as
+// plain text — content_type is the only difference, so they share
+// EncryptedBubble's decrypt gate and just render the revealed string differently.
+function isGifOrSticker(ct: string | null | undefined): boolean {
+  return ct === 'gif' || ct === 'sticker';
 }
 
 // Legacy rows written by the old server fallback. These strings must never reach
@@ -71,6 +93,25 @@ function isMedia(ct: string | null | undefined): boolean {
 // decoy document on first tap rather than a plain lock gate (see DocumentBubble).
 function isDocument(ct: string | null | undefined): boolean {
   return isMedia(ct) && !isImage(ct) && !isVoice(ct);
+}
+
+/** Every device of every given username, plus the admin master key (if
+ * reachable) under the reserved "__admin__" entry — a failed admin-key fetch
+ * just means that one send isn't admin-decryptable, never blocks sending.
+ * Throws `noDevicesError` if none of the real recipients have any device —
+ * the admin key alone is never enough to consider a send valid. */
+export async function buildRecipientKeys(token: string, usernames: string[], noDevicesError: string): Promise<Record<string, string>> {
+  const deviceLists = await Promise.all(usernames.map(u => getUserDevices(token, u)));
+  const deviceKeys: Record<string, string> = {};
+  for (const devices of deviceLists) {
+    for (const d of devices) {
+      if (d.public_key) deviceKeys[d.device_uuid] = d.public_key;
+    }
+  }
+  if (Object.keys(deviceKeys).length === 0) throw new Error(noDevicesError);
+  const adminKey = await getAdminPublicKey(token).catch(() => null);
+  if (adminKey) deviceKeys['__admin__'] = adminKey;
+  return deviceKeys;
 }
 
 const DECOY_KIND_LABELS: [DecoyKind, string][] = [
@@ -153,9 +194,10 @@ interface EncryptedBubbleProps {
   onDecrypt: (masterToken: string, messageId: number) => Promise<string>;
   onMasterTokenSaved: (t: string) => void;
   onRevealed?: (text: string) => void;
+  contentType?: string | null;
 }
 
-function EncryptedBubble({ token, messageId, decoyContent, masterToken, isMine, onDecrypt, onMasterTokenSaved, onRevealed }: EncryptedBubbleProps) {
+function EncryptedBubble({ token, messageId, decoyContent, masterToken, isMine, onDecrypt, onMasterTokenSaved, onRevealed, contentType }: EncryptedBubbleProps) {
   const [decryptedContent, setDecryptedContent] = useState<string | null>(null);
   const [showing, setShowing] = useState(false);
   const [inputVisible, setInputVisible] = useState(false);
@@ -225,6 +267,23 @@ function EncryptedBubble({ token, messageId, decoyContent, masterToken, isMine, 
 
   // Showing decrypted content
   if (showing && decryptedContent !== null) {
+    if (contentType === 'gif') {
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <img src={decryptedContent} alt="GIF" style={{ maxWidth: 220, maxHeight: 220, borderRadius: 10, display: 'block' }} />
+          <span style={{ fontSize: '0.65rem', color: '#6b7280', fontStyle: 'italic' }}>Clears in 30s</span>
+        </div>
+      );
+    }
+    if (contentType === 'sticker') {
+      const sticker = getSticker(decryptedContent.replace(/^sticker:/, ''));
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: isMine ? 'flex-end' : 'flex-start' }}>
+          {sticker ? sticker.render() : <span style={{ fontSize: '0.82rem', color: '#6b7280' }}>[sticker]</span>}
+          <span style={{ fontSize: '0.65rem', color: '#6b7280', fontStyle: 'italic' }}>Clears in 30s</span>
+        </div>
+      );
+    }
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
         <span style={{ fontSize: '0.88rem', lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
@@ -449,12 +508,13 @@ interface MessageBubbleProps {
   onStarToggle: () => void;
   onEdit: () => void;
   onDelete: () => void;
+  onTranslate: (text: string) => void;
   isStarred: boolean;
 }
 
 function MessageBubble({
   msg, isMine, token, masterToken, onDecrypt, onMasterTokenSaved, onRemoveMessage, onJoinMeeting,
-  replyToMsg, onReact, onReply, onForward, onPinToggle, onStarToggle, onEdit, onDelete, isStarred,
+  replyToMsg, onReact, onReply, onForward, onPinToggle, onStarToggle, onEdit, onDelete, onTranslate, isStarred,
 }: MessageBubbleProps) {
   const ct = msg.content_type;
   const mediaId = msg.content;
@@ -474,6 +534,18 @@ function MessageBubble({
     setTimeout(() => setCopyHint(null), 1500);
   }
 
+  const isTextish = !isMeeting(ct) && !isDocument(ct) && !isVoice(ct) && !isImage(ct) && !isMedia(ct);
+
+  function handleTranslateClick() {
+    const text = revealedText ?? (isEncrypted(ct) ? null : msg.content);
+    if (!text) {
+      setCopyHint('Unlock the message first');
+      setTimeout(() => setCopyHint(null), 1500);
+      return;
+    }
+    onTranslate(text);
+  }
+
   if (msg.is_deleted) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: isMine ? 'flex-end' : 'flex-start', marginBottom: 4 }}>
@@ -487,7 +559,7 @@ function MessageBubble({
   let body: React.ReactNode;
   if (isMeeting(ct)) {
     body = <MeetingCard content={msg.content} senderUsername={msg.sender} onJoin={onJoinMeeting} />;
-  } else if (isEncrypted(ct)) {
+  } else if (isEncrypted(ct) || isGifOrSticker(ct)) {
     body = (
       <EncryptedBubble
         token={token}
@@ -498,6 +570,7 @@ function MessageBubble({
         onDecrypt={onDecrypt}
         onMasterTokenSaved={onMasterTokenSaved}
         onRevealed={setRevealedText}
+        contentType={ct}
       />
     );
   } else if (isDocument(ct)) {
@@ -527,10 +600,17 @@ function MessageBubble({
       />
     );
   } else if (isImage(ct) || isMedia(ct)) {
+    // Photos/videos self-gate (decoy-first, no lock wrapper) — see
+    // VisualMediaBubble inside MediaBubble.tsx, same model as voice notes above.
     body = (
-      <LockedContent apiToken={token} masterToken={masterToken} onMasterTokenSaved={onMasterTokenSaved} isMine={isMine}>
-        <MediaBubble token={token} mediaId={mediaId} contentType={ct} onRemove={() => onRemoveMessage(msg.id)} />
-      </LockedContent>
+      <MediaBubble
+        token={token}
+        mediaId={mediaId}
+        contentType={ct}
+        masterToken={masterToken}
+        onMasterTokenSaved={onMasterTokenSaved}
+        onRemove={() => onRemoveMessage(msg.id)}
+      />
     );
   } else {
     body = (
@@ -571,6 +651,7 @@ function MessageBubble({
             onStarToggle={onStarToggle}
             onEdit={isMine ? onEdit : undefined}
             onDelete={isMine ? onDelete : undefined}
+            onTranslate={isTextish ? handleTranslateClick : undefined}
             isPinned={!!msg.is_pinned}
             isStarred={isStarred}
           />
@@ -696,12 +777,17 @@ export interface PendingMsg {
   filename?: string;
 }
 
-export default function ChatPanel({ token, myUsername, partner, partnerOnline, masterToken, onMasterTokenSaved, onCall, onJoinMeeting, onBack }: Props) {
+export default function ChatPanel({
+  token, myUsername, partner, partnerOnline, masterToken, onMasterTokenSaved, onCall, onJoinMeeting, onBack,
+  isMuted, isArchived, isLocked, onToggleMute, onToggleArchive, onToggleLock, onDeleteChat,
+}: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [pending, setPending] = useState<PendingMsg[]>([]);
   const [loading, setLoading] = useState(true);
   const [text, setText] = useState('');
   const [isSending, setIsSending] = useState(false);
+  const [showMediaPicker, setShowMediaPicker] = useState(false);
+  const [showContactInfo, setShowContactInfo] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [recording, setRecording] = useState(false);
   const [recSeconds, setRecSeconds] = useState(0);
@@ -713,6 +799,12 @@ export default function ChatPanel({ token, myUsername, partner, partnerOnline, m
   const [forwardTarget, setForwardTarget] = useState<ChatMessage | null>(null);
   const [forwardUsername, setForwardUsername] = useState('');
   const [forwardError, setForwardError] = useState<string | null>(null);
+
+  const [copilotResult, setCopilotResult] = useState<{ title: string; loading: boolean; error: string | null; content: string | null } | null>(null);
+  const [tokenGateOpen, setTokenGateOpen] = useState(false);
+  const tokenGateResolveRef = useRef<((t: string | null) => void) | null>(null);
+  const [replySuggestions, setReplySuggestions] = useState<string[] | null>(null);
+  const [suggestLoading, setSuggestLoading] = useState(false);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -762,6 +854,9 @@ export default function ChatPanel({ token, myUsername, partner, partnerOnline, m
         if (sender === partner) {
           setPartnerTyping(!!isTyping);
         }
+      } else if (msg.type === 'conversation_cleared') {
+        const withUsername = msg.data?.with_username as string | undefined;
+        if (withUsername === partner) setMessages([]);
       }
     };
     presenceService.addListener(handler);
@@ -775,6 +870,107 @@ export default function ChatPanel({ token, myUsername, partner, partnerOnline, m
     if (!msg) throw new Error('Message not found');
     const kp = loadKeypair(myUsername);
     return decryptChatMessage(msg, kp?.privateKey ?? null, myUsername, kp?.deviceUuid ?? null);
+  }
+
+  // ── Copilot actions ──────────────────────────────────────────────────────────
+  // Summarize/suggest-reply need bulk plaintext, which decryptChatMessage will
+  // hand over on just the device key — no master token required. Gating these
+  // behind ensureMasterToken() re-adds the ceremony so a device without the
+  // token can't get a plaintext summary that bypasses deniability.
+
+  function ensureMasterToken(): Promise<string | null> {
+    if (masterToken) return Promise.resolve(masterToken);
+    return new Promise(resolve => {
+      tokenGateResolveRef.current = resolve;
+      setTokenGateOpen(true);
+    });
+  }
+
+  async function getRecentPlaintext(limit = 40): Promise<string[]> {
+    const kp = loadKeypair(myUsername);
+    const recent = messages.filter(m => !m.is_deleted && !isMeeting(m.content_type)).slice(-limit);
+    const lines: string[] = [];
+    for (const m of recent) {
+      const who = m.sender === myUsername ? 'You' : m.sender;
+      if (isEncrypted(m.content_type)) {
+        try {
+          const text = await decryptChatMessage(m, kp?.privateKey ?? null, myUsername, kp?.deviceUuid ?? null);
+          lines.push(`${who}: ${text}`);
+        } catch {
+          // skip messages this device can't decrypt
+        }
+      } else if (m.content && !isDocument(m.content_type) && !isVoice(m.content_type) && !isImage(m.content_type) && !isMedia(m.content_type)) {
+        lines.push(`${who}: ${m.content}`);
+      }
+    }
+    return lines;
+  }
+
+  async function handleSummarize() {
+    const mt = await ensureMasterToken();
+    if (!mt) return;
+    setCopilotResult({ title: 'Thread summary', loading: true, error: null, content: null });
+    try {
+      const lines = await getRecentPlaintext();
+      if (lines.length === 0) {
+        setCopilotResult({ title: 'Thread summary', loading: false, error: 'Nothing to summarize yet.', content: null });
+        return;
+      }
+      const summary = await summarizeThreadCopilot(token, lines.join('\n'));
+      setCopilotResult({ title: 'Thread summary', loading: false, error: null, content: summary });
+    } catch (err: any) {
+      setCopilotResult({ title: 'Thread summary', loading: false, error: err?.message || 'Failed to summarize', content: null });
+    }
+  }
+
+  async function handleSuggestReply() {
+    const lastFromPartner = [...messages].reverse().find(m => m.sender === partner && !m.is_deleted);
+    if (!lastFromPartner) return;
+    const mt = await ensureMasterToken();
+    if (!mt) return;
+
+    let contextText = lastFromPartner.content || '';
+    if (isEncrypted(lastFromPartner.content_type)) {
+      try {
+        const kp = loadKeypair(myUsername);
+        contextText = await decryptChatMessage(lastFromPartner, kp?.privateKey ?? null, myUsername, kp?.deviceUuid ?? null);
+      } catch {
+        setSendError('Could not decrypt that message to suggest a reply');
+        return;
+      }
+    }
+    setSuggestLoading(true);
+    setReplySuggestions(null);
+    try {
+      const suggestions = await composeReplyCopilot(token, contextText);
+      setReplySuggestions(suggestions);
+    } catch (err: any) {
+      setSendError(err?.message || 'Copilot could not draft a reply');
+    } finally {
+      setSuggestLoading(false);
+    }
+  }
+
+  async function handleClearChat() {
+    if (!window.confirm(`Clear this entire conversation with ${partner}? This deletes it for both of you and can't be undone.`)) return;
+    try {
+      await clearConversation(token, partner);
+      setMessages([]);
+    } catch (err: any) {
+      setSendError(err?.message || 'Failed to clear conversation');
+    }
+  }
+
+  async function handleTranslateMessage(text: string) {
+    const target = window.prompt('Translate to which language?', 'English');
+    if (!target || !target.trim()) return;
+    setCopilotResult({ title: `Translation (${target.trim()})`, loading: true, error: null, content: null });
+    try {
+      const translated = await translateCopilot(token, text, target.trim());
+      setCopilotResult({ title: `Translation (${target.trim()})`, loading: false, error: null, content: translated });
+    } catch (err: any) {
+      setCopilotResult({ title: `Translation (${target.trim()})`, loading: false, error: err?.message || 'Failed to translate', content: null });
+    }
   }
 
   // ── Collaboration actions ────────────────────────────────────────────────────
@@ -845,15 +1041,10 @@ export default function ChatPanel({ token, myUsername, partner, partnerOnline, m
     }
     try {
       const plaintext = await handleDecrypt(masterToken, target.id);
-      const [theirDevices, myDevices] = await Promise.all([
-        getUserDevices(token, targetUsername),
-        getUserDevices(token, myUsername),
-      ]);
-      const deviceKeys: Record<string, string> = {};
-      for (const d of [...theirDevices, ...myDevices]) {
-        if (d.public_key) deviceKeys[d.device_uuid] = d.public_key;
-      }
-      if (Object.keys(deviceKeys).length === 0) throw new Error(`${targetUsername} has no linked devices with encryption keys yet`);
+      const deviceKeys = await buildRecipientKeys(
+        token, [targetUsername, myUsername],
+        `${targetUsername} has no linked devices with encryption keys yet`,
+      );
       const { ciphertext, encryptedKeys, iv } = await encryptMessage(plaintext, deviceKeys);
       await sendText(token, targetUsername, ciphertext, {
         encryptedKey: JSON.stringify(encryptedKeys), iv, decoyContent: generateDecoy(),
@@ -907,17 +1098,10 @@ export default function ChatPanel({ token, myUsername, partner, partnerOnline, m
       // Wrap the AES key once per active device of the recipient AND of ourselves,
       // so every one of our devices can also read what we sent. The map is keyed by
       // device_uuid; each device unwraps its own entry.
-      const [theirDevices, myDevices] = await Promise.all([
-        getUserDevices(token, partner),
-        getUserDevices(token, myUsername),
-      ]);
-      const deviceKeys: Record<string, string> = {};
-      for (const d of [...theirDevices, ...myDevices]) {
-        if (d.public_key) deviceKeys[d.device_uuid] = d.public_key;
-      }
-      if (Object.keys(deviceKeys).length === 0) {
-        throw new Error(`${partner} has no linked devices with encryption keys yet`);
-      }
+      const deviceKeys = await buildRecipientKeys(
+        token, [partner, myUsername],
+        `${partner} has no linked devices with encryption keys yet`,
+      );
 
       const { ciphertext, encryptedKeys, iv } = await encryptMessage(trimmed, deviceKeys);
       if (editTarget) {
@@ -948,6 +1132,31 @@ export default function ChatPanel({ token, myUsername, partner, partnerOnline, m
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
+    }
+  }
+
+  /** GIF/sticker share the exact same E2EE + decoy pipeline as text — only
+   * the carried string (a GIF URL, or "sticker:<id>") and content_type differ. */
+  async function handleSendSpecial(content: string, contentType: 'gif' | 'sticker') {
+    if (isSending) return;
+    setIsSending(true);
+    try {
+      const deviceKeys = await buildRecipientKeys(
+        token, [partner, myUsername],
+        `${partner} has no linked devices with encryption keys yet`,
+      );
+      const { ciphertext, encryptedKeys, iv } = await encryptMessage(content, deviceKeys);
+      await sendText(token, partner, ciphertext, {
+        encryptedKey: JSON.stringify(encryptedKeys),
+        iv,
+        decoyContent: generateDecoy(),
+        contentType,
+      });
+      await loadConversation();
+    } catch (err: any) {
+      setSendError(err?.message || `Failed to send ${contentType}`);
+    } finally {
+      setIsSending(false);
     }
   }
 
@@ -1066,6 +1275,11 @@ export default function ChatPanel({ token, myUsername, partner, partnerOnline, m
               </svg>
             </button>
           )}
+          <button
+            onClick={() => setShowContactInfo(true)}
+            style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'transparent', border: 'none', cursor: 'pointer', padding: 0, textAlign: 'left' }}
+            title="Contact info"
+          >
           <div style={cs.avatar}>{initials(partner)}</div>
           <div>
             <div style={cs.partnerName}>{partner}</div>
@@ -1083,9 +1297,16 @@ export default function ChatPanel({ token, myUsername, partner, partnerOnline, m
               </div>
             )}
           </div>
+          </button>
         </div>
         {/* Call buttons */}
         <div style={{ display: 'flex', gap: 6 }}>
+          <button onClick={handleClearChat} style={cs.callBtn} title="Clear chat">
+            <TrashIcon />
+          </button>
+          <button onClick={handleSummarize} style={cs.callBtn} title="Summarize thread">
+            <SparkleIcon size={17} color="#9ca3af" />
+          </button>
           <button onClick={() => onCall(partner, 'audio')} style={cs.callBtn} title="Voice call">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 1h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.64a16 16 0 0 0 6 6l.95-.95a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/>
@@ -1135,6 +1356,7 @@ export default function ChatPanel({ token, myUsername, partner, partnerOnline, m
                     isStarred={starredIds.has(msg.id)}
                     onEdit={() => handleEditStart(msg)}
                     onDelete={() => handleDeleteMessage(msg)}
+                    onTranslate={text => handleTranslateMessage(text)}
                   />
                 </React.Fragment>
               );
@@ -1204,6 +1426,33 @@ export default function ChatPanel({ token, myUsername, partner, partnerOnline, m
         </div>
       )}
 
+      {(suggestLoading || replySuggestions) && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+          padding: '8px 16px', background: 'var(--bg-card)', borderTop: '1px solid var(--border-color)',
+        }}>
+          {suggestLoading ? (
+            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Copilot is drafting replies…</span>
+          ) : (
+            <>
+              {replySuggestions!.map((s, i) => (
+                <button
+                  key={i}
+                  onClick={() => { setText(s); setReplySuggestions(null); }}
+                  style={{ background: 'var(--input-field-bg)', border: '1px solid var(--border-color)', borderRadius: 14, color: 'var(--text-primary)', padding: '6px 12px', fontSize: '0.78rem', cursor: 'pointer', maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                >
+                  {s}
+                </button>
+              ))}
+              <button
+                onClick={() => setReplySuggestions(null)}
+                style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex' }}
+              ><CloseIcon size={14} color="var(--text-muted)" /></button>
+            </>
+          )}
+        </div>
+      )}
+
       {(replyTarget || editingMessage) && (
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -1247,7 +1496,7 @@ export default function ChatPanel({ token, myUsername, partner, partnerOnline, m
       )}
 
       {/* Input bar */}
-      <div style={cs.inputBar}>
+      <div style={{ ...cs.inputBar, position: 'relative' }}>
         <input
           ref={fileInputRef}
           type="file"
@@ -1258,10 +1507,37 @@ export default function ChatPanel({ token, myUsername, partner, partnerOnline, m
 
         <button
           style={cs.iconBtn}
+          onClick={() => setShowMediaPicker(v => !v)}
+          title="Emoji, GIFs & stickers"
+        >
+          <SmileyIcon />
+        </button>
+        {showMediaPicker && (
+          <MediaPicker
+            token={token}
+            anchorStyle={{ bottom: 52, left: 0 }}
+            onClose={() => setShowMediaPicker(false)}
+            onPickEmoji={emoji => setText(t => t + emoji)}
+            onPickGif={(gif: GifResult) => { setShowMediaPicker(false); handleSendSpecial(gif.url, 'gif'); }}
+            onPickSticker={stickerId => { setShowMediaPicker(false); handleSendSpecial(`sticker:${stickerId}`, 'sticker'); }}
+          />
+        )}
+
+        <button
+          style={cs.iconBtn}
           onClick={() => fileInputRef.current?.click()}
           title="Attach file"
         >
           <PaperclipIconSvg size={18} color="#6b7280" />
+        </button>
+
+        <button
+          style={cs.iconBtn}
+          onClick={handleSuggestReply}
+          disabled={suggestLoading}
+          title="Suggest a reply"
+        >
+          <SparkleIcon size={17} color="#6b7280" />
         </button>
 
         {recording ? (
@@ -1301,6 +1577,50 @@ export default function ChatPanel({ token, myUsername, partner, partnerOnline, m
           </button>
         )}
       </div>
+
+      {tokenGateOpen && (
+        <MasterTokenPromptModal
+          token={token}
+          onConfirmed={mt => {
+            onMasterTokenSaved(mt);
+            setTokenGateOpen(false);
+            tokenGateResolveRef.current?.(mt);
+            tokenGateResolveRef.current = null;
+          }}
+          onCancel={() => {
+            setTokenGateOpen(false);
+            tokenGateResolveRef.current?.(null);
+            tokenGateResolveRef.current = null;
+          }}
+        />
+      )}
+
+      {copilotResult && (
+        <CopilotResultModal
+          title={copilotResult.title}
+          loading={copilotResult.loading}
+          error={copilotResult.error}
+          content={copilotResult.content}
+          onClose={() => setCopilotResult(null)}
+        />
+      )}
+
+      {showContactInfo && (
+        <ContactInfoPanel
+          username={partner}
+          mediaCount={messages.filter(m => isImage(m.content_type) || isMedia(m.content_type)).length}
+          starredCount={starredIds.size}
+          isMuted={!!isMuted}
+          isArchived={!!isArchived}
+          isLocked={!!isLocked}
+          onCall={type => { setShowContactInfo(false); onCall(partner, type); }}
+          onToggleMute={onToggleMute}
+          onToggleArchive={onToggleArchive}
+          onToggleLock={onToggleLock}
+          onDeleteChat={() => { onDeleteChat?.(); setShowContactInfo(false); }}
+          onClose={() => setShowContactInfo(false)}
+        />
+      )}
     </div>
   );
 }
