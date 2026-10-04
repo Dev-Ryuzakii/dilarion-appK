@@ -6,6 +6,11 @@ export default defineConfig({
   publicDir: false,
   build: { outDir: 'dist', emptyOutDir: true },
   preview: {
-    allowedHosts: ['dilarion-appk.afribase.dev', 'dilarion.xyz'],
+    allowedHosts: [
+      'dilarion-appk.afribase.dev',
+      'dilarion-webplatform.afribase.dev',
+      'dilarion.xyz',
+      'web.dilarion.xyz',
+    ],
   },
 })
