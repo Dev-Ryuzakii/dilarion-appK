@@ -36,13 +36,7 @@ export default function OnboardingScreen({ sessionToken, username, onDone, onCan
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720, facingMode: 'user' }, audio: false });
       streamRef.current = stream;
-      setCameraOn(true);
-      requestAnimationFrame(() => {
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          videoRef.current.play().catch(() => {});
-        }
-      });
+      setCameraOn(true); // the <video> mounts on this render; the effect below attaches the stream
     } catch {
       setCameraError('Camera not available. Allow camera access for Dilarion and try again.');
     }
@@ -50,9 +44,22 @@ export default function OnboardingScreen({ sessionToken, username, onDone, onCan
 
   useEffect(() => () => stopCamera(), []);
 
+  // Attach the camera only once the <video> element exists - it is rendered
+  // conditionally on cameraOn, so it isn't there yet when the stream arrives.
+  useEffect(() => {
+    const video = videoRef.current;
+    const stream = streamRef.current;
+    if (!cameraOn || !video || !stream) return;
+    video.srcObject = stream;
+    video.play().catch(() => {});
+  }, [cameraOn]);
+
   function capture() {
     const video = videoRef.current;
-    if (!video || !video.videoWidth) return;
+    if (!video || !video.videoWidth) {
+      setCameraError('Camera is still starting - try again in a second.');
+      return;
+    }
     const scale = Math.min(1, 1024 / Math.max(video.videoWidth, video.videoHeight));
     const canvas = document.createElement('canvas');
     canvas.width = Math.round(video.videoWidth * scale);
@@ -96,7 +103,7 @@ export default function OnboardingScreen({ sessionToken, username, onDone, onCan
 
         <div style={o.photoBox}>
           {cameraOn ? (
-            <video ref={videoRef} muted playsInline style={{ ...o.media, transform: 'scaleX(-1)' }} />
+            <video ref={videoRef} autoPlay muted playsInline style={{ ...o.media, transform: 'scaleX(-1)' }} />
           ) : photo ? (
             <img src={photo.dataUrl} alt="Your photo" style={o.media} />
           ) : (
