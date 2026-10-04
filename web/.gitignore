@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.DS_Store
+# Installers are uploaded to file storage, not committed (APK > GitHub's 100 MB limit).
+*.apk
+*.dmg
+*.msi
+*.exe
