@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { presenceService, WsMessage } from '../services/presence';
@@ -28,6 +28,7 @@ import {
   conferenceAccept,
   conferenceDecline,
   createConference,
+  startGroupCall,
   conferenceInvite as apiConferenceInvite,
   createMeeting,
   getUpcomingMeetings,
@@ -54,18 +55,19 @@ import {
   regenerateRecoveryCode,
 } from '../services/api';
 import ChatItemMenu from '../components/ChatItemMenu';
-import {
-  isLivenessLockEnabled,
-  setLivenessLockEnabled,
-  gateSensitiveAction as gateLiveness,
-} from '../services/liveness';
 import { Keypair, loadKeypair, saveKeypair, clearKeypair, parseExportedKey } from '../services/keys';
 import ChatPanel from './ChatPanel';
 import GroupPanel from './GroupPanel';
+import { CreateGroupModal, JoinGroupModal } from '../components/GroupDialogs';
 import { CallType, IncomingCall } from './CallModal';
-import { openCallWindow, closeCallWindowIfOpen } from '../services/callWindow';
+import { openCallWindow, closeCallWindowIfOpen, UPGRADE_TO_GALLERY_EVENT } from '../services/callWindow';
+import { isTauri } from '../services/platform';
+import InPageCallHost from '../components/InPageCallHost';
+import type { GroupCallInfo } from '../callWindow/GroupCallView';
+import type { JoinMeetingHandler } from '../components/MeetingCard';
 import GalleryView from '../components/GalleryView';
 import MeetingLobby from '../components/MeetingLobby';
+import meetingsArt from '../assets/undraw_processing_bto8.svg';
 import WaitingForHostScreen from '../components/WaitingForHostScreen';
 import { fmtRange } from '../components/MeetingCard';
 import CalendarView from '../components/CalendarView';
@@ -228,7 +230,7 @@ function NavRow({ icon, label, active, badge, onClick, style }: {
   );
 }
 
-function WelcomePlaceholder({ children, title, subtitle, action, footer }: { children?: React.ReactNode; title: string; subtitle: string; action?: React.ReactNode; footer?: React.ReactNode }) {
+function WelcomePlaceholder({ children, art, title, subtitle, action, footer }: { children?: React.ReactNode; art?: React.ReactNode; title: string; subtitle: string; action?: React.ReactNode; footer?: React.ReactNode }) {
   return (
     <div style={{
       flex: 1,
@@ -242,20 +244,22 @@ function WelcomePlaceholder({ children, title, subtitle, action, footer }: { chi
       height: '100%',
       position: 'relative',
     }}>
-      <div style={{
-        width: 84,
-        height: 84,
-        borderRadius: 22,
-        overflow: 'hidden',
-        background: 'var(--bg-card)',
-        border: '1px solid var(--border-color)',
-        marginBottom: 4,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-      }}>
-        {children}
-      </div>
+      {art ?? (
+        <div style={{
+          width: 84,
+          height: 84,
+          borderRadius: 22,
+          overflow: 'hidden',
+          background: 'var(--bg-card)',
+          border: '1px solid var(--border-color)',
+          marginBottom: 4,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}>
+          {children}
+        </div>
+      )}
       <h2 style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.04em' }}>{title}</h2>
       <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', textAlign: 'center' }}>{subtitle}</p>
       {action && <div style={{ marginTop: 6 }}>{action}</div>}
@@ -268,20 +272,70 @@ function WelcomePlaceholder({ children, title, subtitle, action, footer }: { chi
   );
 }
 
-// Small flat illustration for the Meetings empty state — a screen with a
-// camera lens and two participant dots, styled with the accent color so it
-// tracks whichever accent the user picked in Appearance.
-function MeetingsIllustration() {
+// ── Resizable columns ──────────────────────────────────────────────────────────
+
+const LAYOUT_KEY = 'dilarion_layout';
+const NAV_WIDTH = { def: 260, min: 180, max: 380 };
+const LIST_WIDTH = { def: 320, min: 220, max: 560 };
+
+function loadLayout(): { nav: number; list: number } {
+  try {
+    const s = JSON.parse(localStorage.getItem(LAYOUT_KEY) || '{}');
+    return {
+      nav: clampWidth(Number(s.nav) || NAV_WIDTH.def, NAV_WIDTH),
+      list: clampWidth(Number(s.list) || LIST_WIDTH.def, LIST_WIDTH),
+    };
+  } catch {
+    return { nav: NAV_WIDTH.def, list: LIST_WIDTH.def };
+  }
+}
+
+function clampWidth(w: number, range: { min: number; max: number }) {
+  return Math.min(range.max, Math.max(range.min, Math.round(w)));
+}
+
+// Thin drag strip sitting on the border between two columns. Drag to resize
+// the column on its left; double-click to snap back to the default width.
+function ColumnResizer({ width, range, onChange }: {
+  width: number;
+  range: { def: number; min: number; max: number };
+  onChange: (w: number) => void;
+}) {
+  const [active, setActive] = useState(false);
+  const drag = useRef<{ startX: number; startW: number } | null>(null);
+
   return (
-    <svg width="52" height="52" viewBox="0 0 64 64" fill="none">
-      <rect x="6" y="14" width="52" height="34" rx="6" fill="var(--accent)" fillOpacity="0.14" stroke="var(--accent)" strokeWidth="2" />
-      <circle cx="32" cy="31" r="9" fill="var(--accent)" fillOpacity="0.22" stroke="var(--accent)" strokeWidth="2" />
-      <circle cx="32" cy="31" r="3.2" fill="var(--accent)" />
-      <path d="M24 54h16" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" />
-      <path d="M32 48v6" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" />
-      <circle cx="14" cy="21" r="3" fill="var(--accent)" fillOpacity="0.6" />
-      <circle cx="50" cy="21" r="3" fill="var(--accent)" fillOpacity="0.6" />
-    </svg>
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      title="Drag to resize"
+      onPointerDown={e => {
+        e.preventDefault();
+        e.currentTarget.setPointerCapture(e.pointerId);
+        drag.current = { startX: e.clientX, startW: width };
+        setActive(true);
+      }}
+      onPointerMove={e => {
+        if (!drag.current) return;
+        onChange(clampWidth(drag.current.startW + e.clientX - drag.current.startX, range));
+      }}
+      onPointerUp={() => { drag.current = null; setActive(false); }}
+      onPointerCancel={() => { drag.current = null; setActive(false); }}
+      onDoubleClick={() => onChange(range.def)}
+      onMouseEnter={() => setActive(true)}
+      onMouseLeave={() => { if (!drag.current) setActive(false); }}
+      style={{
+        width: 7, marginLeft: -4, marginRight: -3, flexShrink: 0,
+        position: 'relative', zIndex: 20, cursor: 'col-resize', touchAction: 'none',
+        display: 'flex', justifyContent: 'center',
+      }}
+    >
+      <div style={{
+        width: 2, height: '100%',
+        background: active ? 'var(--accent)' : 'transparent',
+        transition: 'background 0.12s',
+      }} />
+    </div>
   );
 }
 
@@ -918,14 +972,6 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
   const [showDisable2FA, setShowDisable2FA] = useState(false);
   const [disable2FAPassword, setDisable2FAPassword] = useState('');
 
-  const [livenessLockEnabled, setLivenessLockEnabledState] = useState(isLivenessLockEnabled);
-
-  function toggleLivenessLock() {
-    const next = !livenessLockEnabled;
-    setLivenessLockEnabled(next);
-    setLivenessLockEnabledState(next);
-  }
-
   const [voiceIdentityEnrolled, setVoiceIdentityEnrolled] = useState(false);
   const [voiceIdentityLoading, setVoiceIdentityLoading] = useState(true);
   const [voiceIdentityUploading, setVoiceIdentityUploading] = useState(false);
@@ -1058,7 +1104,6 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
 
   async function handleEnable2FA() {
     if (!enable2FAMasterToken.trim() || enable2FAPassword.trim().length < 6) return;
-    if (!(await gateLiveness())) return;
     setTwoFaLoading(true);
     setTwoFaError(null);
     try {
@@ -1076,7 +1121,6 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
 
   async function handleDisable2FA() {
     if (!disable2FAPassword.trim()) return;
-    if (!(await gateLiveness())) return;
     setTwoFaLoading(true);
     setTwoFaError(null);
     try {
@@ -1132,7 +1176,6 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
   async function handleCreate() {
     const trimmed = createInput.trim();
     if (!trimmed) return;
-    if (!(await gateLiveness())) return;
     setCreateLoading(true);
     setCreateError(null);
     setCreateSuccess(false);
@@ -1562,37 +1605,6 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
         {twoFaError && <span style={{ fontSize: '0.75rem', color: '#ef4444' }}>{twoFaError}</span>}
       </div>
 
-      {/* Liveness Lock section — desktop's stand-in for mobile Biometric Lock;
-          no OS Windows Hello/Touch ID plumbing here, so this confirms a live
-          person is at the camera instead, before opening the app and before
-          the master-token/2FA changes above. */}
-      <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 12, padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Liveness Lock</div>
-        <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 8, padding: '10px 14px' }}>
-          <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-            Confirms a live person is at the camera before opening Dilarion and before master-token or 2FA changes. Checks for presence, not identity.
-          </span>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <div style={{ width: 8, height: 8, borderRadius: '50%', background: livenessLockEnabled ? '#25d366' : '#6b7280', flexShrink: 0 }} />
-          <span style={{ fontSize: '0.85rem', color: livenessLockEnabled ? '#25d366' : 'var(--text-muted)' }}>
-            {livenessLockEnabled ? 'Liveness lock enabled' : 'Liveness lock disabled'}
-          </span>
-        </div>
-        <button
-          onClick={toggleLivenessLock}
-          style={{
-            alignSelf: 'flex-start',
-            background: livenessLockEnabled ? 'transparent' : 'var(--accent)',
-            color: livenessLockEnabled ? 'var(--text-muted)' : '#fff',
-            border: livenessLockEnabled ? '1px solid var(--border-color)' : 'none',
-            borderRadius: 8, padding: '8px 16px', fontSize: '0.82rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
-          }}
-        >
-          {livenessLockEnabled ? 'Disable' : 'Enable'}
-        </button>
-      </div>
-
       {/* AI Voice Decoy section */}
       <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 12, padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
         <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>AI Voice Decoy</div>
@@ -1732,7 +1744,7 @@ function CallsList({ calls, loading, selectedCallId, onSelectCall }: CallsListPr
     <div style={hs.listItems}>
       {calls.map(call => {
         const isMissed = call.status === 'missed' && !call.is_caller;
-        const isCompleted = call.status === 'completed';
+        const isCompleted = call.duration > 0 || ['completed', 'end', 'ended', 'accept', 'accepted'].includes(call.status);
         const isActive = selectedCallId === call.id;
         let statusColor = '#6b7280';
         if (isMissed) statusColor = '#ef4444';
@@ -1766,7 +1778,7 @@ function CallsList({ calls, loading, selectedCallId, onSelectCall }: CallsListPr
                 {callIcon}
                 <span style={{ fontSize: '0.72rem', color: statusColor }}>
                   {call.status}
-                  {call.status === 'completed' && call.duration > 0 ? ` · ${fmtDuration(call.duration)}` : ''}
+                  {call.duration > 0 ? ` · ${fmtDuration(call.duration)}` : ''}
                 </span>
               </div>
             </div>
@@ -1806,7 +1818,7 @@ function CallDetailPanel({ call, onCall }: {
   }
 
   const isMissed = call.status === 'missed' && !call.is_caller;
-  const isCompleted = call.status === 'completed';
+  const isCompleted = call.duration > 0 || ['completed', 'end', 'ended', 'accept', 'accepted'].includes(call.status);
   const statusColor = isMissed ? '#ef4444' : isCompleted ? '#10b981' : '#6b7280';
 
   return (
@@ -1927,6 +1939,10 @@ function stopRinging() {
 
 export default function HomeScreen({ token, username, onLogout }: Props) {
   const [activeTab, setActiveTab] = useState<Tab>('chats');
+  const [layout, setLayout] = useState(loadLayout);
+  useEffect(() => {
+    try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout)); } catch { /* storage unavailable */ }
+  }, [layout]);
   const [selectedChat, setSelectedChat] = useState<string | null>(null);
   const [selectedGroup, setSelectedGroup] = useState<number | null>(null);
   const [selectedCallId, setSelectedCallId] = useState<number | null>(null);
@@ -1971,7 +1987,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
   // used to.
   const [callWindowOpen, setCallWindowOpen] = useState(false);
   // LiveKit gallery-view group call — separate from the mesh-based call window above.
-  const [activeGalleryCall, setActiveGalleryCall] = useState<{ conferenceId: number; initialMicOn?: boolean; initialCamOn?: boolean; displayName?: string } | null>(null);
+  const [activeGalleryCall, setActiveGalleryCall] = useState<{ conferenceId: number; initialMicOn?: boolean; initialCamOn?: boolean; displayName?: string; title?: string } | null>(null);
   const [galleryMinimized, setGalleryMinimized] = useState(false);
   // Device-setup lobby shown before actually connecting to a group call.
   const [meetingLobby, setMeetingLobby] = useState<
@@ -1983,7 +1999,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
   // Someone adding us to a call already in progress. Rings and waits for the
   // master token — an invite must not open our microphone on its own.
   const [conferenceInvite, setConferenceInvite] = useState<
-    { conferenceId: number; invitedBy: string; participants: string[] } | null
+    { conferenceId: number; invitedBy: string; participants: string[]; groupId?: number; groupName?: string; callType?: 'voice' | 'video' } | null
   >(null);
   const [confTokenInput, setConfTokenInput] = useState('');
   const [confTokenRejected, setConfTokenRejected] = useState(false);
@@ -1997,6 +2013,17 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
         token, conferenceInvite.conferenceId, confTokenInput.trim(),
       );
       stopRinging();
+      if (conferenceInvite.groupName) {
+        // Group call (not a meeting): WhatsApp-style call window.
+        openGroupCallWindow({
+          conference_id: conferenceInvite.conferenceId,
+          group_id: conferenceInvite.groupId ?? 0,
+          group_name: conferenceInvite.groupName,
+          call_type: conferenceInvite.callType ?? 'voice',
+        });
+        setConferenceInvite(null);
+        return;
+      }
       // Media starts only now, after the owner authenticated and accepted.
       // Renders via GalleryView (LiveKit), same as starting a group call —
       // group calls no longer use the mesh CallModal conference path.
@@ -2012,6 +2039,11 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
   }
   // A call that stopped ringing before it was answered — offered as a call back
   // instead of leaving the user to go and find the caller again.
+  // Someone tried to sign in on another device and was blocked (one signed-in
+  // device per platform) — show who, where and when.
+  const [blockedLogin, setBlockedLogin] = useState<
+    { deviceName: string | null; platform: string | null; location: string | null; ip: string | null; time: string | null } | null
+  >(null);
   const [missedCall, setMissedCall] = useState<{ from: string; callType: CallType } | null>(null);
   const [callTokenInput, setCallTokenInput] = useState('');
   const [callTokenError, setCallTokenError] = useState<string | null>(null);
@@ -2046,7 +2078,9 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
 
   // ── Badge count — update dock/taskbar icon when unread changes ─────────────────
   useEffect(() => {
-    invoke('set_badge_count', { count: unread.size }).catch(() => {});
+    if (isTauri()) invoke('set_badge_count', { count: unread.size }).catch(() => {});
+    // Web: the unread count goes in the tab title instead of a dock badge.
+    else document.title = unread.size > 0 ? `(${unread.size}) Dilarion` : 'Dilarion';
   }, [unread.size]);
 
   // ── System color scheme change listener ────────────────────────────────────────
@@ -2134,16 +2168,26 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
           startRinging();
           setIncomingCall({ from: caller, callType, callId, offerSdp });
         }
+      } else if (msg.type === 'login_attempt_blocked') {
+        const d = (msg as any).data || {};
+        setBlockedLogin({
+          deviceName: d.device_name ?? null, platform: d.platform ?? null,
+          location: d.location ?? null, ip: d.ip ?? null, time: d.time ?? null,
+        });
+        playBeep();
       } else if (msg.type === 'conference_invite') {
         const data = (msg as any).data || {};
         const confId = data.conference_id as number;
         const invitedBy = (data.invited_by as string) || '';
         const participants = (data.existing_participants as string[]) || [];
+        const groupName = (data.group_name as string) || undefined;
+        const groupId = (data.group_id as number) || undefined;
+        const callType = data.call_type === 'voice' || data.call_type === 'video' ? data.call_type as 'voice' | 'video' : undefined;
         if (confId) {
           startRinging();
           setConfTokenInput('');
           setConfTokenRejected(false);
-          setConferenceInvite({ conferenceId: confId, invitedBy, participants });
+          setConferenceInvite({ conferenceId: confId, invitedBy, participants, groupId, groupName, callType });
         }
       } else if (msg.type === 'call_status_update') {
         const data = (msg as any).data || {};
@@ -2189,6 +2233,17 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
   // The call window (its own OS window) asks to hand off into a group
   // conference — see CallWindowApp's onUpgradeToGallery.
   useEffect(() => {
+    if (!isTauri()) {
+      // Web: the in-page call hands off through a window event instead.
+      const onUpgrade = (e: Event) => {
+        const confId = (e as CustomEvent<{ conferenceId: number }>).detail?.conferenceId;
+        if (!confId) return;
+        setCallWindowOpen(false);
+        setActiveGalleryCall({ conferenceId: confId });
+      };
+      window.addEventListener(UPGRADE_TO_GALLERY_EVENT, onUpgrade);
+      return () => window.removeEventListener(UPGRADE_TO_GALLERY_EVENT, onUpgrade);
+    }
     const unlisten = listen<{ conferenceId: number }>('dilarion://upgrade-to-gallery', (event) => {
       setCallWindowOpen(false);
       setActiveGalleryCall({ conferenceId: event.payload.conferenceId });
@@ -2206,13 +2261,43 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
   }, [token, username]);
 
   // ── Load groups ──────────────────────────────────────────────────────────────
+  const [showCreateGroup, setShowCreateGroup] = useState(false);
+  const [showJoinGroup, setShowJoinGroup] = useState(false);
+
+  const refreshGroups = useCallback(() => {
+    return getGroups(token).then(gs => setGroups(gs)).catch(() => {});
+  }, [token]);
+
   useEffect(() => {
     setLoadingGroups(true);
-    getGroups(token)
-      .then(gs => setGroups(gs))
-      .catch(() => {})
-      .finally(() => setLoadingGroups(false));
-  }, [token]);
+    refreshGroups().finally(() => setLoadingGroups(false));
+  }, [refreshGroups]);
+
+  // Self-service groups: membership/name/timer changes made by any group
+  // admin arrive as group_updated — reload the list, and drop the open
+  // thread if this user was removed or the group was deleted.
+  useEffect(() => {
+    const onGroupMsg = (msg: WsMessage) => {
+      if (msg.type !== 'group_updated') return;
+      const gid = msg.data?.group_id as number | undefined;
+      const ev = msg.data?.event as string | undefined;
+      if (gid && (ev === 'deleted' || ev === 'removed')) {
+        setSelectedGroup(cur => (cur === gid ? null : cur));
+        setGroups(prev => prev.filter(g => g.id !== gid));
+      }
+      refreshGroups();
+    };
+    presenceService.addListener(onGroupMsg);
+    return () => presenceService.removeListener(onGroupMsg);
+  }, [refreshGroups]);
+
+  function handleGroupReady(g: Group) {
+    setShowCreateGroup(false);
+    setShowJoinGroup(false);
+    setGroups(prev => (prev.some(x => x.id === g.id) ? prev.map(x => (x.id === g.id ? { ...x, ...g } : x)) : [g, ...prev]));
+    setSelectedGroup(g.id);
+    refreshGroups();
+  }
 
   // ── Load call history when calls tab active ──────────────────────────────────
   useEffect(() => {
@@ -2304,6 +2389,35 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
       if (target.groupId && selectedGroup === target.groupId) setSelectedGroup(null);
       refreshChatSettings();
     } catch {}
+  }
+
+  function openGroupCallWindow(info: GroupCallInfo) {
+    setCallWindowOpen(true);
+    openCallWindow(
+      {
+        token, my_username: username, partner: info.group_name,
+        call_type: info.call_type === 'video' ? 'video' : 'audio', is_incoming: false,
+        group_call: info,
+      },
+      () => setCallWindowOpen(false),
+    ).catch(() => setCallWindowOpen(false));
+  }
+
+  // WhatsApp-style group call (separate from meetings): rings every other
+  // member and opens the dedicated call window — not the meeting gallery.
+  async function handleStartGroupCall(group: Group, callType: 'voice' | 'video') {
+    if (activeGalleryCall || callWindowOpen) {
+      setChatJoinError('You are already on a call');
+      return;
+    }
+    setChatJoinError(null);
+    try {
+      const { conference_id, not_rung } = await startGroupCall(token, group.id, callType);
+      openGroupCallWindow({ conference_id, group_id: group.id, group_name: group.name, call_type: callType });
+      if (not_rung > 0) setChatJoinError(`Call is full — ${not_rung} member${not_rung === 1 ? '' : 's'} couldn't be rung`);
+    } catch (err: any) {
+      setChatJoinError(err?.message || 'Failed to start group call');
+    }
   }
 
   function handleCall(partner: string, callType: CallType) {
@@ -2528,12 +2642,18 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
   // meetings still need the master-token accept gate (opening a mic without
   // consent is not okay) — reuse the same conferenceInvite overlay that
   // handles that. Scheduled meetings join directly, matching joinScheduledMeeting.
-  function handleJoinMeetingFromChat(
-    m: { kind: 'instant'; conferenceId: number; invitedBy: string } | { kind: 'scheduled'; joinCode: string },
-  ) {
+  function handleJoinMeetingFromChat(m: Parameters<JoinMeetingHandler>[0]) {
     setChatJoinError(null);
     if (m.kind === 'instant') {
       setConferenceInvite({ conferenceId: m.conferenceId, invitedBy: m.invitedBy, participants: [] });
+      return;
+    }
+    if (m.kind === 'group_call') {
+      if (callWindowOpen || activeGalleryCall) { setChatJoinError('You are already on a call'); return; }
+      setConferenceInvite({
+        conferenceId: m.conferenceId, invitedBy: m.invitedBy, participants: [],
+        groupId: m.groupId, groupName: m.groupName, callType: m.callType,
+      });
       return;
     }
     setMeetingLobby({ kind: 'join', joinCode: m.joinCode, title: null });
@@ -2703,6 +2823,33 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
               value={search}
               onChange={e => setSearch(e.target.value)}
             />
+          </div>
+          <div style={{ display: 'flex', gap: 8, padding: '8px 12px', borderBottom: '1px solid var(--border-color)' }}>
+            <button
+              onClick={() => setShowCreateGroup(true)}
+              style={{
+                flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 10px',
+                fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14M5 12h14" /></svg>
+              New group
+            </button>
+            <button
+              onClick={() => setShowJoinGroup(true)}
+              style={{
+                flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                background: 'transparent', color: 'var(--text-primary)', border: '1px solid var(--border-color)', borderRadius: 8,
+                padding: '8px 10px', fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+                <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+              </svg>
+              Join via link
+            </button>
           </div>
           {archivedGroupCount > 0 && (
             <button
@@ -2905,6 +3052,13 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
               onMasterTokenSaved={() => {}}
               onJoinMeeting={handleJoinMeetingFromChat}
               onBack={() => setSelectedGroup(null)}
+              onGroupChanged={g => setGroups(prev => prev.map(x => (x.id === g.id ? { ...x, ...g } : x)))}
+              onGroupGone={() => {
+                setGroups(prev => prev.filter(x => x.id !== group.id));
+                setSelectedGroup(null);
+                refreshGroups();
+              }}
+              onStartGroupCall={handleStartGroupCall}
             />
           );
         }
@@ -2937,9 +3091,15 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
               Start Instant Meeting
             </button>
           }
-        >
-          <MeetingsIllustration />
-        </WelcomePlaceholder>
+          art={
+            <img
+              src={meetingsArt}
+              alt=""
+              draggable={false}
+              style={{ width: 'min(340px, 60%)', height: 'auto', marginBottom: 10, userSelect: 'none' }}
+            />
+          }
+        />
       );
     }
 
@@ -2994,7 +3154,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
     <div style={hs.root}>
 
       {/* ── SIDEBAR (WhatsApp Desktop-style, labeled rows) ─────────────── */}
-      <nav style={hs.tabBar}>
+      <nav style={{ ...hs.tabBar, width: layout.nav }}>
         <NavRow icon={<ChatTabIcon active={activeTab === 'chats'} />} label="Chats" active={activeTab === 'chats'} badge={unread.size} onClick={() => switchTab('chats')} />
         <NavRow icon={<GroupTabIcon active={activeTab === 'groups'} />} label="Groups" active={activeTab === 'groups'} onClick={() => switchTab('groups')} />
         <NavRow icon={<MeetingsTabIcon active={activeTab === 'meetings'} />} label="Meetings" active={activeTab === 'meetings'} onClick={() => switchTab('meetings')} />
@@ -3025,11 +3185,15 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
         </button>
       </nav>
 
-      {/* ── LIST PANEL (320px) ──────────────────────────────────────────── */}
-      <aside style={hs.listPanel}>
+      <ColumnResizer width={layout.nav} range={NAV_WIDTH} onChange={nav => setLayout(l => ({ ...l, nav }))} />
+
+      {/* ── LIST PANEL (resizable, 320px default) ───────────────────────── */}
+      <aside style={{ ...hs.listPanel, width: layout.list }}>
         {renderListHeader()}
         {renderListContent()}
       </aside>
+
+      <ColumnResizer width={layout.list} range={LIST_WIDTH} onChange={list => setLayout(l => ({ ...l, list }))} />
 
       {/* ── MAIN PANEL (flex 1) ─────────────────────────────────────────── */}
       <main style={hs.mainPanel}>
@@ -3097,6 +3261,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
           initialMicOn={activeGalleryCall.initialMicOn}
           initialCamOn={activeGalleryCall.initialCamOn}
           displayName={activeGalleryCall.displayName}
+          title={activeGalleryCall.title}
           myUsername={username}
           masterToken={masterToken}
           onMasterTokenSaved={setMasterToken}
@@ -3115,8 +3280,13 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
       {conferenceInvite && !callWindowOpen && !activeGalleryCall && (
         <div style={ci.backdrop}>
           <div style={ci.card}>
-            <p style={ci.kicker}>Group call</p>
-            <h3 style={ci.title}>{conferenceInvite.invitedBy} is adding you</h3>
+            <p style={ci.kicker}>
+              {conferenceInvite.callType === 'video' ? 'Group video call' : conferenceInvite.callType === 'voice' ? 'Group voice call' : 'Group call'}
+              {conferenceInvite.groupName ? ` · ${conferenceInvite.groupName}` : ''}
+            </p>
+            <h3 style={ci.title}>
+              {conferenceInvite.groupName ? `${conferenceInvite.invitedBy} is calling` : `${conferenceInvite.invitedBy} is adding you`}
+            </h3>
             {conferenceInvite.participants.length > 0 && (
               <p style={ci.people}>
                 Already on the call: {conferenceInvite.participants.join(', ')}
@@ -3162,6 +3332,38 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
       )}
 
       {/* ── LOCKED CHAT — MASTER TOKEN GATE ──────────────────────────────── */}
+      {blockedLogin && (
+        <div style={ci.backdrop}>
+          <div style={ci.card}>
+            <p style={{ ...ci.kicker, color: '#ef4444' }}>Security alert</p>
+            <h3 style={ci.title}>Sign-in attempt blocked</h3>
+            <p style={{ ...ci.hint, color: 'var(--text-secondary, #9ca3af)', lineHeight: 1.6 }}>
+              Someone tried to sign in to your account on another device. It was blocked because you are signed in here.
+            </p>
+            <div style={{ fontSize: '0.85rem', lineHeight: 1.8, color: 'var(--text-primary, #e5e7eb)', margin: '6px 0 10px' }}>
+              <div><strong>Device:</strong> {blockedLogin.deviceName || 'Unknown'}{blockedLogin.platform ? ` (${blockedLogin.platform})` : ''}</div>
+              <div><strong>Location:</strong> {blockedLogin.location || 'Unknown'}</div>
+              {blockedLogin.ip && <div><strong>IP address:</strong> {blockedLogin.ip}</div>}
+              <div><strong>Time:</strong> {blockedLogin.time ? new Date(blockedLogin.time).toLocaleString() : 'Just now'}</div>
+            </div>
+            <p style={{ ...ci.hint, color: '#9ca3af' }}>If this wasn't you, change your login token now.</p>
+            <div style={ci.row}>
+              <button style={ci.join} onClick={() => setBlockedLogin(null)}>OK</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Web only: calls render here instead of in a separate OS window. */}
+      {!isTauri() && <InPageCallHost />}
+
+      {showCreateGroup && (
+        <CreateGroupModal token={token} myUsername={username} onClose={() => setShowCreateGroup(false)} onCreated={handleGroupReady} />
+      )}
+      {showJoinGroup && (
+        <JoinGroupModal token={token} onClose={() => setShowJoinGroup(false)} onJoined={handleGroupReady} />
+      )}
+
       {lockPrompt && (
         <div style={ci.backdrop}>
           <div style={ci.card}>
@@ -3892,10 +4094,9 @@ const hs: Record<string, React.CSSProperties> = {
   // narrow icon rail, full-width active highlight, profile row pinned to
   // the very bottom.
   tabBar: {
-    width: 260,
-    minWidth: 220,
-    maxWidth: 300,
-    flexShrink: 0,
+    width: NAV_WIDTH.def,
+    minWidth: NAV_WIDTH.min,
+    flexShrink: 1,
     display: 'flex',
     flexDirection: 'column',
     paddingTop: 10,
@@ -3950,10 +4151,9 @@ const hs: Record<string, React.CSSProperties> = {
 
   // List panel
   listPanel: {
-    width: 320,
-    minWidth: 220,
-    maxWidth: 360,
-    flexShrink: 0,
+    width: LIST_WIDTH.def,
+    minWidth: LIST_WIDTH.min,
+    flexShrink: 1,
     display: 'flex',
     flexDirection: 'column',
     background: 'var(--bg-panel)',
@@ -4087,7 +4287,8 @@ const hs: Record<string, React.CSSProperties> = {
 
   // Main panel
   mainPanel: {
-    flex: 1,
+    flex: '1 0 0',
+    minWidth: 360,
     display: 'flex',
     flexDirection: 'column',
     overflow: 'hidden',

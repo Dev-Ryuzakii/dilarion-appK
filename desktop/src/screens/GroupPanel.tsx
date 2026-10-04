@@ -21,15 +21,14 @@ import {
   starMessage,
   unstarMessage,
   getStarredMessages,
-  promoteGroupMember,
-  demoteGroupMember,
   GifResult,
+  formatDisappear,
 } from '../services/api';
 import { encryptMessage } from '../services/crypto';
 import { generateDecoy } from '../services/decoy';
 import { loadKeypair } from '../services/keys';
 import { presenceService, WsMessage } from '../services/presence';
-import { LockIcon, PaperclipIcon as PaperclipIconSvg, CloseIcon, PinIcon, SparkleIcon, UsersIcon } from '../components/Icons';
+import { PaperclipIcon as PaperclipIconSvg, CloseIcon, PinIcon, SparkleIcon, UsersIcon } from '../components/Icons';
 import MediaBubble, { DocumentBubble } from '../components/MediaBubble';
 import { PendingBubble, PendingMsg, buildRecipientKeys } from './ChatPanel';
 import MeetingCard, { JoinMeetingHandler } from '../components/MeetingCard';
@@ -38,6 +37,8 @@ import MediaPicker from '../components/MediaPicker';
 import { getSticker } from '../components/stickers';
 import CopilotResultModal from '../components/CopilotResultModal';
 import MasterTokenPromptModal from '../components/MasterTokenPromptModal';
+import { GroupInfoDrawer } from '../components/GroupDialogs';
+import DeleteMessageDialog, { DeleteScope } from '../components/DeleteMessageDialog';
 import { summarizeThreadCopilot, composeReplyCopilot, translateCopilot } from '../services/api';
 
 interface Props {
@@ -49,6 +50,12 @@ interface Props {
   onJoinMeeting: JoinMeetingHandler;
   /** Leave the group thread and go back to the list. */
   onBack?: () => void;
+  /** Group name/description/timer changed from the info drawer. */
+  onGroupChanged?: (g: Group) => void;
+  /** The viewer left, was removed from, or deleted this group. */
+  onGroupGone?: () => void;
+  /** Start a WhatsApp-style call that rings the whole group. */
+  onStartGroupCall?: (group: Group, callType: 'voice' | 'video') => void;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -305,7 +312,6 @@ function EncryptedBubble({ token, messageId, decoyContent, masterToken, onDecryp
 function PrivateTagBubble({ recipient }: { recipient: string }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px', background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 12 }}>
-      <LockIcon size={13} color="#a78bfa" />
       <span style={{ fontSize: '0.82rem', color: '#a78bfa', fontStyle: 'italic' }}>
         Private message for <strong style={{ color: '#c4b5fd' }}>@{recipient}</strong>
       </span>
@@ -479,7 +485,7 @@ function GroupMsgBubble({
             onPinToggle={onPinToggle}
             onStarToggle={onStarToggle}
             onEdit={isMine ? onEdit : undefined}
-            onDelete={isMine ? onDelete : undefined}
+            onDelete={onDelete}
             onTranslate={isTextish ? handleTranslateClick : undefined}
             isPinned={!!msg.is_pinned}
             isStarred={isStarred}
@@ -520,7 +526,7 @@ function GroupMsgBubble({
       )}
       {isForMe && !isMine && (
         <span style={{ fontSize: '0.67rem', color: '#a78bfa', marginBottom: 2, marginLeft: 4, display: 'flex', alignItems: 'center', gap: 3 }}>
-          <LockIcon size={9} color="#a78bfa" /> Only you can read this
+          Only you can read this
         </span>
       )}
 
@@ -581,7 +587,7 @@ function MessageSkeleton() {
 
 // ── GroupPanel ─────────────────────────────────────────────────────────────────
 
-export default function GroupPanel({ token, myUsername, group, masterToken, onMasterTokenSaved, onJoinMeeting, onBack }: Props) {
+export default function GroupPanel({ token, myUsername, group, masterToken, onMasterTokenSaved, onJoinMeeting, onBack, onGroupChanged, onGroupGone, onStartGroupCall }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [text, setText] = useState('');
@@ -593,8 +599,6 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
   const [taggedUser, setTaggedUser] = useState<string | null>(null);
   const [members, setMembers] = useState<GroupMember[]>([]);
   const [showMembers, setShowMembers] = useState(false);
-  const [memberActionBusy, setMemberActionBusy] = useState<string | null>(null);
-  const [memberActionError, setMemberActionError] = useState<string | null>(null);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [replyTarget, setReplyTarget] = useState<ChatMessage | null>(null);
   const [starredIds, setStarredIds] = useState<Set<number>>(new Set());
@@ -643,11 +647,21 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
         if (gid === group.id) {
           loadMessages();
         }
+      } else if (msg.type === 'message_deleted') {
+        const mid = msg.data?.message_id as number | undefined;
+        if (mid && msg.data?.group_id === group.id) {
+          setMessages(prev => prev.map(m => (m.id === mid ? { ...m, is_deleted: true } : m)));
+        }
+      } else if (msg.type === 'group_updated') {
+        const gid = msg.data?.group_id as number | undefined;
+        if (gid === group.id) {
+          getGroupMembers(token, group.id).then(setMembers).catch(() => {});
+        }
       }
     };
     presenceService.addListener(handler);
     return () => presenceService.removeListener(handler);
-  }, [group.id, loadMessages]);
+  }, [group.id, loadMessages, token]);
 
   // The master token gates the reveal in the UI; the decryption itself uses the
   // device's private key against this user's entry in the message's key map.
@@ -706,34 +720,6 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
       setCopilotResult({ title: 'Thread summary', loading: false, error: null, content: summary });
     } catch (err: any) {
       setCopilotResult({ title: 'Thread summary', loading: false, error: err?.message || 'Failed to summarize', content: null });
-    }
-  }
-
-  async function handlePromote(targetUsername: string) {
-    setMemberActionBusy(targetUsername);
-    setMemberActionError(null);
-    try {
-      await promoteGroupMember(token, group.id, targetUsername);
-      const refreshed = await getGroupMembers(token, group.id);
-      setMembers(refreshed);
-    } catch (err: any) {
-      setMemberActionError(err?.message || 'Failed to promote');
-    } finally {
-      setMemberActionBusy(null);
-    }
-  }
-
-  async function handleDemote(targetUsername: string) {
-    setMemberActionBusy(targetUsername);
-    setMemberActionError(null);
-    try {
-      await demoteGroupMember(token, group.id, targetUsername);
-      const refreshed = await getGroupMembers(token, group.id);
-      setMembers(refreshed);
-    } catch (err: any) {
-      setMemberActionError(err?.message || 'Failed to demote');
-    } finally {
-      setMemberActionBusy(null);
     }
   }
 
@@ -807,15 +793,27 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
     } catch {}
   }
 
-  async function handleDeleteMessage(msg: ChatMessage) {
-    if (!window.confirm('Delete this message? This cannot be undone.')) return;
+  const [deleteTarget, setDeleteTarget] = useState<ChatMessage | null>(null);
+  const iAmGroupAdmin = members.find(m => m.username === myUsername)?.role === 'admin' || group.my_role === 'admin';
+
+  function handleDeleteMessage(msg: ChatMessage) {
+    setDeleteTarget(msg);
+  }
+
+  async function confirmDelete(scope: DeleteScope) {
+    const msg = deleteTarget;
+    setDeleteTarget(null);
+    if (!msg) return;
     try {
-      await deleteMessage(token, msg.id);
-      await loadMessages();
+      await deleteMessage(token, msg.id, scope);
+      if (scope === 'me') setMessages(prev => prev.filter(m => m.id !== msg.id));
+      else setMessages(prev => prev.map(m => (m.id === msg.id ? { ...m, is_deleted: true } : m)));
+      loadMessages();
     } catch (err: any) {
       setSendError(err?.message || 'Failed to delete message');
     }
   }
+
 
   async function handleEditStart(msg: ChatMessage) {
     if (!masterToken) {
@@ -1039,67 +1037,56 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
           <div style={{ ...gs.avatar, background: avatarBg }}>{initials(group.name)}</div>
           <div>
             <div style={gs.groupName}>{group.name}</div>
-            <div style={gs.groupMeta}>{group.member_count} members</div>
+            <div style={gs.groupMeta}>
+              {members.length || group.member_count} members
+              {group.disappear_after_hours ? ` · Disappearing: ${formatDisappear(group.disappear_after_hours)}` : ''}
+            </div>
           </div>
         </div>
-        <button onClick={() => { setShowMembers(true); setMemberActionError(null); }} style={gs.iconBtn} title="Members">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+        {onStartGroupCall && (
+          <>
+            <button onClick={() => onStartGroupCall(group, 'voice')} style={gs.iconBtn} title="Group voice call">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 1h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.64a16 16 0 0 0 6 6l.95-.95a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/>
+              </svg>
+            </button>
+            <button onClick={() => onStartGroupCall(group, 'video')} style={gs.iconBtn} title="Group video call">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M15 10l4.553-2.553A1 1 0 0 1 21 8.382v7.236a1 1 0 0 1-1.447.894L15 14M3 8a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+              </svg>
+            </button>
+          </>
+        )}
+        <button onClick={() => setShowMembers(true)} style={gs.iconBtn} title="Group info">
           <UsersIcon size={18} color="#9ca3af" />
         </button>
         <button onClick={handleSummarize} style={gs.iconBtn} title="Summarize thread">
           <SparkleIcon size={17} color="#9ca3af" />
         </button>
+        </div>
       </div>
 
+      {deleteTarget && (
+        <DeleteMessageDialog
+          isMine={deleteTarget.sender === myUsername}
+          canDeleteForEveryone={!deleteTarget.is_deleted && (deleteTarget.sender === myUsername || iAmGroupAdmin)}
+          onPick={confirmDelete}
+          onCancel={() => setDeleteTarget(null)}
+        />
+      )}
+
       {showMembers && (
-        <div
-          style={{ position: 'fixed', inset: 0, zIndex: 950, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'flex-end' }}
-          onClick={e => { if (e.target === e.currentTarget) setShowMembers(false); }}
-        >
-          <div style={{ width: 320, height: '100%', background: 'var(--bg-panel)', display: 'flex', flexDirection: 'column', boxShadow: '-8px 0 30px rgba(0,0,0,0.4)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 18px', borderBottom: '1px solid var(--border-color)' }}>
-              <span style={{ color: 'var(--text-primary)', fontWeight: 700, fontSize: '0.9rem' }}>Members ({members.length})</span>
-              <button onClick={() => setShowMembers(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: '1rem', cursor: 'pointer' }}>✕</button>
-            </div>
-            {memberActionError && (
-              <div style={{ padding: '8px 18px', color: '#ef4444', fontSize: '0.75rem' }}>{memberActionError}</div>
-            )}
-            <div style={{ flex: 1, overflowY: 'auto', padding: '8px 10px' }}>
-              {members.map(m => {
-                const isAdmin = m.role === 'admin';
-                const iAmAdmin = members.find(x => x.username === myUsername)?.role === 'admin';
-                const busy = memberActionBusy === m.username;
-                return (
-                  <div key={m.user_id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 8 }}>
-                    <div style={{
-                      width: 32, height: 32, borderRadius: '50%', background: 'var(--accent)', color: '#fff',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.72rem', fontWeight: 700, flexShrink: 0,
-                    }}>
-                      {m.username.slice(0, 2).toUpperCase()}
-                    </div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: '0.82rem', color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {m.username}{m.username === myUsername ? ' (you)' : ''}
-                      </div>
-                      {isAdmin && <div style={{ fontSize: '0.68rem', color: 'var(--accent)', fontWeight: 600 }}>Group admin</div>}
-                    </div>
-                    {iAmAdmin && m.username !== myUsername && (
-                      <button
-                        onClick={() => (isAdmin ? handleDemote(m.username) : handlePromote(m.username))}
-                        disabled={busy}
-                        style={{
-                          background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 6,
-                          color: 'var(--text-primary)', fontSize: '0.7rem', padding: '4px 8px', cursor: busy ? 'wait' : 'pointer', flexShrink: 0,
-                        }}
-                      >
-                        {busy ? '…' : isAdmin ? 'Demote' : 'Make admin'}
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
+        <GroupInfoDrawer
+          token={token}
+          myUsername={myUsername}
+          group={group}
+          members={members}
+          onClose={() => setShowMembers(false)}
+          onGroupChanged={g => onGroupChanged?.(g)}
+          onMembersChanged={() => { getGroupMembers(token, group.id).then(setMembers).catch(() => {}); }}
+          onGroupGone={() => { setShowMembers(false); onGroupGone?.(); }}
+        />
       )}
 
       {/* Messages */}
@@ -1322,7 +1309,6 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
         {taggedUser && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span style={{ fontSize: '0.75rem', color: '#a78bfa', background: 'var(--bg-card)', border: '1px solid #4c1d95', borderRadius: 8, padding: '3px 10px', display: 'flex', alignItems: 'center', gap: 5 }}>
-              <LockIcon size={10} color="#a78bfa" />
               Private → <strong>@{taggedUser}</strong>
             </span>
             <button

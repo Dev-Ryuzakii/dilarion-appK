@@ -55,6 +55,7 @@ export default function GalleryView({
   minimized = false,
   onMinimize,
   onMaximize,
+  title,
 }: {
   token: string;
   conferenceId: number;
@@ -68,6 +69,8 @@ export default function GalleryView({
   minimized?: boolean;
   onMinimize?: () => void;
   onMaximize?: () => void;
+  /** Header label, e.g. "Group voice call · Ops". Defaults to "Group Video". */
+  title?: string;
 }) {
   const roomRef = useRef<Room | null>(null);
   const [tiles, setTiles] = useState<Record<string, Tile>>({});
@@ -629,7 +632,7 @@ export default function GalleryView({
         padding: '14px 20px', flexShrink: 0,
       }}>
         <span style={{ color: '#fff', fontWeight: 700, fontSize: '0.95rem', display: 'flex', alignItems: 'center', gap: 8 }}>
-          {inBreakoutName ? `Breakout: ${inBreakoutName}` : 'Group Video'} {tileList.length > 0 && `· ${tileList.length}`}
+          {inBreakoutName ? `Breakout: ${inBreakoutName}` : (title || 'Group Video')} {tileList.length > 0 && `· ${tileList.length}`}
           {inBreakoutName && (
             <span style={{ background: 'rgba(124,58,237,0.25)', border: '1px solid rgba(124,58,237,0.5)', borderRadius: 20, padding: '2px 10px', fontSize: '0.68rem', color: '#c4b5fd', fontWeight: 700 }}>
               in breakout room

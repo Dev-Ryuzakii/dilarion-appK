@@ -61,9 +61,14 @@ export default function LoginScreen({ onLogin, onBack }: Props) {
     setError('');
     setLoading(true);
     try {
-      const data = await login(username, userToken) as Record<string, string>;
+      const data = await login(username, userToken) as Record<string, any>;
       const sessionToken = data.token || data.access_token || data.session_token;
       if (!sessionToken) throw new Error('No session token received');
+      if (data.onboarding_required) {
+        // Invited staff activate and complete the live-photo profile on the
+        // phone app first; the server refuses everything else until then.
+        throw new Error('Finish setting up your account in the Dilarion mobile app first (activation and profile photo), then sign in here.');
+      }
       onLogin(sessionToken, username);
     } catch (err: any) {
       setError(err.message || 'Login failed');

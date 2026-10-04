@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import QRCode from 'qrcode';
+import { deviceName } from '../services/device';
+import { platformName } from '../services/platform';
 import { generateKeyPair } from '../services/crypto';
 import { saveKeypair } from '../services/keys';
 import { linkStart, linkStatus } from '../services/api';
@@ -11,13 +13,6 @@ interface Props {
 
 type Phase = 'starting' | 'waiting' | 'approved' | 'expired' | 'error';
 
-function deviceName(): string {
-  const p = navigator.platform || 'Desktop';
-  if (/mac/i.test(p)) return 'Mac Desktop';
-  if (/win/i.test(p)) return 'Windows Desktop';
-  if (/linux/i.test(p)) return 'Linux Desktop';
-  return 'Desktop';
-}
 
 export default function LinkDeviceScreen({ onLinked, onUsePassword }: Props) {
   const [phase, setPhase] = useState<Phase>('starting');
@@ -44,7 +39,7 @@ export default function LinkDeviceScreen({ onLinked, onUsePassword }: Props) {
       try {
         // This device generates its own keypair; only the public key leaves it.
         const kp = await generateKeyPair();
-        const { nonce } = await linkStart(kp.publicKey, 'desktop', deviceName());
+        const { nonce } = await linkStart(kp.publicKey, platformName(), deviceName());
         if (cancelled) return;
 
         // The phone scans this nonce to approve the link.

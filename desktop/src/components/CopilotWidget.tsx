@@ -25,6 +25,35 @@ interface ChatMsg {
  * the draft to the caller, which opens the real form — attendees and final
  * confirmation always go through that, same as typing it in by hand.
  */
+const BTN = 56;
+const PANEL_W = 340;
+const PANEL_H = 460;
+const MARGIN = 8;
+const GAP = 12;
+const POS_KEY = 'dilarion_copilot_widget_pos';
+
+// Launcher position as distance from the window's right/bottom edges, so it
+// stays docked to that corner when the window is resized.
+interface Anchor { right: number; bottom: number }
+
+function clampAnchor(a: Anchor): Anchor {
+  return {
+    right: Math.min(Math.max(a.right, MARGIN), Math.max(MARGIN, window.innerWidth - BTN - MARGIN)),
+    bottom: Math.min(Math.max(a.bottom, MARGIN), Math.max(MARGIN, window.innerHeight - BTN - MARGIN)),
+  };
+}
+
+function loadAnchor(): Anchor {
+  try {
+    const raw = localStorage.getItem(POS_KEY);
+    if (raw) {
+      const a = JSON.parse(raw);
+      if (typeof a?.right === 'number' && typeof a?.bottom === 'number') return clampAnchor(a);
+    }
+  } catch { /* storage unavailable — fall back to default corner */ }
+  return { right: 24, bottom: 24 };
+}
+
 export default function CopilotWidget({ token, onScheduleDraft }: {
   token: string;
   onScheduleDraft: (draft: CopilotScheduleDraft) => void;
@@ -36,6 +65,53 @@ export default function CopilotWidget({ token, onScheduleDraft }: {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [anchor, setAnchor] = useState<Anchor>(loadAnchor);
+  const [dragging, setDragging] = useState(false);
+  // Set when a pointer-down turned into a real drag, so the click that
+  // follows on the launcher doesn't also toggle the panel.
+  const movedRef = useRef(false);
+
+  useEffect(() => {
+    const onResize = () => setAnchor(a => clampAnchor(a));
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  function startDrag(e: React.PointerEvent) {
+    if (e.button !== 0) return;
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const origin = anchor;
+    movedRef.current = false;
+    let latest = origin;
+
+    const onMove = (ev: PointerEvent) => {
+      const dx = ev.clientX - startX;
+      const dy = ev.clientY - startY;
+      if (!movedRef.current && Math.hypot(dx, dy) < 4) return;
+      if (!movedRef.current) { movedRef.current = true; setDragging(true); }
+      latest = clampAnchor({ right: origin.right - dx, bottom: origin.bottom - dy });
+      setAnchor(latest);
+    };
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      setDragging(false);
+      if (movedRef.current) {
+        try { localStorage.setItem(POS_KEY, JSON.stringify(latest)); } catch { /* ignore */ }
+      }
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  }
+
+  // Panel follows the launcher: above it when there's room, otherwise below,
+  // right-aligned with it and kept inside the window.
+  const panelRight = Math.min(Math.max(anchor.right, MARGIN), Math.max(MARGIN, window.innerWidth - PANEL_W - MARGIN));
+  const roomAbove = window.innerHeight - (anchor.bottom + BTN + GAP) >= PANEL_H + MARGIN;
+  const panelBottom = roomAbove
+    ? anchor.bottom + BTN + GAP
+    : Math.max(MARGIN, anchor.bottom - GAP - PANEL_H);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
@@ -86,14 +162,20 @@ export default function CopilotWidget({ token, onScheduleDraft }: {
     <>
       {open && (
         <div style={{
-          position: 'fixed', bottom: 92, right: 24, width: 340, height: 460, zIndex: 960,
+          position: 'fixed', bottom: panelBottom, right: panelRight, width: PANEL_W, height: PANEL_H, zIndex: 960,
+          maxHeight: `calc(100vh - ${MARGIN * 2}px)`,
           background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 16,
           boxShadow: '0 16px 48px rgba(0,0,0,0.35)', display: 'flex', flexDirection: 'column', overflow: 'hidden',
         }}>
-          <div style={{
-            padding: '14px 16px', borderBottom: '1px solid var(--border-color)',
-            display: 'flex', alignItems: 'center', gap: 8,
-          }}>
+          <div
+            onPointerDown={e => { if (!(e.target as HTMLElement).closest('button')) startDrag(e); }}
+            title="Drag to move"
+            style={{
+              padding: '14px 16px', borderBottom: '1px solid var(--border-color)',
+              display: 'flex', alignItems: 'center', gap: 8,
+              cursor: dragging ? 'grabbing' : 'grab', userSelect: 'none', touchAction: 'none',
+            }}
+          >
             <SparkleIcon size={16} color="var(--accent)" />
             <span style={{ fontWeight: 800, fontSize: '0.9rem', color: 'var(--text-primary)', flex: 1 }}>Copilot</span>
             <button
@@ -160,11 +242,13 @@ export default function CopilotWidget({ token, onScheduleDraft }: {
       )}
 
       <button
-        onClick={() => setOpen(v => !v)}
-        title="Copilot"
+        onPointerDown={startDrag}
+        onClick={() => { if (movedRef.current) { movedRef.current = false; return; } setOpen(v => !v); }}
+        title="Copilot — drag to move"
         style={{
-          position: 'fixed', bottom: 24, right: 24, zIndex: 961,
-          width: 56, height: 56, borderRadius: '50%', border: 'none', cursor: 'pointer',
+          position: 'fixed', bottom: anchor.bottom, right: anchor.right, zIndex: 961,
+          width: BTN, height: BTN, borderRadius: '50%', border: 'none', cursor: dragging ? 'grabbing' : 'pointer',
+          touchAction: 'none', userSelect: 'none',
           background: 'var(--accent)', color: '#fff',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           boxShadow: '0 8px 24px rgba(0,0,0,0.3)',

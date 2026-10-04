@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { downloadMedia, downloadDecoyFile, downloadDecoyVoice, downloadDecoyImage, confirmMasterToken, documentQACopilot, transcribeCopilot } from '../services/api';
-import { CameraIcon, LockIcon, MicIcon as MicIconSvg, PaperclipIcon as PaperclipIconSvg, SpinnerIcon, CloseIcon, SparkleIcon } from './Icons';
+import { CameraIcon, MicIcon as MicIconSvg, PaperclipIcon as PaperclipIconSvg, SpinnerIcon, CloseIcon, SparkleIcon } from './Icons';
 import CopilotResultModal from './CopilotResultModal';
 
 /** Best-effort check that bytes are readable text, not binary — Document Q&A
@@ -388,7 +388,12 @@ function VoiceBubble({ token, mediaId, masterToken, onMasterTokenSaved, onRemove
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 220 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      {/* Double-click unlocks the real audio — same gesture as photos, no
+          padlock on the bubble hinting that a decoy is playing. */}
+      <div
+        style={{ display: 'flex', alignItems: 'center', gap: 8 }}
+        onDoubleClick={() => { if (!usingReal && !revealing) handleLockTap(); }}
+      >
         <audio
           ref={audioRef}
           src={voiceUrl ?? undefined}
@@ -470,17 +475,6 @@ function VoiceBubble({ token, mediaId, masterToken, onMasterTokenSaved, onRemove
             <MicIconSvg size={7} color="var(--accent)" />
           </div>
         </div>
-
-        {!usingReal && (
-          <button
-            onClick={handleLockTap}
-            disabled={revealing}
-            title="Unlock real audio"
-            style={{ background: 'transparent', border: 'none', cursor: revealing ? 'wait' : 'pointer', padding: 4, display: 'flex', flexShrink: 0 }}
-          >
-            {revealing ? <SpinnerIcon size={14} /> : <LockIcon size={14} color={isMine ? 'rgba(255,255,255,0.8)' : '#9ca3af'} />}
-          </button>
-        )}
 
         <button
           onClick={handleTranscribe}
@@ -564,6 +558,34 @@ export default function MediaBubble({ token, mediaId, contentType, masterToken, 
 
 type VisStage = 'idle' | 'loading' | 'decoy' | 'revealing' | 'revealed';
 
+// Decoy stills are what anyone sees and never change for a given mediaId, so
+// keep them in memory for the session: switching chats or reloading the
+// thread re-renders instantly instead of re-downloading. In-flight requests
+// are shared so a burst of re-mounts only fetches once.
+const DECOY_CACHE_MAX = 300;
+const decoyImageCache = new Map<string, string>();
+const decoyImageInflight = new Map<string, Promise<string>>();
+
+function getDecoyImageUrl(token: string, mediaId: string): Promise<string> {
+  const hit = decoyImageCache.get(mediaId);
+  if (hit) return Promise.resolve(hit);
+  const pending = decoyImageInflight.get(mediaId);
+  if (pending) return pending;
+  const p = downloadDecoyImage(token, mediaId)
+    .then(async blob => {
+      const url = toDataUrl(new Uint8Array(await blob.arrayBuffer()), 'image/jpeg');
+      decoyImageCache.set(mediaId, url);
+      if (decoyImageCache.size > DECOY_CACHE_MAX) {
+        const oldest = decoyImageCache.keys().next().value;
+        if (oldest !== undefined) decoyImageCache.delete(oldest);
+      }
+      return url;
+    })
+    .finally(() => decoyImageInflight.delete(mediaId));
+  decoyImageInflight.set(mediaId, p);
+  return p;
+}
+
 // Split out from the default export above purely so MediaBubble itself never
 // calls a hook before its early voice-routing return — this is the actual
 // hook-owning component for the image/video/fallback-file path.
@@ -581,8 +603,9 @@ function VisualMediaBubble({
   token: string; mediaId: string; contentType: string;
   masterToken: string | null; onMasterTokenSaved: (t: string) => void; onRemove?: () => void;
 }) {
-  const [stage, setStage] = useState<VisStage>('idle');
-  const [objectUrl, setObjectUrl] = useState<string | null>(null);
+  const cachedDecoy = decoyImageCache.get(mediaId) ?? null;
+  const [stage, setStage] = useState<VisStage>(cachedDecoy ? 'decoy' : 'loading');
+  const [objectUrl, setObjectUrl] = useState<string | null>(cachedDecoy);
   const [lightboxKind, setLightboxKind] = useState<MediaKind>('image');
   const [error, setError] = useState<string | null>(null);
   const [tokenInputVisible, setTokenInputVisible] = useState(false);
@@ -614,21 +637,27 @@ function VisualMediaBubble({
     if (wasRevealed) scheduleRemoval();
   }
 
-  async function loadDecoy() {
+  // Decoy loads by itself as soon as the bubble mounts (cached after the
+  // first fetch), so the photo is always visible — no tap-to-download.
+  async function loadDecoy(openViewer = false) {
     setStage('loading');
     setError(null);
     try {
-      const blob = await downloadDecoyImage(token, mediaId);
-      const buf = new Uint8Array(await blob.arrayBuffer());
-      setObjectUrl(toDataUrl(buf, 'image/jpeg'));
+      const url = await getDecoyImageUrl(token, mediaId);
+      setObjectUrl(url);
       setLightboxKind('image');
       setStage('decoy');
-      setViewerOpen(true);
+      if (openViewer) setViewerOpen(true);
     } catch {
       setError('Failed to load');
       setStage('idle');
     }
   }
+
+  useEffect(() => {
+    if (!decoyImageCache.has(mediaId)) loadDecoy();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mediaId]);
 
   async function reveal(mToken: string) {
     setStage('revealing');
@@ -670,7 +699,7 @@ function VisualMediaBubble({
     if (clickTimerRef.current) return;
     clickTimerRef.current = setTimeout(() => {
       clickTimerRef.current = null;
-      if (stage === 'idle') loadDecoy();
+      if (stage === 'idle') loadDecoy(true);
       else if ((stage === 'decoy' || stage === 'revealed') && objectUrl) setViewerOpen(true);
     }, 280);
   }

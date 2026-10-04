@@ -23,12 +23,13 @@ import { encryptMessage } from '../services/crypto';
 import { generateDecoy } from '../services/decoy';
 import { loadKeypair } from '../services/keys';
 import { presenceService, WsMessage } from '../services/presence';
-import { LockIcon, MicIcon as MicIconSvg, PaperclipIcon as PaperclipIconSvg, CameraIcon, CloseIcon, PinIcon, SparkleIcon } from '../components/Icons';
+import { MicIcon as MicIconSvg, PaperclipIcon as PaperclipIconSvg, CameraIcon, CloseIcon, PinIcon, SparkleIcon } from '../components/Icons';
 import MediaBubble, { DocumentBubble } from '../components/MediaBubble';
 import MeetingCard, { JoinMeetingHandler } from '../components/MeetingCard';
 import { MessageMenuTrigger, MessageReactionPills, TrashIcon, SmileyIcon } from '../components/MessageMenu';
 import CopilotResultModal from '../components/CopilotResultModal';
 import MasterTokenPromptModal from '../components/MasterTokenPromptModal';
+import DeleteMessageDialog, { DeleteScope } from '../components/DeleteMessageDialog';
 import MediaPicker from '../components/MediaPicker';
 import { getSticker } from '../components/stickers';
 import ContactInfoPanel from '../components/ContactInfoPanel';
@@ -453,7 +454,6 @@ export function LockedContent({ apiToken, masterToken, onMasterTokenSaved, isMin
         onClick={handleTap}
         style={{ cursor: loading ? 'wait' : 'pointer', opacity: loading ? 0.7 : 1, display: 'flex', alignItems: 'center', gap: 6, padding: '2px 0' }}
       >
-        <LockIcon size={12} color={isMine ? 'rgba(255,255,255,0.75)' : '#6b7280'} />
         <span style={{ fontSize: '0.82rem', color: isMine ? 'rgba(255,255,255,0.75)' : '#6b7280', userSelect: 'none' }}>
           {loading ? 'Verifying…' : 'Tap to view'}
         </span>
@@ -650,7 +650,7 @@ function MessageBubble({
             onPinToggle={onPinToggle}
             onStarToggle={onStarToggle}
             onEdit={isMine ? onEdit : undefined}
-            onDelete={isMine ? onDelete : undefined}
+            onDelete={onDelete}
             onTranslate={isTextish ? handleTranslateClick : undefined}
             isPinned={!!msg.is_pinned}
             isStarred={isStarred}
@@ -857,6 +857,11 @@ export default function ChatPanel({
       } else if (msg.type === 'conversation_cleared') {
         const withUsername = msg.data?.with_username as string | undefined;
         if (withUsername === partner) setMessages([]);
+      } else if (msg.type === 'message_deleted') {
+        const mid = msg.data?.message_id as number | undefined;
+        if (mid && !msg.data?.group_id) {
+          setMessages(prev => prev.map(m => (m.id === mid ? { ...m, is_deleted: true } : m)));
+        }
       }
     };
     presenceService.addListener(handler);
@@ -1005,11 +1010,21 @@ export default function ChatPanel({
     } catch {}
   }
 
-  async function handleDeleteMessage(msg: ChatMessage) {
-    if (!window.confirm('Delete this message? This cannot be undone.')) return;
+  const [deleteTarget, setDeleteTarget] = useState<ChatMessage | null>(null);
+
+  function handleDeleteMessage(msg: ChatMessage) {
+    setDeleteTarget(msg);
+  }
+
+  async function confirmDelete(scope: DeleteScope) {
+    const msg = deleteTarget;
+    setDeleteTarget(null);
+    if (!msg) return;
     try {
-      await deleteMessage(token, msg.id);
-      await loadConversation();
+      await deleteMessage(token, msg.id, scope);
+      if (scope === 'me') setMessages(prev => prev.filter(m => m.id !== msg.id));
+      else setMessages(prev => prev.map(m => (m.id === msg.id ? { ...m, is_deleted: true } : m)));
+      loadConversation();
     } catch (err: any) {
       setSendError(err?.message || 'Failed to delete message');
     }
@@ -1577,6 +1592,15 @@ export default function ChatPanel({
           </button>
         )}
       </div>
+
+      {deleteTarget && (
+        <DeleteMessageDialog
+          isMine={deleteTarget.sender === myUsername}
+          canDeleteForEveryone={deleteTarget.sender === myUsername && !deleteTarget.is_deleted}
+          onPick={confirmDelete}
+          onCancel={() => setDeleteTarget(null)}
+        />
+      )}
 
       {tokenGateOpen && (
         <MasterTokenPromptModal

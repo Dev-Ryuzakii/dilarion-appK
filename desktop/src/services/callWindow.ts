@@ -1,6 +1,8 @@
 import { invoke } from '@tauri-apps/api/core';
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import type { CallType } from '../screens/CallModal';
+import { isTauri } from './platform';
+import type { GroupCallInfo } from '../callWindow/GroupCallView';
 
 export interface PendingCallPayload {
   token: string;
@@ -13,6 +15,9 @@ export interface PendingCallPayload {
   conference_id?: number;
   conference_participants?: string[];
   master_token?: string;
+  /** Set for a WhatsApp-style group call — the window renders GroupCallView
+   * (LiveKit room for the group) instead of the 1:1 CallModal. */
+  group_call?: GroupCallInfo;
 }
 
 /**
@@ -23,6 +28,12 @@ export interface PendingCallPayload {
  * off `activeCall` being non-null.
  */
 export async function openCallWindow(payload: PendingCallPayload, onClosed: () => void): Promise<void> {
+  if (!isTauri()) {
+    // Web: no second OS window - the call renders full-screen in this tab
+    // (see InPageCallHost).
+    showInPageCall(payload, onClosed);
+    return;
+  }
   await invoke('set_pending_call', { call: payload });
 
   const existing = await WebviewWindow.getByLabel('call');
@@ -36,10 +47,11 @@ export async function openCallWindow(payload: PendingCallPayload, onClosed: () =
   const win = new WebviewWindow('call', {
     url: 'index.html',
     title: `Dilarion — ${payload.partner}`,
-    width: 480,
-    height: 760,
-    minWidth: 380,
-    minHeight: 600,
+    // WhatsApp Desktop-sized call window — landscape, big enough for video.
+    width: 1024,
+    height: 700,
+    minWidth: 640,
+    minHeight: 520,
     resizable: true,
     center: true,
     decorations: true,
@@ -52,6 +64,49 @@ export async function openCallWindow(payload: PendingCallPayload, onClosed: () =
 /** Used when the main window itself needs to tear down the call (e.g. the
  * other party upgraded a 1:1 call into a group conference). */
 export async function closeCallWindowIfOpen(): Promise<void> {
+  if (!isTauri()) {
+    closeInPageCall();
+    return;
+  }
   const existing = await WebviewWindow.getByLabel('call');
   await existing?.close();
 }
+
+// ── Web: in-page call ─────────────────────────────────────────────────────────
+
+type InPageCall = { payload: PendingCallPayload; onClosed: () => void } | null;
+let inPageCall: InPageCall = null;
+const inPageListeners = new Set<(c: InPageCall) => void>();
+
+function publishInPage() {
+  inPageListeners.forEach(l => l(inPageCall));
+}
+
+export function showInPageCall(payload: PendingCallPayload, onClosed: () => void) {
+  if (inPageCall) return; // already on a call
+  inPageCall = { payload, onClosed };
+  publishInPage();
+}
+
+export function closeInPageCall() {
+  const current = inPageCall;
+  inPageCall = null;
+  publishInPage();
+  current?.onClosed();
+}
+
+/** Replace the call shown in-page (e.g. "call back" after a hang-up). */
+export function replaceInPageCall(payload: PendingCallPayload) {
+  if (!inPageCall) return;
+  inPageCall = { ...inPageCall, payload };
+  publishInPage();
+}
+
+export function subscribeInPageCall(fn: (c: InPageCall) => void): () => void {
+  inPageListeners.add(fn);
+  fn(inPageCall);
+  return () => { inPageListeners.delete(fn); };
+}
+
+/** Window event the in-page call fires when a 1:1 call becomes a group call. */
+export const UPGRADE_TO_GALLERY_EVENT = 'dilarion-upgrade-to-gallery';

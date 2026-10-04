@@ -3,6 +3,9 @@ import { decryptMessage as decryptMessageLocal, resolveEncryptedKey } from './cr
 // VITE_API_BASE comes from .env.production / .env.test (see package.json build:test).
 // Falls back to production so a plain `npm run build` with no mode flag never
 // silently points at the test backend.
+import { deviceId, deviceName } from './device';
+import { platformName } from './platform';
+
 const BASE = import.meta.env.VITE_API_BASE || 'https://apidilarion.eibstratoc.com';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -42,8 +45,13 @@ export interface Contact {
 export interface Group {
   id: number;
   name: string;
-  description?: string;
+  description?: string | null;
   member_count: number;
+  created_by?: number;
+  /** Group-wide disappearing-message timer in hours; null = off. */
+  disappear_after_hours?: number | null;
+  /** The viewer's role in this group ('admin' | 'member'). */
+  my_role?: string | null;
 }
 
 // ── Auth ───────────────────────────────────────────────────────────────────────
@@ -52,7 +60,12 @@ export async function login(username: string, token: string): Promise<unknown> {
   const res = await fetch(`${BASE}/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, token }),
+    body: JSON.stringify({
+      username, token,
+      // One signed-in desktop per account — the server names this device in
+      // the owner's alert if it's blocked.
+      device_id: deviceId(), device_name: deviceName(), platform: platformName(),
+    }),
   });
   if (!res.ok) {
     let detail = 'Invalid username or token';
@@ -1492,12 +1505,31 @@ export async function editMessage(
   if (!res.ok) throw new Error('Failed to edit message');
 }
 
-export async function deleteMessage(token: string, messageId: number): Promise<void> {
-  const res = await fetch(`${BASE}/messages/${messageId}`, {
+/** scope 'everyone' tombstones it for the whole chat (sender / group admin);
+ * 'me' just hides it for this user. */
+export async function deleteMessage(token: string, messageId: number, scope: 'everyone' | 'me' = 'everyone'): Promise<void> {
+  const res = await fetch(`${BASE}/messages/${messageId}?scope=${scope}`, {
     method: 'DELETE',
     headers: { Authorization: `Bearer ${token}` },
   });
-  if (!res.ok) throw new Error('Failed to delete message');
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || 'Failed to delete message');
+  }
+}
+
+/** Rings every other group member; the caller joins the returned conference. */
+export async function startGroupCall(token: string, groupId: number, callType: 'voice' | 'video'): Promise<{ conference_id: number; rung: number; not_rung: number }> {
+  const res = await fetch(`${BASE}/groups/${groupId}/call`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ call_type: callType }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || 'Failed to start group call');
+  }
+  return res.json();
 }
 
 export async function pinMessage(token: string, messageId: number): Promise<void> {
@@ -1581,6 +1613,121 @@ export async function demoteGroupMember(token: string, groupId: number, username
     const body = await res.json().catch(() => null);
     throw new Error(body?.detail || 'Failed to demote member');
   }
+}
+
+// ── Self-service groups (any user creates/runs their own groups) ──────────────
+
+async function groupFetch<T>(token: string, path: string, init: RequestInit, fallback: string): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    ...init,
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...(init.headers || {}) },
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || fallback);
+  }
+  return res.json();
+}
+
+export function createGroup(
+  token: string,
+  data: { name: string; description?: string; members: string[]; disappearAfterHours?: number | null },
+): Promise<Group> {
+  return groupFetch(token, '/groups/create', {
+    method: 'POST',
+    body: JSON.stringify({
+      name: data.name,
+      description: data.description || null,
+      members: data.members,
+      disappear_after_hours: data.disappearAfterHours ?? null,
+    }),
+  }, 'Failed to create group');
+}
+
+export function updateGroup(
+  token: string,
+  groupId: number,
+  data: { name?: string; description?: string; disappearAfterHours?: number | null },
+): Promise<Group> {
+  const body: Record<string, unknown> = {};
+  if (data.name !== undefined) body.name = data.name;
+  if (data.description !== undefined) body.description = data.description;
+  if (data.disappearAfterHours !== undefined) {
+    if (data.disappearAfterHours === null) body.clear_disappear = true;
+    else body.disappear_after_hours = data.disappearAfterHours;
+  }
+  return groupFetch(token, `/groups/${groupId}`, { method: 'PUT', body: JSON.stringify(body) }, 'Failed to update group');
+}
+
+export function deleteGroup(token: string, groupId: number): Promise<unknown> {
+  return groupFetch(token, `/groups/${groupId}`, { method: 'DELETE' }, 'Failed to delete group');
+}
+
+export function leaveGroup(token: string, groupId: number): Promise<unknown> {
+  return groupFetch(token, `/groups/${groupId}/leave`, { method: 'POST' }, 'Failed to leave group');
+}
+
+export function addGroupMember(token: string, groupId: number, username: string): Promise<unknown> {
+  return groupFetch(token, `/groups/${groupId}/members?username=${encodeURIComponent(username)}`, { method: 'POST' }, 'Failed to add member');
+}
+
+export function removeGroupMember(token: string, groupId: number, username: string): Promise<unknown> {
+  return groupFetch(token, `/groups/${groupId}/members/${encodeURIComponent(username)}`, { method: 'DELETE' }, 'Failed to remove member');
+}
+
+export interface GroupInvite {
+  group_id: number;
+  invite_code: string;
+  invite_link: string;
+  qr_payload: string;
+}
+
+export function getGroupInvite(token: string, groupId: number): Promise<GroupInvite> {
+  return groupFetch(token, `/groups/${groupId}/invite`, { method: 'GET' }, 'Failed to load invite link');
+}
+
+export function resetGroupInvite(token: string, groupId: number): Promise<GroupInvite> {
+  return groupFetch(token, `/groups/${groupId}/invite/reset`, { method: 'POST' }, 'Failed to reset invite link');
+}
+
+export interface GroupInvitePreview {
+  group_id: number;
+  name: string;
+  description: string | null;
+  member_count: number;
+  disappear_after_hours: number | null;
+  already_member: boolean;
+}
+
+/** Accepts a bare code, a dilarion://join/ link or a dilarion:join: QR payload. */
+export function normalizeInviteCode(input: string): string {
+  return input.trim().replace(/^dilarion:\/\/join\//, '').replace(/^dilarion:join:/, '');
+}
+
+export function previewGroupInvite(token: string, code: string): Promise<GroupInvitePreview> {
+  return groupFetch(token, `/groups/invite/${encodeURIComponent(normalizeInviteCode(code))}`, { method: 'GET' }, 'Invite link is invalid or has been reset');
+}
+
+export function joinGroupViaInvite(token: string, code: string): Promise<Group> {
+  return groupFetch(token, `/groups/join/${encodeURIComponent(normalizeInviteCode(code))}`, { method: 'POST' }, 'Failed to join group');
+}
+
+/** Timer choices offered for group disappearing messages (hours; null = off). */
+export const GROUP_DISAPPEAR_OPTIONS: { label: string; hours: number | null }[] = [
+  { label: 'Off', hours: null },
+  { label: '1 hour', hours: 1 },
+  { label: '8 hours', hours: 8 },
+  { label: '24 hours', hours: 24 },
+  { label: '7 days', hours: 24 * 7 },
+  { label: '90 days', hours: 24 * 90 },
+];
+
+export function formatDisappear(hours: number | null | undefined): string {
+  if (!hours) return 'Off';
+  const preset = GROUP_DISAPPEAR_OPTIONS.find(o => o.hours === hours);
+  if (preset) return preset.label;
+  if (hours % 24 === 0) return `${hours / 24} days`;
+  return `${hours} hours`;
 }
 
 // ── Profile picture ───────────────────────────────────────────────────────────

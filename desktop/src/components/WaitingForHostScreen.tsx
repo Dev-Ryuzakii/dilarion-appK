@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { presenceService, WsMessage } from '../services/presence';
+import waitingArt from '../assets/undraw_team-work_i1f3.svg';
 
 // Shown after join_by_code comes back status:"waiting" — the host has a
 // waiting room on and hasn't let this guest in yet. Just listens for the
@@ -35,8 +36,14 @@ export default function WaitingForHostScreen({
         gap: 18, color: '#fff',
       }}
     >
+      <img
+        src={waitingArt}
+        alt=""
+        draggable={false}
+        style={{ width: 'min(380px, 70vw)', height: 'auto', marginBottom: 6, userSelect: 'none' }}
+      />
       <div style={{
-        width: 56, height: 56, borderRadius: '50%',
+        width: 28, height: 28, borderRadius: '50%',
         border: '3px solid rgba(255,255,255,0.15)', borderTopColor: 'var(--accent, #6d5efc)',
         animation: 'spin 1s linear infinite',
       }} />

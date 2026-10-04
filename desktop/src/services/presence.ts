@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { emitTo, listen } from '@tauri-apps/api/event';
+import { browserDeviceName, isTauri } from './platform';
 
 const WS_BASE = (import.meta.env.VITE_WS_BASE as string | undefined) || 'wss://apidilarion.eibstratoc.com/ws';
 
@@ -36,6 +37,7 @@ function getOrCreateDeviceId(): string {
 }
 
 async function getDeviceName(): Promise<string> {
+  if (!isTauri()) return browserDeviceName();
   try {
     const info = await invoke<{ hostname: string }>('get_device_info');
     return info.hostname || 'Desktop';
@@ -108,7 +110,7 @@ class PresenceService {
       try {
         const msg: WsMessage = JSON.parse(e.data);
         this.listeners.forEach(l => l(msg));
-        if (CALL_RELEVANT_WS_TYPES.has(msg.type)) {
+        if (isTauri() && CALL_RELEVANT_WS_TYPES.has(msg.type)) {
           // Best-effort — if no call window is open this just fails silently
           // (emitTo throws when the target label doesn't exist).
           emitTo('call', WS_FORWARD_EVENT, msg).catch(() => {});
@@ -186,6 +188,7 @@ export function startCallWindowForwardBridge(): () => void {
 
 /** True when running as the standalone call window, not the main app window. */
 export function isCallWindow(): boolean {
+  if (!isTauri()) return false;
   try {
     return getCurrentWindow().label === 'call';
   } catch {

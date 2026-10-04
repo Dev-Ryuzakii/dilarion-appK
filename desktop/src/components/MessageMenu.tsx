@@ -164,7 +164,7 @@ export function MessageMenuTrigger({
     ...(onTranslate ? [{ key: 'translate', icon: <SparkleIcon size={16} />, label: 'Translate', onClick: onTranslate }] : []),
     { key: 'info', icon: <InfoIcon />, label: 'Info', onClick: onInfo },
     ...(isMine && onEdit ? [{ key: 'edit', icon: <EditIcon />, label: 'Edit', onClick: onEdit }] : []),
-    ...(isMine && onDelete ? [{ key: 'delete', icon: <TrashIcon />, label: 'Delete', onClick: onDelete, danger: true }] : []),
+    ...(onDelete ? [{ key: 'delete', icon: <TrashIcon />, label: 'Delete', onClick: onDelete, danger: true }] : []),
   ];
 
   return (

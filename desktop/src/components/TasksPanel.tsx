@@ -395,29 +395,7 @@ function CreateTaskModal({ token, myUsername, groups, onClose, onCreated }: { to
                   placeholder="Team name"
                   style={inputStyle}
                 />
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                  {users.length === 0 ? (
-                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>No other users found</span>
-                  ) : (
-                    users.map(u => {
-                      const checked = g.usernames.includes(u.username);
-                      return (
-                        <button
-                          key={u.username}
-                          type="button"
-                          onClick={() => toggleBreakoutMember(i, u.username)}
-                          style={{
-                            background: checked ? 'var(--accent)' : 'var(--bg-card)',
-                            color: checked ? '#fff' : 'var(--text-primary)',
-                            border: '1px solid var(--border-color)', borderRadius: 14, padding: '3px 10px', fontSize: '0.72rem', cursor: 'pointer',
-                          }}
-                        >
-                          {u.username}
-                        </button>
-                      );
-                    })
-                  )}
-                </div>
+                <UserSearchPicker users={users} selected={g.usernames} onToggle={u => toggleBreakoutMember(i, u)} />
               </div>
             ))}
             <button type="button" onClick={() => setBreakoutGroups(prev => [...prev, { name: `Team ${String.fromCharCode(65 + prev.length)}`, usernames: [] }])} style={{ alignSelf: 'flex-start', background: 'transparent', border: 'none', color: 'var(--accent)', fontSize: '0.78rem', cursor: 'pointer', padding: 0 }}>
@@ -427,29 +405,7 @@ function CreateTaskModal({ token, myUsername, groups, onClose, onCreated }: { to
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Assignees</span>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-              {users.length === 0 ? (
-                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>No other users found</span>
-              ) : (
-                users.map(u => {
-                  const checked = assignees.includes(u.username);
-                  return (
-                    <button
-                      key={u.username}
-                      type="button"
-                      onClick={() => toggleAssignee(u.username)}
-                      style={{
-                        background: checked ? 'var(--accent)' : 'var(--bg-card)',
-                        color: checked ? '#fff' : 'var(--text-primary)',
-                        border: '1px solid var(--border-color)', borderRadius: 14, padding: '3px 10px', fontSize: '0.72rem', cursor: 'pointer',
-                      }}
-                    >
-                      {u.username}
-                    </button>
-                  );
-                })
-              )}
-            </div>
+            <UserSearchPicker users={users} selected={assignees} onToggle={toggleAssignee} />
           </div>
         )}
 
@@ -464,6 +420,72 @@ function CreateTaskModal({ token, myUsername, groups, onClose, onCreated }: { to
           </button>
         </div>
       </form>
+    </div>
+  );
+}
+
+// Search-as-you-type picker: selected people show as removable chips, the
+// list below filters by username so large orgs don't render every user.
+function UserSearchPicker({ users, selected, onToggle }: { users: Contact[]; selected: string[]; onToggle: (username: string) => void }) {
+  const [query, setQuery] = useState('');
+  const q = query.trim().toLowerCase();
+  const matches = users.filter(u => !q || u.username.toLowerCase().includes(q));
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      {selected.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          {selected.map(u => (
+            <button
+              key={u}
+              type="button"
+              onClick={() => onToggle(u)}
+              title={`Remove ${u}`}
+              style={{ background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 14, padding: '3px 10px', fontSize: '0.72rem', cursor: 'pointer' }}
+            >
+              {u} ✕
+            </button>
+          ))}
+        </div>
+      )}
+      <input
+        value={query}
+        onChange={e => setQuery(e.target.value)}
+        onKeyDown={e => {
+          // Enter picks the first match instead of submitting the form.
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            const first = matches.find(u => !selected.includes(u.username));
+            if (first) { onToggle(first.username); setQuery(''); }
+          }
+        }}
+        placeholder="Search people by username"
+        style={inputStyle}
+      />
+      <div style={{ maxHeight: 160, overflowY: 'auto', border: '1px solid var(--border-color)', borderRadius: 8 }}>
+        {users.length === 0 ? (
+          <div style={{ padding: '8px 12px', fontSize: '0.75rem', color: 'var(--text-muted)' }}>No other users found</div>
+        ) : matches.length === 0 ? (
+          <div style={{ padding: '8px 12px', fontSize: '0.75rem', color: 'var(--text-muted)' }}>No match for "{query.trim()}"</div>
+        ) : (
+          matches.map(u => {
+            const checked = selected.includes(u.username);
+            return (
+              <label
+                key={u.username}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', cursor: 'pointer',
+                  fontSize: '0.8rem', color: 'var(--text-primary)',
+                  background: checked ? 'var(--item-active-bg)' : 'transparent',
+                }}
+              >
+                <input type="checkbox" checked={checked} onChange={() => onToggle(u.username)} />
+                {u.username}
+              </label>
+            );
+          })
+        )}
+      </div>
     </div>
   );
 }

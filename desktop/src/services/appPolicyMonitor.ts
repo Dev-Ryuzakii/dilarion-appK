@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { isTauri } from './platform';
 import { getPolicyBlocklist, reportPolicyViolation } from './api';
 
 /**
@@ -50,6 +51,8 @@ async function checkOnce() {
 }
 
 export function start(token: string) {
+  // Process listing needs the desktop app; nothing to check from a browser.
+  if (!isTauri()) return;
   currentToken = token;
   if (pollTimer) return;
   checkOnce();

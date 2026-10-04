@@ -830,7 +830,7 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
               autoPlay
               playsInline
               muted
-              style={{ width: '100%', height: '100%', objectFit: 'cover', background: '#000', borderRadius: 14 }}
+              style={{ width: '100%', height: '100%', objectFit: 'contain', background: '#000' }}
             />
             {/* Local PiP */}
             <video
@@ -1054,54 +1054,54 @@ function SignalBars({ quality }: { quality: 0 | 1 | 2 | 3 | 4 }) {
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 const cs: Record<string, React.CSSProperties> = {
+  // The call lives in its own OS window (CallWindowApp), so the "modal" fills
+  // that whole window edge to edge, WhatsApp Desktop-style: video (or the
+  // avatar) takes all the space, info + controls sit underneath.
   overlay: {
     position: 'fixed',
     inset: 0,
-    background: 'rgba(0,0,0,0.85)',
+    background: '#0b0b0b',
     zIndex: 1000,
     display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   modal: {
     background: '#111827',
-    borderRadius: 20,
-    width: 520,
-    maxHeight: '90vh',
+    width: '100%',
+    height: '100%',
     display: 'flex',
     flexDirection: 'column',
     overflow: 'hidden',
-    boxShadow: '0 24px 80px rgba(0,0,0,0.8)',
   },
   videoArea: {
     position: 'relative',
     width: '100%',
-    height: 320,
+    flex: 1,
+    minHeight: 0,
     background: '#000',
-    flexShrink: 0,
   },
   localPip: {
     position: 'absolute',
-    bottom: 12,
-    right: 12,
-    width: 120,
-    height: 90,
+    bottom: 16,
+    right: 16,
+    width: 'clamp(140px, 22vw, 260px)',
+    aspectRatio: '4 / 3',
     objectFit: 'cover',
-    borderRadius: 10,
+    borderRadius: 12,
     border: '2px solid #1f2937',
     background: '#000',
+    boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
   },
   avatarArea: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    height: 200,
-    background: '#0f172a',
-    flexShrink: 0,
+    flex: 1,
+    minHeight: 0,
+    background: 'radial-gradient(circle at 50% 40%, #1e293b 0%, #0f172a 70%)',
   },
   bigAvatar: {
-    width: 96,
-    height: 96,
+    width: 'clamp(96px, 18vh, 160px)',
+    height: 'clamp(96px, 18vh, 160px)',
     borderRadius: '50%',
     background: '#c0392b',
     color: '#fff',
@@ -1109,7 +1109,7 @@ const cs: Record<string, React.CSSProperties> = {
     alignItems: 'center',
     justifyContent: 'center',
     fontWeight: 800,
-    fontSize: '2rem',
+    fontSize: 'clamp(2rem, 5vh, 3.2rem)',
   },
   infoBar: {
     display: 'flex',
@@ -1134,8 +1134,8 @@ const cs: Record<string, React.CSSProperties> = {
     padding: '12px 24px 24px',
   },
   ctrlBtn: {
-    width: 52,
-    height: 52,
+    width: 56,
+    height: 56,
     borderRadius: '50%',
     display: 'flex',
     alignItems: 'center',

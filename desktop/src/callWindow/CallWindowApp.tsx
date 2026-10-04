@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { emitTo } from '@tauri-apps/api/event';
 import CallModal, { CallType } from '../screens/CallModal';
+import GroupCallView from './GroupCallView';
 import { startCallWindowForwardBridge } from '../services/presence';
 import type { PendingCallPayload } from '../services/callWindow';
 
@@ -31,6 +32,17 @@ export default function CallWindowApp() {
 
   if (!ready || !call) {
     return <div style={{ width: '100%', height: '100vh', background: '#0b0b0b' }} />;
+  }
+
+  if (call.group_call) {
+    return (
+      <GroupCallView
+        token={call.token}
+        myUsername={call.my_username}
+        info={call.group_call}
+        onEnd={() => { getCurrentWindow().close().catch(() => {}); }}
+      />
+    );
   }
 
   return (
