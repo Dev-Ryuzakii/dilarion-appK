@@ -18,7 +18,15 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import com.dilarion.app.data.model.IncomingCallData
-import com.dilarion.app.security.AppLockManager
+import com.dilarion.app.security.IdleLogoutManager
+import com.dilarion.app.security.SessionManager
+import com.dilarion.app.services.PresenceService
+import android.os.Handler
+import android.os.Looper
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import javax.inject.Inject
 import com.dilarion.app.services.NotificationHelper
 import com.dilarion.app.ui.components.PipController
 import com.dilarion.app.ui.navigation.AppNavigation
@@ -33,6 +41,42 @@ import dagger.hilt.android.AndroidEntryPoint
 class MainActivity : FragmentActivity() {
 
     private var pendingIncomingCall: IncomingCallData? = null
+
+    @Inject lateinit var sessionManager: SessionManager
+    @Inject lateinit var presenceService: PresenceService
+
+    private val idleHandler = Handler(Looper.getMainLooper())
+    private val idleCheck = object : Runnable {
+        override fun run() {
+            checkIdle()
+            idleHandler.postDelayed(this, 30_000)
+        }
+    }
+
+    override fun onUserInteraction() {
+        super.onUserInteraction()
+        IdleLogoutManager.markActive(this)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        checkIdle()
+        idleHandler.postDelayed(idleCheck, 30_000)
+    }
+
+    /** Idle past the system timeout → drop the session; the token prompt takes over. */
+    private fun checkIdle() {
+        if (IdleLogoutManager.lockedUser.value != null) return
+        if (!IdleLogoutManager.isExpired(this)) return
+        lifecycleScope.launch {
+            val token = sessionManager.sessionToken.first() ?: return@launch
+            val username = sessionManager.username.first() ?: return@launch
+            if (token.isBlank()) return@launch
+            presenceService.disconnect()
+            sessionManager.clearSessionTokenOnly()
+            IdleLogoutManager.lock(this@MainActivity, username)
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -56,7 +100,7 @@ class MainActivity : FragmentActivity() {
         requestMonitoringPermissions()
         requestBatteryOptimizationExemption()
         pendingIncomingCall = extractIncomingCall(intent)
-        AppLockManager.armIfEnabled(this)
+        IdleLogoutManager.restore(this)
         setContent {
             DilarionTheme {
                 AppNavigation(pendingIncomingCall = pendingIncomingCall)
@@ -69,7 +113,8 @@ class MainActivity : FragmentActivity() {
     // the system gesture instead of a tap.
     override fun onPause() {
         super.onPause()
-        AppLockManager.armIfEnabled(this)
+        idleHandler.removeCallbacks(idleCheck)
+        IdleLogoutManager.markActive(this, force = true)
     }
 
     override fun onUserLeaveHint() {

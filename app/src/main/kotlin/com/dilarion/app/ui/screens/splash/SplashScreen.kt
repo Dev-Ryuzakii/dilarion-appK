@@ -28,6 +28,7 @@ import com.dilarion.app.ui.theme.SurfaceWhite
 fun SplashScreen(
     onAuthRequired: () -> Unit,
     onAuthenticated: () -> Unit,
+    onOnboardingRequired: () -> Unit = {},
     viewModel: SplashViewModel = hiltViewModel(),
 ) {
     val destination by viewModel.destination.collectAsState()
@@ -36,6 +37,7 @@ fun SplashScreen(
         when (destination) {
             SplashDestination.AUTH    -> onAuthRequired()
             SplashDestination.HOME    -> onAuthenticated()
+            SplashDestination.ONBOARDING -> onOnboardingRequired()
             SplashDestination.LOADING -> Unit
         }
     }

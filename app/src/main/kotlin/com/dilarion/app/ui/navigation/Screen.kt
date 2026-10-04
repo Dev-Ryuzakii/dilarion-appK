@@ -35,6 +35,16 @@ sealed class Screen(val route: String) {
         fun route(conferenceId: Int, micOn: Boolean = true, camOn: Boolean = true, displayName: String? = null) =
             "waiting/$conferenceId?micOn=$micOn&camOn=$camOn&displayName=${(displayName ?: "").encodeToUrl()}"
     }
+    object Onboarding    : Screen("onboarding")
+    object CreateGroup   : Screen("create_group")
+    object GroupInfo     : Screen("group_info/{groupId}") {
+        fun route(groupId: Int) = "group_info/$groupId"
+    }
+    /** WhatsApp-style group call (not a meeting). conferenceId < 0 = start a new call. */
+    object GroupCall : Screen("group_call?conferenceId={conferenceId}&groupId={groupId}&groupName={groupName}&callType={callType}") {
+        fun route(conferenceId: Int, groupId: Int, groupName: String, callType: String) =
+            "group_call?conferenceId=$conferenceId&groupId=$groupId&groupName=${groupName.encodeToUrl()}&callType=$callType"
+    }
     object MasterToken   : Screen("master_token")
     object LinkedDevices : Screen("linked_devices")
 }

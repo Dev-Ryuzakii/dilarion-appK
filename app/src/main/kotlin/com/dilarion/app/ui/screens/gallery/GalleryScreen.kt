@@ -58,6 +58,7 @@ fun GalleryScreen(
     viewModel: GalleryViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsState()
+    com.dilarion.app.security.HoldIdleLogoutWhileVisible()
     var showChat by remember { mutableStateOf(false) }
     val isInPip by PipController.isInPip
 

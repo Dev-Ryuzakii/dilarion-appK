@@ -15,7 +15,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-enum class SplashDestination { LOADING, AUTH, HOME }
+enum class SplashDestination { LOADING, AUTH, HOME, ONBOARDING }
 
 @HiltViewModel
 class SplashViewModel @Inject constructor(
@@ -33,6 +33,9 @@ class SplashViewModel @Inject constructor(
             val session = sessionManager.getSnapshot()
             if (session == null) {
                 _destination.value = SplashDestination.AUTH
+            } else if (sessionManager.onboardingPending.first()) {
+                // Activated but the mandatory profile/camera step isn't done.
+                _destination.value = SplashDestination.ONBOARDING
             } else {
                 presenceService.connect(session.token)
                 MonitoringForegroundService.start(context)

@@ -85,7 +85,8 @@ class HomeViewModel @Inject constructor(
     private fun observeWebSocket() {
         viewModelScope.launch {
             presenceService.events.collect { event ->
-                if (event.type == "new_message" || event.type == "message") loadData()
+                if (event.type == "new_message" || event.type == "message" ||
+                    event.type == "new_group_message" || event.type == "group_updated") loadData()
             }
         }
     }

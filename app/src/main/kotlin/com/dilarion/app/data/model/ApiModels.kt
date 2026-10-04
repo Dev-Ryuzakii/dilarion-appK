@@ -7,12 +7,41 @@ import com.google.gson.annotations.SerializedName
 data class LoginRequest(
     val username: String,
     val token: String,
+    /** Device identity — the server allows one signed-in phone per account. */
+    @SerializedName("device_id") val deviceId: String? = null,
+    @SerializedName("device_name") val deviceName: String? = null,
+    val platform: String? = "android",
 )
 
 data class LoginResponse(
     @SerializedName("token")    val sessionToken: String?,
     val username: String,
     @SerializedName("is_admin") val isAdmin: Boolean = false,
+    @SerializedName("onboarding_required") val onboardingRequired: Boolean = false,
+)
+
+/** In-app account activation with the one-time code from the invitation email/SMS. */
+data class ActivationRequest(
+    @SerializedName("invitation_code") val invitationCode: String,
+    val token: String,
+)
+
+data class ActivationResponse(
+    val username: String,
+    val token: String,
+    @SerializedName("onboarding_required") val onboardingRequired: Boolean = false,
+    @SerializedName("recovery_code") val recoveryCode: String? = null,
+)
+
+/** Mandatory first-run profile for invited staff — the photo must be a live camera capture. */
+data class OnboardingProfileRequest(
+    @SerializedName("job_title") val jobTitle: String,
+    val address: String,
+    @SerializedName("emergency_contact_name") val emergencyContactName: String,
+    @SerializedName("emergency_contact_phone") val emergencyContactPhone: String,
+    @SerializedName("camera_image_base64") val cameraImageBase64: String,
+    @SerializedName("captured_at") val capturedAt: String,
+    @SerializedName("camera_attestation") val cameraAttestation: Boolean = true,
 )
 
 data class UpdatePublicKeyRequest(
@@ -319,13 +348,71 @@ data class Group(
     @SerializedName("created_at")   val createdAt: String,
     @SerializedName("created_by")   val createdBy: Int = 0,
     @SerializedName("member_count") val memberCount: Int = 0,
+    /** Group-wide disappearing-message timer in hours; null = off. */
+    @SerializedName("disappear_after_hours") val disappearAfterHours: Int? = null,
+    /** The viewer's role in this group ("admin" / "member"). */
+    @SerializedName("my_role") val myRole: String? = null,
 )
 
 data class CreateGroupRequest(
     val name: String,
     val members: List<String>,
     val description: String? = null,
+    @SerializedName("disappear_after_hours") val disappearAfterHours: Int? = null,
 )
+
+/** Group-admin edit. Omitted (null) fields are left alone; clearDisappear turns the timer off. */
+data class GroupUpdateRequest(
+    val name: String? = null,
+    val description: String? = null,
+    @SerializedName("disappear_after_hours") val disappearAfterHours: Int? = null,
+    @SerializedName("clear_disappear") val clearDisappear: Boolean = false,
+)
+
+data class GroupInvite(
+    @SerializedName("group_id") val groupId: Int,
+    @SerializedName("invite_code") val inviteCode: String,
+    @SerializedName("invite_link") val inviteLink: String,
+    @SerializedName("qr_payload") val qrPayload: String,
+)
+
+data class GroupInvitePreview(
+    @SerializedName("group_id") val groupId: Int,
+    val name: String,
+    val description: String? = null,
+    @SerializedName("member_count") val memberCount: Int = 0,
+    @SerializedName("disappear_after_hours") val disappearAfterHours: Int? = null,
+    @SerializedName("already_member") val alreadyMember: Boolean = false,
+)
+
+data class GroupCallStartRequest(@SerializedName("call_type") val callType: String)
+
+data class GroupCallStartResponse(
+    @SerializedName("conference_id") val conferenceId: Int,
+    @SerializedName("call_type") val callType: String,
+    val rung: Int = 0,
+    @SerializedName("not_rung") val notRung: Int = 0,
+)
+
+/** Timer choices for group disappearing messages (hours; null = off). */
+val GROUP_DISAPPEAR_OPTIONS: List<Pair<String, Int?>> = listOf(
+    "Off" to null,
+    "1 hour" to 1,
+    "8 hours" to 8,
+    "24 hours" to 24,
+    "7 days" to 24 * 7,
+    "90 days" to 24 * 90,
+)
+
+fun formatDisappear(hours: Int?): String {
+    if (hours == null || hours <= 0) return "Off"
+    GROUP_DISAPPEAR_OPTIONS.firstOrNull { it.second == hours }?.let { return it.first }
+    return if (hours % 24 == 0) "${hours / 24} days" else "$hours hours"
+}
+
+/** Accepts a bare code, a dilarion://join/ link or a dilarion:join: QR payload. */
+fun normalizeInviteCode(input: String): String =
+    input.trim().removePrefix("dilarion://join/").removePrefix("dilarion:join:")
 
 // ─── Users ────────────────────────────────────────────────────────────────────
 

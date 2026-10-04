@@ -41,6 +41,7 @@ fun HomeScreen(
     onCallUser: (String) -> Unit,
     onOpenGroupChat: (Int, String) -> Unit,
     onNewChat: () -> Unit,
+    onNewGroup: () -> Unit = {},
     onNewMeeting: () -> Unit,
     onMeetings: () -> Unit,
     onJoinMeeting: (joinCode: String, title: String?) -> Unit,
@@ -50,6 +51,15 @@ fun HomeScreen(
     val uiState by viewModel.uiState.collectAsState()
     var selectedTab by remember { mutableStateOf(HomeTab.CHATS) }
     var showLogoutDialog by remember { mutableStateOf(false) }
+    var showJoinGroup by remember { mutableStateOf(false) }
+    var showGroupMenu by remember { mutableStateOf(false) }
+
+    if (showJoinGroup) {
+        com.dilarion.app.ui.screens.groups.JoinGroupDialog(
+            onDismiss = { showJoinGroup = false },
+            onJoined = { g -> showJoinGroup = false; viewModel.loadData(); onOpenGroupChat(g.id, g.name) },
+        )
+    }
 
     if (showLogoutDialog) {
         AlertDialog(
@@ -134,6 +144,26 @@ fun HomeScreen(
             if (selectedTab == HomeTab.CHATS) {
                 FloatingActionButton(onClick = onNewChat, containerColor = DilarionRed) {
                     Icon(Icons.Default.Add, "New chat", tint = SurfaceWhite)
+                }
+            }
+            // Any user can create or join a group — no admin needed.
+            if (selectedTab == HomeTab.GROUPS) {
+                Box {
+                    FloatingActionButton(onClick = { showGroupMenu = true }, containerColor = DilarionRed) {
+                        Icon(Icons.Default.GroupAdd, "New group", tint = SurfaceWhite)
+                    }
+                    DropdownMenu(expanded = showGroupMenu, onDismissRequest = { showGroupMenu = false }) {
+                        DropdownMenuItem(
+                            text = { Text("New group") },
+                            leadingIcon = { Icon(Icons.Default.GroupAdd, null) },
+                            onClick = { showGroupMenu = false; onNewGroup() },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Join via link or QR") },
+                            leadingIcon = { Icon(Icons.Default.QrCodeScanner, null) },
+                            onClick = { showGroupMenu = false; showJoinGroup = true },
+                        )
+                    }
                 }
             }
         },

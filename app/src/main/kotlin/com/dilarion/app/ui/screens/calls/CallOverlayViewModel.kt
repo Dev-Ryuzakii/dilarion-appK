@@ -23,6 +23,22 @@ data class ConferenceInviteData(
     val conferenceId: Int,
     val invitedBy: String,
     val existingParticipants: List<String>,
+    /** Set for a WhatsApp-style group call (not a meeting) — joins the group call screen. */
+    val groupId: Int? = null,
+    val groupName: String? = null,
+    /** "voice" or "video" for a group call. */
+    val callType: String? = null,
+) {
+    val isGroupCall: Boolean get() = groupName != null
+}
+
+/** Someone tried to sign in to this account on another device and was blocked. */
+data class BlockedLoginInfo(
+    val deviceName: String?,
+    val platform: String?,
+    val location: String?,
+    val ip: String?,
+    val time: String?,
 )
 
 /** A call that rang here and was cancelled before it was answered. */
@@ -48,6 +64,7 @@ data class MinimizedCallInfo(
 
 @HiltViewModel
 class CallOverlayViewModel @Inject constructor(
+    @dagger.hilt.android.qualifiers.ApplicationContext private val context: android.content.Context,
     private val presenceService: PresenceService,
     private val apiService: ApiService,
     private val sessionManager: SessionManager,
@@ -108,12 +125,27 @@ class CallOverlayViewModel @Inject constructor(
                     }
                     // Being added to a live call rings like any other call: the
                     // invitee has to answer before their microphone joins it.
+                    "login_attempt_blocked" -> {
+                        fun str(k: String) = data.get(k)?.takeIf { !it.isJsonNull }?.asString
+                        val info = BlockedLoginInfo(str("device_name"), str("platform"), str("location"), str("ip"), str("time"))
+                        _blockedLogin.value = info
+                        NotificationHelper.showSecurityAlert(
+                            context,
+                            "Sign-in blocked",
+                            "Someone tried to sign in on ${info.deviceName ?: "another device"} from ${info.location ?: "an unknown location"}.",
+                        )
+                    }
                     "conference_invite" -> {
                         val confId = data.get("conference_id")?.asInt ?: return@collect
                         val invitedBy = data.get("invited_by")?.asString ?: ""
                         val existing = data.getAsJsonArray("existing_participants")
                             ?.map { it.asString } ?: emptyList()
-                        _conferenceInvite.value = ConferenceInviteData(confId, invitedBy, existing)
+                        _conferenceInvite.value = ConferenceInviteData(
+                            confId, invitedBy, existing,
+                            groupId = data.get("group_id")?.takeIf { !it.isJsonNull }?.asInt,
+                            groupName = data.get("group_name")?.takeIf { !it.isJsonNull }?.asString,
+                            callType = data.get("call_type")?.takeIf { !it.isJsonNull }?.asString,
+                        )
                     }
                 }
             }
@@ -127,6 +159,15 @@ class CallOverlayViewModel @Inject constructor(
     fun clearConferenceUpgrade() { _conferenceUpgrade.value = null }
 
     fun clearConferenceInvite() { _conferenceInvite.value = null }
+
+    private val _blockedLogin = MutableStateFlow<BlockedLoginInfo?>(null)
+    val blockedLogin: StateFlow<BlockedLoginInfo?> = _blockedLogin
+    fun clearBlockedLogin() { _blockedLogin.value = null }
+
+    /** Join tapped on a group-call card in a chat — same master-token accept as a ring. */
+    fun showGroupCallJoin(conferenceId: Int, groupId: Int, groupName: String, callType: String, startedBy: String) {
+        _conferenceInvite.value = ConferenceInviteData(conferenceId, startedBy, emptyList(), groupId, groupName, callType)
+    }
 
     fun declineConferenceInvite() {
         val invite = _conferenceInvite.value ?: return

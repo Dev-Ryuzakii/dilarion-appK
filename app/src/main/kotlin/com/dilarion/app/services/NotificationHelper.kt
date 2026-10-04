@@ -161,6 +161,28 @@ object NotificationHelper {
             .build()
     }
 
+    /** High-priority alert, e.g. a sign-in attempt from another device was blocked. */
+    fun showSecurityAlert(context: Context, title: String, text: String) {
+        createChannels(context)
+        val tapIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val tapPending = PendingIntent.getActivity(
+            context, 3, tapIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val notification = Notification.Builder(context, CHANNEL_MESSAGES)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setStyle(Notification.BigTextStyle().bigText(text))
+            .setSmallIcon(android.R.drawable.ic_dialog_alert)
+            .setContentIntent(tapPending)
+            .setAutoCancel(true)
+            .setVisibility(Notification.VISIBILITY_PRIVATE)
+            .build()
+        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+        runCatching { nm.notify(7301, notification) }
+    }
+
     fun cancelCall(context: Context) {
         stopRingtone()
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager

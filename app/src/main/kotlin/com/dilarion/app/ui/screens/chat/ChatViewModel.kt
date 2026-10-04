@@ -119,6 +119,8 @@ data class ChatUiState(
     val replySuggestions: List<String>? = null,
     val suggestLoading: Boolean = false,
     val showMembersSheet: Boolean = false,
+    /** The open group was deleted or this user was removed from it. */
+    val groupGone: Boolean = false,
     val groupAdminBusy: Boolean = false,
     val groupAdminError: String? = null,
     // Chat settings (archive/mute/lock/delete-for-me) for THIS thread specifically.
@@ -403,12 +405,28 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    fun deleteMessage(msg: Message) {
+    /** WhatsApp-style: "everyone" tombstones it for the whole chat (sender, or a
+     *  group admin in a group); "me" just hides it for this user. */
+    fun deleteMessage(msg: Message, scope: String = "everyone") {
         viewModelScope.launch {
             val token = sessionManager.sessionToken.first() ?: return@launch
-            runCatching { apiService.deleteMessage("Bearer $token", msg.id) }
+            val resp = runCatching { apiService.deleteMessage("Bearer $token", msg.id, scope) }.getOrNull()
+            if (resp == null || !resp.isSuccessful) {
+                _uiState.value = _uiState.value.copy(error = "Couldn't delete message")
+                return@launch
+            }
+            _uiState.value = _uiState.value.copy(
+                messages = if (scope == "me") _uiState.value.messages.filterNot { it.id == msg.id }
+                else _uiState.value.messages.map { if (it.id == msg.id) it.copy(isDeleted = true) else it },
+            )
             loadMessages()
         }
+    }
+
+    /** True when the viewer is an admin of the open group. */
+    fun isGroupAdmin(): Boolean {
+        val me = _uiState.value.currentUsername
+        return groupId != null && _uiState.value.groupMembers.any { it.username == me && it.role == "admin" }
     }
 
     fun setReplyTarget(msg: Message?) {
@@ -657,12 +675,10 @@ class ChatViewModel @Inject constructor(
                 tempFile.writeBytes(bytes)
                 val requestFile = tempFile.asRequestBody(mime.toMediaTypeOrNull())
                 val filePart = MultipartBody.Part.createFormData("file", displayName, requestFile)
-                val usernamePart = peerUsername.toRequestBody("text/plain".toMediaTypeOrNull())
-                val contentTypePart = mime.toRequestBody("text/plain".toMediaTypeOrNull())
-                val decoyKindPart = decoyKind?.toRequestBody("text/plain".toMediaTypeOrNull())
-                apiService.uploadMedia("Bearer $token", usernamePart, filePart, contentTypePart, decoyKindPart)
+                val resp = uploadAttachment("Bearer $token", filePart, mime, decoyKind)
                 tempFile.delete()
-                loadMedia()
+                if (!resp.isSuccessful) throw IllegalStateException("Upload failed (${resp.code()})")
+                refreshAfterUpload()
             }.onFailure {
                 _uiState.value = _uiState.value.copy(error = it.message)
             }
@@ -671,6 +687,29 @@ class ChatViewModel @Inject constructor(
                 pendingUploads = _uiState.value.pendingUploads.filterNot { it.id == pending.id },
             )
         }
+    }
+
+    /** Group chats upload to the group (upload_raw_group); 1:1 chats to the peer. */
+    private suspend fun uploadAttachment(
+        bearer: String,
+        filePart: MultipartBody.Part,
+        contentType: String,
+        decoyKind: String?,
+    ): retrofit2.Response<com.dilarion.app.data.model.MediaUploadResponse> {
+        val text = "text/plain".toMediaTypeOrNull()
+        val contentTypePart = contentType.toRequestBody(text)
+        val decoyKindPart = decoyKind?.toRequestBody(text)
+        val gId = groupId
+        return if (gId != null) {
+            apiService.uploadGroupMedia(bearer, gId.toString().toRequestBody(text), filePart, contentTypePart, decoyKindPart)
+        } else {
+            apiService.uploadMedia(bearer, peerUsername.toRequestBody(text), filePart, contentTypePart, decoyKindPart)
+        }
+    }
+
+    // Group media arrives as group messages; 1:1 media via the media inbox.
+    private fun refreshAfterUpload() {
+        if (groupId != null) loadMessages() else loadMedia()
     }
 
     fun startRecording(context: Context) {
@@ -720,11 +759,10 @@ class ChatViewModel @Inject constructor(
             runCatching {
                 val requestFile = file.asRequestBody("audio/mp4".toMediaTypeOrNull())
                 val filePart = MultipartBody.Part.createFormData("file", file.name, requestFile)
-                val usernamePart = peerUsername.toRequestBody("text/plain".toMediaTypeOrNull())
-                val contentTypePart = "media/voice".toRequestBody("text/plain".toMediaTypeOrNull())
-                apiService.uploadMedia("Bearer $token", usernamePart, filePart, contentTypePart)
+                val resp = uploadAttachment("Bearer $token", filePart, "media/voice", null)
                 file.delete()
-                loadMedia()
+                if (!resp.isSuccessful) throw IllegalStateException("Upload failed (${resp.code()})")
+                refreshAfterUpload()
             }.onFailure {
                 _uiState.value = _uiState.value.copy(error = it.message)
             }
@@ -931,6 +969,18 @@ class ChatViewModel @Inject constructor(
         val useReal = _uiState.value.unlockedIds.contains("media_$mediaId")
         val cacheKey = "${if (useReal) "imgreal" else "imgdecoy"}_$mediaId"
         if (_uiState.value.localFilePaths.containsKey(cacheKey)) return
+        // Decoy stills never change for a given mediaId and are what anyone
+        // sees, so reuse the copy already on disk from an earlier visit —
+        // re-opening the chat shows the photo instantly, no re-download.
+        if (!useReal) {
+            val cached = File(context.cacheDir, "$cacheKey.jpg")
+            if (cached.exists() && cached.length() > 0) {
+                _uiState.value = _uiState.value.copy(
+                    localFilePaths = _uiState.value.localFilePaths + (cacheKey to cached.absolutePath)
+                )
+                return
+            }
+        }
         viewModelScope.launch {
             val token = sessionManager.sessionToken.first() ?: return@launch
             runCatching {
@@ -1063,11 +1113,42 @@ class ChatViewModel @Inject constructor(
 
     fun getCombinedItems(): List<ChatItem> {
         val s = _uiState.value
+        if (groupId != null) {
+            // Group attachments come back as group messages whose content is the
+            // stored media id — render them as media bubbles, like desktop.
+            val (media, text) = s.messages.partition { !it.isDeleted && isGroupMediaMessage(it) }
+            return (text.map { ChatItem.TextMessage(it) } +
+                    media.map { ChatItem.MediaMessage(groupMessageToMedia(it)) } +
+                    s.pendingUploads.map { ChatItem.Pending(it) })
+                .sortedBy { it.timestamp ?: "" }
+        }
         return (s.messages.filter { !isMediaFilenameMessage(it, s.mediaItems) }
                     .map { ChatItem.TextMessage(it) } +
                 s.mediaItems.map { ChatItem.MediaMessage(it) } +
                 s.pendingUploads.map { ChatItem.Pending(it) })
             .sortedBy { it.timestamp ?: "" }
+    }
+
+    private fun isGroupMediaMessage(m: Message): Boolean {
+        val ct = m.contentType ?: return false
+        if (m.content.isNullOrBlank()) return false
+        return ct.startsWith("media/") || ct.startsWith("image/") || ct.startsWith("video/") ||
+            ct.startsWith("audio/") || ct.startsWith("application/")
+    }
+
+    private fun groupMessageToMedia(m: Message): MediaItem {
+        val ct = m.contentType ?: "media/raw"
+        val mediaType = when {
+            ct == "media/voice" || ct.startsWith("audio/") -> "voice"
+            ct.startsWith("image/") -> "photo"
+            ct.startsWith("video/") -> "video"
+            else -> "raw"
+        }
+        val id = m.content.orEmpty()
+        return MediaItem(
+            id = m.id, mediaId = id, filename = id, mediaType = mediaType, contentType = ct,
+            sender = m.sender, timestamp = m.timestamp,
+        )
     }
 
     // Media uploads produce a companion text message whose content is just the
@@ -1146,11 +1227,22 @@ class ChatViewModel @Inject constructor(
                     "message_deleted" -> {
                         val msgId = d?.get("message_id")?.asInt
                         if (msgId != null) {
+                            // Deleted for everyone — leave the "This message was deleted" tombstone.
                             _uiState.value = _uiState.value.copy(
-                                messages = _uiState.value.messages.filterNot { it.id == msgId },
+                                messages = _uiState.value.messages.map { if (it.id == msgId) it.copy(isDeleted = true) else it },
                             )
                         }
                         if (groupId == null) loadMedia()
+                    }
+                    "group_updated" -> {
+                        val gid = d?.get("group_id")?.asInt
+                        if (d != null && gid != null && gid == groupId) {
+                            loadGroupMembers(gid)
+                            val ev = d.get("event")?.asString
+                            if (ev == "deleted" || ev == "removed") {
+                                _uiState.value = _uiState.value.copy(groupGone = true)
+                            }
+                        }
                     }
                 }
             }

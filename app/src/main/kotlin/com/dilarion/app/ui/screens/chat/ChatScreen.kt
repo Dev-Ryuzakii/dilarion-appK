@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+
 package com.dilarion.app.ui.screens.chat
 
 import android.Manifest
@@ -140,6 +142,16 @@ private val DECOY_KIND_LABELS = listOf(
     "memo" to "Memo",
 )
 
+// Stand-in photos the server can generate for a real photo/video
+// (backend decoy_image.IMAGE_DECOY_KINDS) — what everyone sees until the
+// master token unlocks the real one.
+private val IMAGE_DECOY_KIND_LABELS = listOf(
+    "meme" to "Meme",
+    "screenshot" to "Screenshot",
+    "receipt" to "Receipt",
+    "whiteboard" to "Whiteboard",
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen(
@@ -148,6 +160,12 @@ fun ChatScreen(
     groupName: String?,
     onBack: () -> Unit,
     onCall: ((String) -> Unit)? = null,
+    /** Group only: open the group info screen (description, timer, invite, members). */
+    onOpenGroupInfo: ((Int) -> Unit)? = null,
+    /** Group only: start a WhatsApp-style group call — "voice" or "video". */
+    onGroupCall: ((groupId: Int, groupName: String, callType: String) -> Unit)? = null,
+    /** Join tapped on a group-call card in the thread. */
+    onJoinGroupCall: ((conferenceId: Int, groupId: Int, groupName: String, callType: String, startedBy: String) -> Unit)? = null,
     viewModel: ChatViewModel = hiltViewModel(),
 ) {
     val context = LocalContext.current
@@ -164,12 +182,16 @@ fun ChatScreen(
     var viewerImagePath by remember { mutableStateOf<String?>(null) }
     var videoViewerPath by remember { mutableStateOf<String?>(null) }
     var pendingDocUri by remember { mutableStateOf<Uri?>(null) }
+    var pendingImageUri by remember { mutableStateOf<Uri?>(null) }
 
     val combinedItems = remember(uiState.messages, uiState.mediaItems) {
         viewModel.getCombinedItems()
     }
 
     val displayName = if (groupId != null) (groupName ?: "Group") else username
+
+    // Removed from the group, or it was deleted — leave the thread.
+    LaunchedEffect(uiState.groupGone) { if (uiState.groupGone) onBack() }
 
     LaunchedEffect(combinedItems.size) {
         if (combinedItems.isNotEmpty()) listState.animateScrollToItem(combinedItems.size - 1)
@@ -179,7 +201,7 @@ fun ChatScreen(
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) {
             val mime = context.contentResolver.getType(uri)
-            if (isDocumentMime(mime)) pendingDocUri = uri else viewModel.sendAttachment(uri, context)
+            if (isDocumentMime(mime)) pendingDocUri = uri else pendingImageUri = uri
         }
     }
 
@@ -260,6 +282,33 @@ fun ChatScreen(
         )
     }
 
+    var deleteTarget by remember { mutableStateOf<com.dilarion.app.data.model.Message?>(null) }
+    deleteTarget?.let { target ->
+        val mine = target.sender == uiState.currentUsername
+        val canEveryone = !target.isDeleted && (mine || viewModel.isGroupAdmin())
+        AlertDialog(
+            onDismissRequest = { deleteTarget = null },
+            title = { Text("Delete message?") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    if (!mine && canEveryone) {
+                        Text("As a group admin you can remove this message for everyone.", color = TextSecondary, fontSize = 13.sp)
+                    }
+                    if (canEveryone) {
+                        TextButton(onClick = { viewModel.deleteMessage(target, "everyone"); deleteTarget = null }, modifier = Modifier.fillMaxWidth()) {
+                            Text("Delete for everyone", color = DilarionRed, modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.End)
+                        }
+                    }
+                    TextButton(onClick = { viewModel.deleteMessage(target, "me"); deleteTarget = null }, modifier = Modifier.fillMaxWidth()) {
+                        Text("Delete for me", color = DilarionRed, modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.End)
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = { deleteTarget = null }) { Text("Cancel") } },
+        )
+    }
+
     var translateTargetText by remember { mutableStateOf<String?>(null) }
     translateTargetText?.let { text ->
         TranslateLanguageDialog(
@@ -291,6 +340,17 @@ fun ChatScreen(
         DecoyKindDialog(
             onPick = { kind -> viewModel.sendAttachment(uri, context, kind); pendingDocUri = null },
             onDismiss = { pendingDocUri = null },
+        )
+    }
+
+    pendingImageUri?.let { uri ->
+        DecoyKindDialog(
+            onPick = { kind -> viewModel.sendAttachment(uri, context, kind); pendingImageUri = null },
+            onDismiss = { pendingImageUri = null },
+            title = "Decoy photo",
+            kinds = IMAGE_DECOY_KIND_LABELS,
+            // No kind → the server picks a real-looking stock photo.
+            defaultLabel = "Real-looking photo (default)",
         )
     }
 
@@ -332,7 +392,8 @@ fun ChatScreen(
                 title = {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        modifier = if (groupId == null) Modifier.clickable { viewModel.toggleContactInfo(true) } else Modifier,
+                        modifier = if (groupId == null) Modifier.clickable { viewModel.toggleContactInfo(true) }
+                        else Modifier.clickable { onOpenGroupInfo?.invoke(groupId) ?: viewModel.toggleMembersSheet(true) },
                     ) {
                         Box(
                             modifier = Modifier.size(36.dp).clip(CircleShape).background(DilarionRedDark),
@@ -365,9 +426,17 @@ fun ChatScreen(
                             Icon(Icons.Default.Call, "Call", tint = SurfaceWhite)
                         }
                     }
+                    if (groupId != null && onGroupCall != null) {
+                        IconButton(onClick = { onGroupCall(groupId, displayName, "video") }) {
+                            Icon(Icons.Default.Videocam, "Group video call", tint = SurfaceWhite)
+                        }
+                        IconButton(onClick = { onGroupCall(groupId, displayName, "voice") }) {
+                            Icon(Icons.Default.Call, "Group voice call", tint = SurfaceWhite)
+                        }
+                    }
                     if (groupId != null) {
-                        IconButton(onClick = { viewModel.toggleMembersSheet(true) }) {
-                            Icon(Icons.Default.Group, "Members", tint = SurfaceWhite)
+                        IconButton(onClick = { onOpenGroupInfo?.invoke(groupId) ?: viewModel.toggleMembersSheet(true) }) {
+                            Icon(Icons.Default.Info, "Group info", tint = SurfaceWhite)
                         }
                     }
                     Box {
@@ -483,7 +552,10 @@ fun ChatScreen(
                                             onFail = { },
                                         )
                                     },
-                                    onDelete = { viewModel.deleteMessage(message) },
+                                    onDelete = { deleteTarget = message },
+                                    onJoinGroupCall = { confId, gId, gName, type ->
+                                        onJoinGroupCall?.invoke(confId, gId, gName, type, message.sender ?: "")
+                                    },
                                 )
                             }
                             is ChatItem.MediaMessage -> {
@@ -698,7 +770,6 @@ fun ChatScreen(
                                             verticalAlignment = Alignment.CenterVertically,
                                             horizontalArrangement = Arrangement.spacedBy(4.dp),
                                         ) {
-                                            Icon(Icons.Default.Lock, null, tint = Color(0xFFA78BFA), modifier = Modifier.size(10.dp))
                                             Text("Private → @${uiState.taggedUser}", color = Color(0xFFA78BFA), fontSize = 12.sp, fontWeight = FontWeight.Medium)
                                         }
                                     }
@@ -836,7 +907,15 @@ private fun VoiceMessageBubble(
     val playedColor = if (isMine) SurfaceWhite else DilarionRed
     val unplayedColor = if (isMine) SurfaceWhite.copy(alpha = 0.4f) else DilarionRed.copy(alpha = 0.3f)
 
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(4.dp).widthIn(min = 220.dp)) {
+    // No padlock on the bubble — double-tap unlocks the real audio, same
+    // gesture as photos and documents, so nothing hints a decoy is playing.
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .combinedClickable(onClick = {}, onDoubleClick = { if (!isUnlocked) onLockTap() })
+            .padding(4.dp)
+            .widthIn(min = 220.dp),
+    ) {
         IconButton(onClick = onPlayTap, modifier = Modifier.size(38.dp)) {
             Box(
                 Modifier.size(34.dp).clip(CircleShape).background(if (isMine) SurfaceWhite.copy(alpha = 0.25f) else DilarionRed.copy(alpha = 0.12f)),
@@ -921,12 +1000,6 @@ private fun VoiceMessageBubble(
                 Icon(Icons.Default.Mic, null, tint = DilarionRed, modifier = Modifier.size(9.dp))
             }
         }
-        if (!isUnlocked) {
-            Spacer(Modifier.width(4.dp))
-            IconButton(onClick = onLockTap, modifier = Modifier.size(24.dp)) {
-                Icon(Icons.Default.Lock, "Unlock real audio", tint = if (isMine) SurfaceWhite.copy(alpha = 0.85f) else TextSecondary, modifier = Modifier.size(14.dp))
-            }
-        }
         Spacer(Modifier.width(2.dp))
         IconButton(onClick = onTranscribeTap, modifier = Modifier.size(24.dp)) {
             Icon(Icons.Default.AutoAwesome, "Transcribe", tint = if (isMine) SurfaceWhite.copy(alpha = 0.85f) else DilarionRed, modifier = Modifier.size(14.dp))
@@ -991,8 +1064,8 @@ private fun MediaBubble(
             } else {
                 // Image/video — decoy-first: a stand-in still photo loads and is
                 // shown immediately, same as anyone would see, no token needed.
-                // Only the small lock icon (while !isUnlocked) prompts for the
-                // real reveal; nothing here may hint a decoy exists until then.
+                // Double-tap (while !isUnlocked) prompts for the real reveal;
+                // nothing here may hint a decoy exists until then.
                 if (localImagePath != null) {
                     Box {
                         AsyncImage(
@@ -1005,7 +1078,10 @@ private fun MediaBubble(
                                 .fillMaxWidth()
                                 .heightIn(max = 200.dp)
                                 .clip(RoundedCornerShape(12.dp))
-                                .clickable { onImageTap(localImagePath) },
+                                .combinedClickable(
+                                    onClick = { onImageTap(localImagePath) },
+                                    onDoubleClick = { if (!isUnlocked) onLockTap() },
+                                ),
                             contentScale = ContentScale.Crop,
                         )
                         if (isVideo && (isUnlocked)) {
@@ -1021,15 +1097,6 @@ private fun MediaBubble(
                                 ) {
                                     Icon(Icons.Default.PlayArrow, "Play video", tint = Color.White, modifier = Modifier.size(26.dp))
                                 }
-                            }
-                        }
-                        if (!isUnlocked) {
-                            IconButton(
-                                onClick = onLockTap,
-                                modifier = Modifier.align(Alignment.TopEnd).size(28.dp)
-                                    .background(Color.Black.copy(alpha = 0.35f), CircleShape),
-                            ) {
-                                Icon(Icons.Default.Lock, "Unlock real content", tint = Color.White, modifier = Modifier.size(14.dp))
                             }
                         }
                     }
@@ -1089,17 +1156,17 @@ private fun DocumentBubble(
                 .background(bubbleColor)
                 .padding(8.dp),
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(4.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .combinedClickable(onClick = onOpen, onDoubleClick = { if (!isUnlocked) onLockTap() })
+                    .padding(4.dp),
+            ) {
                 IconButton(onClick = onOpen, modifier = Modifier.size(36.dp)) {
                     Icon(Icons.Default.Description, "Open document", tint = DilarionRed, modifier = Modifier.size(24.dp))
                 }
                 Spacer(Modifier.width(4.dp))
                 Text("Tap to open", style = MaterialTheme.typography.bodySmall, color = TextSecondary, modifier = Modifier.weight(1f))
-                if (!isUnlocked) {
-                    IconButton(onClick = onLockTap, modifier = Modifier.size(28.dp)) {
-                        Icon(Icons.Default.Lock, "Unlock real document", tint = TextSecondary, modifier = Modifier.size(16.dp))
-                    }
-                }
             }
             Spacer(Modifier.height(2.dp))
             Text(
@@ -1464,20 +1531,23 @@ private fun TranslateLanguageDialog(onDismiss: () -> Unit, onConfirm: (String) -
 private fun DecoyKindDialog(
     onPick: (String?) -> Unit,
     onDismiss: () -> Unit,
+    title: String = "Decoy for this file",
+    kinds: List<Pair<String, String>> = DECOY_KIND_LABELS,
+    defaultLabel: String = "Random",
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        icon = { Icon(Icons.Default.Description, null, tint = DilarionRed) },
-        title = { Text("Decoy for this file", textAlign = TextAlign.Center) },
+        icon = { Icon(if (kinds === DECOY_KIND_LABELS) Icons.Default.Description else Icons.Default.Image, null, tint = DilarionRed) },
+        title = { Text(title, textAlign = TextAlign.Center) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                DECOY_KIND_LABELS.forEach { (kind, label) ->
+                kinds.forEach { (kind, label) ->
                     TextButton(onClick = { onPick(kind) }, modifier = Modifier.fillMaxWidth()) {
                         Text(label, modifier = Modifier.weight(1f), textAlign = TextAlign.Start)
                     }
                 }
                 TextButton(onClick = { onPick(null) }, modifier = Modifier.fillMaxWidth()) {
-                    Text("Random", modifier = Modifier.weight(1f), textAlign = TextAlign.Start)
+                    Text(defaultLabel, modifier = Modifier.weight(1f), textAlign = TextAlign.Start)
                 }
             }
         },
@@ -1604,7 +1674,7 @@ private fun MessageActionsPopup(
                 ActionRow(if (isStarred) Icons.Default.Star else Icons.Default.StarBorder, if (isStarred) "Unstar" else "Star") { onStarToggle(); onDismiss() }
                 ActionRow(Icons.Default.PushPin, if (isPinned) "Unpin" else "Pin") { onPinToggle(); onDismiss() }
                 if (isMine && onEdit != null) ActionRow(Icons.Default.Edit, "Edit") { onEdit(); onDismiss() }
-                if (isMine && onDelete != null) ActionRow(Icons.Default.Delete, "Delete", danger = true) { onDelete(); onDismiss() }
+                if (onDelete != null) ActionRow(Icons.Default.Delete, "Delete", danger = true) { onDelete(); onDismiss() }
             }
         }
     }
@@ -1645,7 +1715,30 @@ private fun MessageBubble(
     onDelete: () -> Unit = {},
     onTranslate: ((String) -> Unit)? = null,
     isStarred: Boolean = false,
+    onJoinGroupCall: ((conferenceId: Int, groupId: Int, groupName: String, callType: String) -> Unit)? = null,
 ) {
+    // Group call notice — rendered as a call card, not a meeting/text bubble.
+    if (message.contentType == "meeting" && !message.isDeleted) {
+        val card = remember(message.content) {
+            runCatching { org.json.JSONObject(message.content ?: "") }.getOrNull()
+        }
+        if (card != null && card.optString("kind") == "group_call") {
+            GroupCallCard(
+                isMine = isMine,
+                isVideo = card.optString("call_type") == "video",
+                startedBy = message.sender ?: "",
+                onJoin = {
+                    onJoinGroupCall?.invoke(
+                        card.optInt("conference_id"),
+                        card.optInt("group_id"),
+                        card.optString("group_name", "Group"),
+                        if (card.optString("call_type") == "video") "video" else "voice",
+                    )
+                },
+            )
+            return
+        }
+    }
     var showMenu by remember { mutableStateOf(false) }
     var showInfo by remember { mutableStateOf(false) }
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
@@ -1728,8 +1821,6 @@ private fun MessageBubble(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.padding(start = if (isGroup) 44.dp else 4.dp, bottom = 2.dp),
             ) {
-                Icon(Icons.Default.Lock, null, tint = privatePurple, modifier = Modifier.size(10.dp))
-                Spacer(Modifier.width(3.dp))
                 Text("Only you can read this", style = MaterialTheme.typography.labelSmall, color = privatePurple)
             }
         }
@@ -1791,7 +1882,6 @@ private fun MessageBubble(
                     ) {
                     if (isPrivateTagged) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Icon(Icons.Default.Lock, null, tint = privatePurple, modifier = Modifier.size(14.dp))
                             Text(
                                 "Private message for @${message.recipient}",
                                 color = privatePurple,
@@ -1867,7 +1957,7 @@ private fun MessageBubble(
                             onPinToggle = onPinToggle,
                             onStarToggle = onStar,
                             onEdit = if (isMine) onEdit else null,
-                            onDelete = if (isMine) onDelete else null,
+                            onDelete = onDelete,
                             onTranslate = onTranslate?.let { cb ->
                                 val text = decryptedText ?: message.content?.takeIf { !isEncrypted && !looksLikeCiphertext(it) }
                                 if (text != null) ({ cb(text) }) else null
@@ -2050,4 +2140,38 @@ private fun MembersSheetDialog(
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
     )
+}
+
+@Composable
+private fun GroupCallCard(isMine: Boolean, isVideo: Boolean, startedBy: String, onJoin: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = if (isMine) Arrangement.End else Arrangement.Start,
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .widthIn(min = 220.dp, max = 280.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(if (isMine) ChatBubbleSelf else ChatBubbleOther)
+                .padding(10.dp),
+        ) {
+            Box(
+                Modifier.size(38.dp).clip(CircleShape).background(Color(0xFF25D366)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(if (isVideo) Icons.Default.Videocam else Icons.Default.Call, null, tint = Color.White, modifier = Modifier.size(20.dp))
+            }
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text(if (isVideo) "Group video call" else "Group voice call", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TextPrimary)
+                Text("Started by $startedBy", fontSize = 12.sp, color = TextSecondary)
+            }
+            Button(
+                onClick = onJoin,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF25D366)),
+                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
+            ) { Text("Join", fontSize = 13.sp) }
+        }
+    }
 }

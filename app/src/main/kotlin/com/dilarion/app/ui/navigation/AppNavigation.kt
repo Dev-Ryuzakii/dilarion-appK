@@ -17,8 +17,6 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.dilarion.app.data.model.IncomingCallData
-import com.dilarion.app.security.AppLockManager
-import com.dilarion.app.ui.components.AppLockScreen
 import com.dilarion.app.ui.screens.auth.AuthScreen
 import com.dilarion.app.ui.screens.auth.AuthViewModel
 import com.dilarion.app.ui.screens.calls.CallOverlayViewModel
@@ -43,9 +41,10 @@ import com.dilarion.app.ui.screens.splash.SplashScreen
 
 @Composable
 fun AppNavigation(pendingIncomingCall: IncomingCallData? = null) {
-    val isLocked by AppLockManager.isLocked.collectAsState()
-    if (isLocked) {
-        AppLockScreen(onUnlocked = { AppLockManager.unlock() })
+    // Idle auto-logout: the session was dropped; access token required to continue.
+    val idleLockedUser by com.dilarion.app.security.IdleLogoutManager.lockedUser.collectAsState()
+    idleLockedUser?.let { user ->
+        com.dilarion.app.ui.components.IdleLockScreen(username = user)
         return
     }
 
@@ -56,6 +55,33 @@ fun AppNavigation(pendingIncomingCall: IncomingCallData? = null) {
     val minimizedCall by overlayVm.minimizedCall.collectAsState()
     val missedCall by overlayVm.missedCall.collectAsState()
     val conferenceUpgrade by overlayVm.conferenceUpgrade.collectAsState()
+    val blockedLogin by overlayVm.blockedLogin.collectAsState()
+
+    // Someone tried to sign in to this account on another device — blocked
+    // server-side (one signed-in device per platform); show who/where/when.
+    blockedLogin?.let { info ->
+        val whenText = info.time?.let { t ->
+            runCatching {
+                java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy, HH:mm")
+                    .format(java.time.OffsetDateTime.parse(t).atZoneSameInstant(java.time.ZoneId.systemDefault()))
+            }.getOrDefault(t)
+        } ?: "just now"
+        AlertDialog(
+            onDismissRequest = { overlayVm.clearBlockedLogin() },
+            title = { Text("Sign-in attempt blocked") },
+            text = {
+                Text(
+                    "Someone tried to sign in to your account on another device. It was blocked because you're signed in here.\n\n" +
+                        "Device: ${info.deviceName ?: "Unknown"}" + (info.platform?.let { " ($it)" } ?: "") + "\n" +
+                        "Location: ${info.location ?: "Unknown"}" + "\n" +
+                        (info.ip?.let { "IP address: $it\n" } ?: "") +
+                        "Time: $whenText\n\n" +
+                        "If this wasn't you, change your login token now."
+                )
+            },
+            confirmButton = { TextButton(onClick = { overlayVm.clearBlockedLogin() }) { Text("OK") } },
+        )
+    }
 
     // Our 1:1 call was turned into a group call by the other party. Group calls
     // run in the LiveKit room — staying on the mesh leg would leave us connected
@@ -107,7 +133,14 @@ fun AppNavigation(pendingIncomingCall: IncomingCallData? = null) {
             onDismiss = { overlayVm.declineConferenceInvite() },
             onJoined = { confId ->
                 overlayVm.clearConferenceInvite()
-                navController.navigate(Screen.Gallery.route(confId))
+                if (invite.isGroupCall) {
+                    // Group call, not a meeting — WhatsApp-style call screen.
+                    navController.navigate(
+                        Screen.GroupCall.route(confId, invite.groupId ?: 0, invite.groupName ?: "Group", invite.callType ?: "voice")
+                    )
+                } else {
+                    navController.navigate(Screen.Gallery.route(confId))
+                }
             },
         )
         return
@@ -131,6 +164,21 @@ fun AppNavigation(pendingIncomingCall: IncomingCallData? = null) {
                         popUpTo(Screen.Splash.route) { inclusive = true }
                     }
                 },
+                onOnboardingRequired = {
+                    navController.navigate(Screen.Onboarding.route) {
+                        popUpTo(Screen.Splash.route) { inclusive = true }
+                    }
+                },
+            )
+        }
+
+        composable(Screen.Onboarding.route) {
+            com.dilarion.app.ui.screens.onboarding.OnboardingScreen(
+                onComplete = {
+                    navController.navigate(Screen.Home.route) {
+                        popUpTo(Screen.Onboarding.route) { inclusive = true }
+                    }
+                },
             )
         }
 
@@ -138,8 +186,8 @@ fun AppNavigation(pendingIncomingCall: IncomingCallData? = null) {
             val vm: AuthViewModel = hiltViewModel()
             AuthScreen(
                 viewModel = vm,
-                onAuthSuccess = {
-                    navController.navigate(Screen.Home.route) {
+                onAuthSuccess = { onboardingRequired ->
+                    navController.navigate(if (onboardingRequired) Screen.Onboarding.route else Screen.Home.route) {
                         popUpTo(Screen.Auth.route) { inclusive = true }
                     }
                 },
@@ -167,6 +215,9 @@ fun AppNavigation(pendingIncomingCall: IncomingCallData? = null) {
                 },
                 onNewChat = {
                     navController.navigate(Screen.OnlineUsers.route)
+                },
+                onNewGroup = {
+                    navController.navigate(Screen.CreateGroup.route)
                 },
                 onNewMeeting = {
                     navController.navigate(Screen.NewMeeting.route)
@@ -217,6 +268,55 @@ fun AppNavigation(pendingIncomingCall: IncomingCallData? = null) {
                 groupId = groupId,
                 groupName = groupName,
                 onBack = { navController.popBackStack() },
+                onOpenGroupInfo = { gid -> navController.navigate(Screen.GroupInfo.route(gid)) },
+                onGroupCall = { gid, gname, type ->
+                    navController.navigate(Screen.GroupCall.route(-1, gid, gname, type))
+                },
+                onJoinGroupCall = { confId, gid, gname, type, startedBy ->
+                    overlayVm.showGroupCallJoin(confId, gid, gname, type, startedBy)
+                },
+            )
+        }
+
+        composable(Screen.CreateGroup.route) {
+            com.dilarion.app.ui.screens.groups.CreateGroupScreen(
+                onBack = { navController.popBackStack() },
+                onCreated = { g ->
+                    navController.navigate(Screen.GroupChat.route(g.id, g.name)) {
+                        popUpTo(Screen.CreateGroup.route) { inclusive = true }
+                    }
+                },
+            )
+        }
+
+        composable(
+            route = Screen.GroupInfo.route,
+            arguments = listOf(navArgument("groupId") { type = NavType.IntType }),
+        ) { backStack ->
+            val gid = backStack.arguments?.getInt("groupId") ?: return@composable
+            com.dilarion.app.ui.screens.groups.GroupInfoScreen(
+                groupId = gid,
+                onBack = { navController.popBackStack() },
+                onGroupGone = { navController.popBackStack(Screen.Home.route, inclusive = false) },
+            )
+        }
+
+        composable(
+            route = Screen.GroupCall.route,
+            arguments = listOf(
+                navArgument("conferenceId") { type = NavType.IntType; defaultValue = -1 },
+                navArgument("groupId") { type = NavType.IntType; defaultValue = 0 },
+                navArgument("groupName") { type = NavType.StringType; defaultValue = "" },
+                navArgument("callType") { type = NavType.StringType; defaultValue = "voice" },
+            ),
+        ) { backStack ->
+            val args = backStack.arguments
+            com.dilarion.app.ui.screens.groupcall.GroupCallScreen(
+                conferenceId = args?.getInt("conferenceId") ?: -1,
+                groupId = args?.getInt("groupId") ?: 0,
+                groupName = args?.getString("groupName")?.let { java.net.URLDecoder.decode(it, "UTF-8") } ?: "Group",
+                callType = args?.getString("callType") ?: "voice",
+                onClose = { navController.popBackStack() },
             )
         }
 

@@ -29,7 +29,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.FragmentActivity
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.dilarion.app.security.BiometricAuth
 import com.dilarion.app.ui.theme.*
 import kotlinx.coroutines.launch
 import com.journeyapps.barcodescanner.ScanContract
@@ -112,14 +111,7 @@ fun LinkedDevicesScreen(
                 )
                 Spacer(Modifier.height(20.dp))
                 Button(
-                    onClick = {
-                        val act = activity
-                        if (act == null) {
-                            startScan()
-                        } else {
-                            scope.launch { if (BiometricAuth.gateSensitiveAction(act)) startScan() }
-                        }
-                    },
+                    onClick = { startScan() },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(24.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = DilarionRed, contentColor = SurfaceWhite),

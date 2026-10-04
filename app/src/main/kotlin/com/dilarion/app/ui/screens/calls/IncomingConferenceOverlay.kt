@@ -99,13 +99,17 @@ fun IncomingConferenceOverlay(
             )
             Spacer(Modifier.height(10.dp))
             Text(
-                "Group call",
+                when (invite.callType) {
+                    "video" -> "Group video call"
+                    "voice" -> "Group voice call"
+                    else -> "Group call"
+                } + (invite.groupName?.let { " · $it" } ?: ""),
                 color = SurfaceWhite.copy(alpha = 0.7f),
                 fontSize = 14.sp,
             )
             Spacer(Modifier.height(6.dp))
             Text(
-                "${invite.invitedBy} is adding you",
+                if (invite.isGroupCall) "${invite.invitedBy} is calling" else "${invite.invitedBy} is adding you",
                 color = SurfaceWhite,
                 fontSize = 24.sp,
                 textAlign = TextAlign.Center,

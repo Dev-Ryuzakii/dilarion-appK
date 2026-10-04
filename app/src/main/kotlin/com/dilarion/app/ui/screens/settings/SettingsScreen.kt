@@ -37,8 +37,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.platform.LocalContext
 import androidx.fragment.app.FragmentActivity
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.dilarion.app.security.BiometricAuth
-import com.dilarion.app.security.BiometricLockPrefs
 import com.dilarion.app.ui.theme.*
 import kotlinx.coroutines.launch
 
@@ -56,11 +54,6 @@ fun SettingsScreen(
     val activity = context as? FragmentActivity
     val scope = rememberCoroutineScope()
 
-    fun gateThen(action: () -> Unit) {
-        val act = activity
-        if (act == null) { action(); return }
-        scope.launch { if (BiometricAuth.gateSensitiveAction(act)) action() }
-    }
 
     var showLogoutDialog by remember { mutableStateOf(false) }
     var showEnable2FA by remember { mutableStateOf(false) }
@@ -225,7 +218,7 @@ fun SettingsScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { gateThen(onMasterToken) }
+                        .clickable { onMasterToken() }
                         .padding(horizontal = 16.dp, vertical = 14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -273,7 +266,7 @@ fun SettingsScreen(
 
                     if (!uiState.twoFaEnabled && !showEnable2FA) {
                         Spacer(Modifier.height(10.dp))
-                        TextButton(onClick = { gateThen { showEnable2FA = true } }) { Text("Enable 2FA", color = DilarionRed) }
+                        TextButton(onClick = { showEnable2FA = true }) { Text("Enable 2FA", color = DilarionRed) }
                     }
 
                     if (!uiState.twoFaEnabled && showEnable2FA) {
@@ -321,7 +314,7 @@ fun SettingsScreen(
 
                     if (uiState.twoFaEnabled && !showDisable2FA) {
                         Spacer(Modifier.height(10.dp))
-                        TextButton(onClick = { gateThen { showDisable2FA = true } }) { Text("Disable 2FA", color = TextSecondary) }
+                        TextButton(onClick = { showDisable2FA = true }) { Text("Disable 2FA", color = TextSecondary) }
                     }
 
                     if (uiState.twoFaEnabled && showDisable2FA) {
@@ -359,50 +352,6 @@ fun SettingsScreen(
                         Spacer(Modifier.height(6.dp))
                         Text(err, style = MaterialTheme.typography.bodySmall, color = DilarionRed)
                     }
-                }
-            }
-
-            Spacer(Modifier.height(12.dp))
-
-            // ── Biometric Lock section ────────────────────────────────────────
-            SettingsSectionHeader("Biometric Lock")
-
-            SettingsCard {
-                var biometricEnabled by remember { mutableStateOf(BiometricLockPrefs.isEnabled(context)) }
-                var biometricUnavailable by remember { mutableStateOf(false) }
-                LaunchedEffect(Unit) {
-                    biometricUnavailable = activity?.let { !BiometricAuth.isAvailable(it) } ?: true
-                }
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(Icons.Default.Fingerprint, null, tint = DilarionRed, modifier = Modifier.size(22.dp))
-                    Spacer(Modifier.width(16.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            "Biometric Lock",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Medium,
-                        )
-                        Text(
-                            if (biometricUnavailable) "Not available — set up a fingerprint/face or screen lock first"
-                            else "Fingerprint/face to open Dilarion and before security changes",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = TextSecondary,
-                        )
-                    }
-                    Switch(
-                        checked = biometricEnabled,
-                        enabled = !biometricUnavailable,
-                        onCheckedChange = {
-                            biometricEnabled = it
-                            BiometricLockPrefs.setEnabled(context, it)
-                        },
-                        colors = SwitchDefaults.colors(checkedThumbColor = DilarionRed, checkedTrackColor = DilarionRedLight),
-                    )
                 }
             }
 

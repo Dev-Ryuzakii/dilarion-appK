@@ -10,6 +10,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Visibility
@@ -36,12 +37,13 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.collectAsState
 import com.dilarion.app.ui.theme.*
 
-private enum class AuthView { LOGIN, SIGNUP, RECOVERY }
+private enum class AuthView { LOGIN, SIGNUP, RECOVERY, ACTIVATE }
 
 @Composable
 fun AuthScreen(
     viewModel: AuthViewModel,
-    onAuthSuccess: () -> Unit,
+    /** onboardingRequired = invited staff must finish the profile + camera step first. */
+    onAuthSuccess: (onboardingRequired: Boolean) -> Unit,
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val focusManager = LocalFocusManager.current
@@ -62,8 +64,12 @@ fun AuthScreen(
 
     var savedAck by remember { mutableStateOf(false) }
 
+    var actCode by remember { mutableStateOf("") }
+    var actToken by remember { mutableStateOf("") }
+    var actConfirm by remember { mutableStateOf("") }
+
     LaunchedEffect(uiState.success) {
-        if (uiState.success) onAuthSuccess()
+        if (uiState.success) onAuthSuccess(uiState.onboardingRequired)
     }
 
     uiState.error?.let { error ->
@@ -85,10 +91,15 @@ fun AuthScreen(
             savedAck = savedAck,
             onAckChange = { savedAck = it },
             onContinue = {
-                username = uiState.revealedUsername ?: username
                 savedAck = false
-                viewModel.clearRevealedCode()
-                view = AuthView.LOGIN
+                if (uiState.activated) {
+                    // Already signed in by activation — straight on.
+                    viewModel.finishActivation()
+                } else {
+                    username = uiState.revealedUsername ?: username
+                    viewModel.clearRevealedCode()
+                    view = AuthView.LOGIN
+                }
             },
         )
         return
@@ -131,6 +142,7 @@ fun AuthScreen(
                 when (view) {
                     AuthView.SIGNUP -> "Create Account"
                     AuthView.RECOVERY -> "Reset Access"
+                    AuthView.ACTIVATE -> "Activate Account"
                     AuthView.LOGIN -> "Welcome Back"
                 },
                 style = MaterialTheme.typography.headlineLarge,
@@ -139,6 +151,7 @@ fun AuthScreen(
                 when (view) {
                     AuthView.SIGNUP -> "Set up your account"
                     AuthView.RECOVERY -> "Use your recovery code"
+                    AuthView.ACTIVATE -> "Use the code from your invitation email or SMS"
                     AuthView.LOGIN -> "Sign in to continue"
                 },
                 style = MaterialTheme.typography.bodyMedium,
@@ -224,11 +237,81 @@ fun AuthScreen(
                                 }
                             }
 
+                            OutlinedButton(
+                                onClick = { view = AuthView.ACTIVATE },
+                                modifier = Modifier.fillMaxWidth().height(48.dp),
+                                shape = RoundedCornerShape(14.dp),
+                            ) {
+                                Icon(Icons.Default.Key, null, tint = DilarionRed, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Text("Activate account", color = DilarionRed, fontWeight = FontWeight.SemiBold)
+                            }
                             TextButton(onClick = { view = AuthView.SIGNUP }, modifier = Modifier.fillMaxWidth()) {
                                 Text("Don't have an account? Sign up")
                             }
                             TextButton(onClick = { view = AuthView.RECOVERY }, modifier = Modifier.fillMaxWidth()) {
                                 Text("Forgot your access token?")
+                            }
+                        }
+
+                        AuthView.ACTIVATE -> {
+                            Text(
+                                "Your organization sent you an activation code by email or SMS. Enter it below and choose your private login token — only you will know it.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextSecondary,
+                            )
+                            OutlinedTextField(
+                                value = actCode,
+                                onValueChange = { actCode = it.trim() },
+                                label = { Text("Activation code") },
+                                leadingIcon = { Icon(Icons.Default.Key, null) },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(14.dp),
+                            )
+                            OutlinedTextField(
+                                value = actToken,
+                                onValueChange = { actToken = it },
+                                label = { Text("Choose a login token") },
+                                supportingText = { Text("At least 8 characters") },
+                                leadingIcon = { Icon(Icons.Default.Lock, null) },
+                                visualTransformation = if (showToken) VisualTransformation.None else PasswordVisualTransformation(),
+                                trailingIcon = {
+                                    IconButton(onClick = { showToken = !showToken }) {
+                                        Icon(if (showToken) Icons.Default.VisibilityOff else Icons.Default.Visibility, contentDescription = "Show token")
+                                    }
+                                },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(14.dp),
+                            )
+                            OutlinedTextField(
+                                value = actConfirm,
+                                onValueChange = { actConfirm = it },
+                                label = { Text("Confirm login token") },
+                                leadingIcon = { Icon(Icons.Default.Lock, null) },
+                                visualTransformation = if (showToken) VisualTransformation.None else PasswordVisualTransformation(),
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(14.dp),
+                            )
+                            Button(
+                                onClick = { focusManager.clearFocus(); viewModel.activate(actCode, actToken, actConfirm) },
+                                enabled = !uiState.isLoading,
+                                modifier = Modifier.fillMaxWidth().height(52.dp),
+                                shape = RoundedCornerShape(14.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = DilarionRed),
+                            ) {
+                                if (uiState.isLoading) {
+                                    CircularProgressIndicator(modifier = Modifier.size(20.dp), color = SurfaceWhite, strokeWidth = 2.dp)
+                                } else {
+                                    Text("Activate", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                                }
+                            }
+                            TextButton(onClick = { view = AuthView.LOGIN }, modifier = Modifier.fillMaxWidth()) {
+                                Text("Back to sign in")
                             }
                         }
 

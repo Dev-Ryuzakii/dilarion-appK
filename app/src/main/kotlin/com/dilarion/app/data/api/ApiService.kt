@@ -22,6 +22,15 @@ interface ApiService {
     @POST("register")
     suspend fun signUp(@Body request: SignUpRequest): Response<SignUpResponse>
 
+    @POST("auth/activate")
+    suspend fun activateAccount(@Body request: ActivationRequest): Response<ActivationResponse>
+
+    @POST("auth/onboarding/profile")
+    suspend fun completeOnboarding(
+        @Header("Authorization") bearer: String,
+        @Body request: OnboardingProfileRequest,
+    ): Response<com.google.gson.JsonObject>
+
     @POST("auth/reset-with-recovery-code")
     suspend fun resetWithRecoveryCode(@Body request: RecoveryCodeResetRequest): Response<RecoveryCodeResetResponse>
 
@@ -130,10 +139,12 @@ interface ApiService {
         @Body request: MessageEditRequest,
     ): Response<com.google.gson.JsonObject>
 
+    /** scope "everyone" tombstones it for the whole chat (sender / group admin); "me" hides it for this user only. */
     @DELETE("messages/{id}")
     suspend fun deleteMessage(
         @Header("Authorization") bearer: String,
         @Path("id") messageId: Int,
+        @Query("scope") scope: String = "everyone",
     ): Response<com.google.gson.JsonObject>
 
     @POST("messages/{id}/pin")
@@ -175,6 +186,85 @@ interface ApiService {
         @Header("Authorization") bearer: String,
         @Path("groupId") groupId: Int,
     ): Response<List<GroupMember>>
+
+    // Self-service groups — any user creates and runs their own groups.
+
+    @POST("groups/create")
+    suspend fun createGroup(
+        @Header("Authorization") bearer: String,
+        @Body request: com.dilarion.app.data.model.CreateGroupRequest,
+    ): Response<Group>
+
+    @GET("groups/{groupId}")
+    suspend fun getGroup(
+        @Header("Authorization") bearer: String,
+        @Path("groupId") groupId: Int,
+    ): Response<Group>
+
+    @PUT("groups/{groupId}")
+    suspend fun updateGroup(
+        @Header("Authorization") bearer: String,
+        @Path("groupId") groupId: Int,
+        @Body request: com.dilarion.app.data.model.GroupUpdateRequest,
+    ): Response<Group>
+
+    @DELETE("groups/{groupId}")
+    suspend fun deleteGroup(
+        @Header("Authorization") bearer: String,
+        @Path("groupId") groupId: Int,
+    ): Response<com.google.gson.JsonObject>
+
+    @POST("groups/{groupId}/leave")
+    suspend fun leaveGroup(
+        @Header("Authorization") bearer: String,
+        @Path("groupId") groupId: Int,
+    ): Response<com.google.gson.JsonObject>
+
+    @POST("groups/{groupId}/members")
+    suspend fun addGroupMember(
+        @Header("Authorization") bearer: String,
+        @Path("groupId") groupId: Int,
+        @Query("username") username: String,
+    ): Response<com.google.gson.JsonObject>
+
+    @DELETE("groups/{groupId}/members/{username}")
+    suspend fun removeGroupMember(
+        @Header("Authorization") bearer: String,
+        @Path("groupId") groupId: Int,
+        @Path("username") username: String,
+    ): Response<com.google.gson.JsonObject>
+
+    @GET("groups/{groupId}/invite")
+    suspend fun getGroupInvite(
+        @Header("Authorization") bearer: String,
+        @Path("groupId") groupId: Int,
+    ): Response<com.dilarion.app.data.model.GroupInvite>
+
+    @POST("groups/{groupId}/invite/reset")
+    suspend fun resetGroupInvite(
+        @Header("Authorization") bearer: String,
+        @Path("groupId") groupId: Int,
+    ): Response<com.dilarion.app.data.model.GroupInvite>
+
+    @GET("groups/invite/{code}")
+    suspend fun previewGroupInvite(
+        @Header("Authorization") bearer: String,
+        @Path("code") code: String,
+    ): Response<com.dilarion.app.data.model.GroupInvitePreview>
+
+    @POST("groups/join/{code}")
+    suspend fun joinGroupViaInvite(
+        @Header("Authorization") bearer: String,
+        @Path("code") code: String,
+    ): Response<Group>
+
+    /** WhatsApp-style call to the whole group (not a meeting) — rings every other member. */
+    @POST("groups/{groupId}/call")
+    suspend fun startGroupCall(
+        @Header("Authorization") bearer: String,
+        @Path("groupId") groupId: Int,
+        @Body request: com.dilarion.app.data.model.GroupCallStartRequest,
+    ): Response<com.dilarion.app.data.model.GroupCallStartResponse>
 
     // ─── Master token ──────────────────────────────────────────────────────────
 
@@ -599,6 +689,17 @@ interface ApiService {
     suspend fun uploadMedia(
         @Header("Authorization") bearer: String,
         @Part("username") username: RequestBody,
+        @Part file: MultipartBody.Part,
+        @Part("content_type") contentType: RequestBody? = null,
+        @Part("decoy_kind") decoyKind: RequestBody? = null,
+    ): Response<MediaUploadResponse>
+
+    /** Group attachment — mirrors upload_raw but targets a group (desktop's uploadGroupMedia). */
+    @Multipart
+    @POST("media/upload_raw_group")
+    suspend fun uploadGroupMedia(
+        @Header("Authorization") bearer: String,
+        @Part("group_id") groupId: RequestBody,
         @Part file: MultipartBody.Part,
         @Part("content_type") contentType: RequestBody? = null,
         @Part("decoy_kind") decoyKind: RequestBody? = null,

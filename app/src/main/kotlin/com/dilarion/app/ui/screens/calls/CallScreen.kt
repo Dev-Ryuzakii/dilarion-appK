@@ -63,6 +63,7 @@ fun CallScreen(
     val reattached = remember { viewModel.reattachIfActive() }
     var showTypeDialog by remember { mutableStateOf(!reattached) }
     val uiState by viewModel.uiState.collectAsState()
+    com.dilarion.app.security.HoldIdleLogoutWhileVisible()
     val localVideo by viewModel.localVideo.collectAsState()
     val remoteVideo by viewModel.remoteVideo.collectAsState()
 
