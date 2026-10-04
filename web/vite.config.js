@@ -5,4 +5,7 @@ export default defineConfig({
   plugins: [react()],
   publicDir: false,
   build: { outDir: 'dist', emptyOutDir: true },
+  preview: {
+    allowedHosts: ['dilarion-appk.afribase.dev'],
+  },
 })
