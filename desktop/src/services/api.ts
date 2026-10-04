@@ -78,6 +78,59 @@ export async function login(username: string, token: string): Promise<unknown> {
   return res.json();
 }
 
+// ── Invited staff: activation + first-run profile ─────────────────────────────
+
+export interface ActivationResult {
+  username: string;
+  token: string;
+  onboarding_required: boolean;
+  recovery_code?: string | null;
+}
+
+/** Activate an invited account with the code from the email/SMS and a login token the user chooses. */
+export async function activateAccount(code: string, loginToken: string): Promise<ActivationResult> {
+  const res = await fetch(`${BASE}/auth/activate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ invitation_code: code.trim(), token: loginToken }),
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) throw new Error(body?.detail || 'Activation failed');
+  return body;
+}
+
+export interface OnboardingProfile {
+  jobTitle: string;
+  address: string;
+  emergencyContactName: string;
+  emergencyContactPhone: string;
+  /** JPEG from a live camera capture, base64 without the data: prefix. */
+  cameraImageBase64: string;
+  capturedAt: string;
+}
+
+/** The mandatory profile step for invited staff (required before anything else works). */
+export async function completeOnboarding(sessionToken: string, p: OnboardingProfile): Promise<void> {
+  const res = await fetch(`${BASE}/auth/onboarding/profile`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${sessionToken}` },
+    body: JSON.stringify({
+      job_title: p.jobTitle,
+      address: p.address,
+      emergency_contact_name: p.emergencyContactName,
+      emergency_contact_phone: p.emergencyContactPhone,
+      camera_image_base64: p.cameraImageBase64,
+      captured_at: p.capturedAt,
+      camera_attestation: true,
+    }),
+  });
+  if (res.status === 409) return; // already completed
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || 'Could not save your profile');
+  }
+}
+
 // ── Device linking (multi-device) ───────────────────────────────────────────────
 
 export interface DeviceKey {

@@ -9,12 +9,14 @@ import { linkStart, linkStatus } from '../services/api';
 interface Props {
   onLinked: (token: string, username: string) => void;
   onUsePassword?: () => void;   // password fallback currently disabled
+  /** Invited staff with an activation code. */
+  onActivate?: () => void;
 }
 
 type Phase = 'starting' | 'waiting' | 'approved' | 'expired' | 'error';
 
 
-export default function LinkDeviceScreen({ onLinked, onUsePassword }: Props) {
+export default function LinkDeviceScreen({ onLinked, onUsePassword, onActivate }: Props) {
   const [phase, setPhase] = useState<Phase>('starting');
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
   const [error, setError] = useState<string>('');
@@ -129,6 +131,9 @@ export default function LinkDeviceScreen({ onLinked, onUsePassword }: Props) {
         )}
         {(phase === 'expired' || phase === 'error') && (
           <button style={s.btn} onClick={() => setAttempt(a => a + 1)}>Try again</button>
+        )}
+        {onActivate && (
+          <button style={s.linkBtn} onClick={onActivate}>New here? Activate your account</button>
         )}
         {onUsePassword && (
           <button style={s.linkBtn} onClick={onUsePassword}>Sign in with username instead</button>

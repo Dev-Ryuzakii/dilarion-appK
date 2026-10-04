@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { isTauri } from './services/platform';
-import LoginScreen from './screens/LoginScreen';
+import LoginScreen, { View as LoginView } from './screens/LoginScreen';
 import LinkDeviceScreen from './screens/LinkDeviceScreen';
 import HomeScreen from './screens/HomeScreen';
 import IdleLockScreen from './components/IdleLockScreen';
@@ -58,6 +58,7 @@ export default function App() {
   const [lockedUser, setLockedUserState] = useState<string | null>(() => (session ? null : getLockedUser()));
   // QR linking is the default entry, username/token sign-in is the fallback.
   const [usePassword, setUsePassword] = useState(false);
+  const [startView, setStartView] = useState<LoginView>('login');
 
   // ── Idle auto-logout ─────────────────────────────────────────────────────
   useEffect(() => {
@@ -130,7 +131,13 @@ export default function App() {
     );
   }
   if (usePassword) {
-    return <LoginScreen onLogin={handleLogin} onBack={() => setUsePassword(false)} />;
+    return <LoginScreen onLogin={handleLogin} onBack={() => { setUsePassword(false); setStartView('login'); }} initialView={startView} />;
   }
-  return <LinkDeviceScreen onLinked={handleLogin} onUsePassword={() => setUsePassword(true)} />;
+  return (
+    <LinkDeviceScreen
+      onLinked={handleLogin}
+      onUsePassword={() => { setStartView('login'); setUsePassword(true); }}
+      onActivate={() => { setStartView('activate'); setUsePassword(true); }}
+    />
+  );
 }

@@ -1,15 +1,30 @@
 import { useState } from 'react';
-import { login, requestPasswordReset, signUp, resetWithRecoveryCode } from '../services/api';
+import { login, requestPasswordReset, signUp, resetWithRecoveryCode, activateAccount } from '../services/api';
+import OnboardingScreen from './OnboardingScreen';
 
 interface Props {
   onLogin: (token: string, username: string) => void;
   onBack?: () => void;
+  /** Open straight on a view, e.g. 'activate' from the link-device screen. */
+  initialView?: View;
 }
 
-type View = 'login' | 'forgot' | 'signup' | 'recovery';
+export type View = 'login' | 'forgot' | 'signup' | 'recovery' | 'activate';
 
-export default function LoginScreen({ onLogin, onBack }: Props) {
-  const [view, setView] = useState<View>('login');
+export default function LoginScreen({ onLogin, onBack, initialView = 'login' }: Props) {
+  const [view, setView] = useState<View>(initialView);
+
+  // Invited staff: activation code + chosen token, then the mandatory profile.
+  const [actCode, setActCode] = useState('');
+  const [actToken, setActToken] = useState('');
+  const [actConfirm, setActConfirm] = useState('');
+  const [actError, setActError] = useState('');
+  const [actLoading, setActLoading] = useState(false);
+  // Signed in but the profile + live photo step is still owed.
+  const [onboarding, setOnboarding] = useState<{ token: string; username: string } | null>(null);
+  // Activation already signed the user in - after the recovery code is shown,
+  // continue (to onboarding or the app) instead of back to the sign-in form.
+  const [activated, setActivated] = useState<{ token: string; username: string; onboarding: boolean } | null>(null);
 
   const [username, setUsername]   = useState('');
   const [userToken, setUserToken] = useState('');
@@ -65,9 +80,10 @@ export default function LoginScreen({ onLogin, onBack }: Props) {
       const sessionToken = data.token || data.access_token || data.session_token;
       if (!sessionToken) throw new Error('No session token received');
       if (data.onboarding_required) {
-        // Invited staff activate and complete the live-photo profile on the
-        // phone app first; the server refuses everything else until then.
-        throw new Error('Finish setting up your account in the Dilarion mobile app first (activation and profile photo), then sign in here.');
+        // Invited staff finish the live-photo profile right here; the server
+        // refuses everything else until it's done.
+        setOnboarding({ token: sessionToken, username: data.username || username });
+        return;
       }
       onLogin(sessionToken, username);
     } catch (err: any) {
@@ -110,9 +126,51 @@ export default function LoginScreen({ onLogin, onBack }: Props) {
   }
 
   function dismissRevealedCode() {
+    if (activated) {
+      setRevealedCode(null);
+      if (activated.onboarding) setOnboarding({ token: activated.token, username: activated.username });
+      else onLogin(activated.token, activated.username);
+      setActivated(null);
+      return;
+    }
     if (revealedCode) setUsername(revealedCode.username);
     setRevealedCode(null);
     setView('login');
+  }
+
+  async function handleActivate(e: React.FormEvent) {
+    e.preventDefault();
+    setActError('');
+    if (!actCode.trim()) return setActError('Enter the activation code from your email or SMS');
+    if (actToken.length < 8) return setActError('Your login token must be at least 8 characters');
+    if (actToken !== actConfirm) return setActError('The two tokens do not match');
+    setActLoading(true);
+    try {
+      const r = await activateAccount(actCode, actToken);
+      setActivated({ token: r.token, username: r.username, onboarding: r.onboarding_required });
+      if (r.recovery_code) {
+        setRevealedCode({ username: r.username, code: r.recovery_code });
+      } else if (r.onboarding_required) {
+        setOnboarding({ token: r.token, username: r.username });
+      } else {
+        onLogin(r.token, r.username);
+      }
+    } catch (err: any) {
+      setActError(err?.message || 'Activation failed');
+    } finally {
+      setActLoading(false);
+    }
+  }
+
+  if (onboarding) {
+    return (
+      <OnboardingScreen
+        sessionToken={onboarding.token}
+        username={onboarding.username}
+        onDone={() => onLogin(onboarding.token, onboarding.username)}
+        onCancel={() => { setOnboarding(null); setView('login'); }}
+      />
+    );
   }
 
   if (revealedCode) {
@@ -140,7 +198,7 @@ export default function LoginScreen({ onLogin, onBack }: Props) {
             I've saved this code somewhere safe
           </label>
           <button style={{ ...s.btn, opacity: savedAck ? 1 : 0.5 }} disabled={!savedAck} onClick={dismissRevealedCode}>
-            Continue to sign in
+            {activated ? 'Continue' : 'Continue to sign in'}
           </button>
         </div>
       </div>
@@ -163,6 +221,7 @@ export default function LoginScreen({ onLogin, onBack }: Props) {
           {view === 'forgot' ? 'Request a token reset'
             : view === 'signup' ? 'Create your account'
             : view === 'recovery' ? 'Reset with your recovery code'
+            : view === 'activate' ? 'Activate your account'
             : 'Sign in to continue'}
         </p>
 
@@ -271,6 +330,48 @@ export default function LoginScreen({ onLogin, onBack }: Props) {
           </form>
         )}
 
+        {view === 'activate' && (
+          <form onSubmit={handleActivate} style={s.form}>
+            <p style={{ fontSize: '0.75rem', color: '#9ca3af', margin: '0 0 4px', lineHeight: 1.5 }}>
+              Your organization sent you an activation code by email or SMS. Enter it, then choose your private login token.
+            </p>
+            <input
+              style={s.input}
+              type="text"
+              placeholder="Activation code"
+              value={actCode}
+              onChange={e => setActCode(e.target.value.trim())}
+              autoComplete="one-time-code"
+              required
+            />
+            <input
+              style={s.input}
+              type="password"
+              placeholder="Choose a login token (min 8 characters)"
+              value={actToken}
+              onChange={e => setActToken(e.target.value)}
+              autoComplete="new-password"
+              required
+            />
+            <input
+              style={s.input}
+              type="password"
+              placeholder="Confirm login token"
+              value={actConfirm}
+              onChange={e => setActConfirm(e.target.value)}
+              autoComplete="new-password"
+              required
+            />
+            {actError && <p style={s.error}>{actError}</p>}
+            <button style={s.btn} type="submit" disabled={actLoading}>
+              {actLoading ? 'Activating…' : 'Activate'}
+            </button>
+            <button type="button" style={{ ...s.linkBtn, border: 'none', padding: '4px 0' }} onClick={() => setView('login')}>
+              Back to sign in
+            </button>
+          </form>
+        )}
+
         {view === 'login' && (
         <form onSubmit={handleSubmit} style={s.form}>
           <input
@@ -308,6 +409,9 @@ export default function LoginScreen({ onLogin, onBack }: Props) {
 
           <button style={s.btn} type="submit" disabled={loading}>
             {loading ? 'Signing in…' : 'Sign In'}
+          </button>
+          <button type="button" style={{ ...s.linkBtn, border: 'none', padding: '4px 0' }} onClick={() => setView('activate')}>
+            Have an activation code? Activate account
           </button>
           <button type="button" style={{ ...s.linkBtn, border: 'none', padding: '4px 0' }} onClick={() => setView('signup')}>
             Don't have an account? Sign up
