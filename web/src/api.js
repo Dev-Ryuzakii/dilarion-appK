@@ -19,4 +19,5 @@ export const getOrganization = (token) => request('/organization/me', { headers:
 export const getOrganizationUsers = (token) => request('/organization/users', { headers: { Authorization: `Bearer ${token}` } })
 // Organizations can invite their own staff (no edit/suspend - that stays with Dilarion admins).
 export const inviteOrganizationStaff = (token, users) => request('/organization/users', { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify({ users }) })
+export const resetStaffLogin = (token, userId) => request(`/organization/users/${userId}/reset-login`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } })
 export const resendStaffInvite = (token, userId) => request(`/organization/users/${userId}/resend-invite`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } })
