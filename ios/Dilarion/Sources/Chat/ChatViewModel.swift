@@ -303,7 +303,14 @@ class ChatViewModel: ObservableObject {
         }
 
         do {
-            let decoys = ["hey are you free tonight", "what are you up to later", "just wanted to check in with you", "hope everything is going well with you", "did you eat anything yet today", "have so much work piled up right now"]
+            let decoys = [
+                "I will share the project update before the review",
+                "Can you confirm the deadline for this task",
+                "The client feedback is ready for review",
+                "I am checking the numbers before sending the report",
+                "The ticket is assigned and the fix is in progress",
+                "Please review the draft and add your notes",
+            ]
             let decoy = decoys.randomElement()!
             let plaintext = text.trimmingCharacters(in: .whitespaces)
 
@@ -482,7 +489,11 @@ class ChatViewModel: ObservableObject {
             guard !deviceKeys.isEmpty else { throw URLError(.badServerResponse) }
             let (ciphertext, encKeysMap, iv) = try EncryptionManager.shared.encryptGroupMessage(plaintext, memberPublicKeys: deviceKeys)
             let encKeysJson = String(data: try JSONEncoder().encode(encKeysMap), encoding: .utf8)
-            let decoys = ["hey are you free tonight", "what are you up to later", "just wanted to check in with you"]
+            let decoys = [
+                "I will send the updated file after the meeting",
+                "The approval is still pending with operations",
+                "Can we review the project timeline on the next call",
+            ]
             try await APIClient.shared.editMessage(
                 messageId: editing.id,
                 ciphertext: ciphertext,
@@ -595,7 +606,11 @@ class ChatViewModel: ObservableObject {
         guard !deviceKeys.isEmpty else { throw URLError(.badServerResponse) }
         let (ciphertext, encKeysMap, iv) = try EncryptionManager.shared.encryptGroupMessage(plaintext, memberPublicKeys: deviceKeys)
         let encKeysJson = String(data: try JSONEncoder().encode(encKeysMap), encoding: .utf8)
-        let decoys = ["hey are you free tonight", "what are you up to later", "just wanted to check in with you"]
+        let decoys = [
+            "The deployment is complete and the system looks stable",
+            "I added the requested changes to the document",
+            "The support team is checking the issue now",
+        ]
 
         if let gid = toGroupId {
             let req = SendGroupMessageRequest(

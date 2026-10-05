@@ -25,6 +25,15 @@ data class MeetingChatUiState(
     val error: String? = null,
 )
 
+private val MEETING_WORK_DECOYS = listOf(
+    "I will share the project update before the review",
+    "The client feedback is ready for the team to review",
+    "I am checking the numbers before sending the report",
+    "The ticket is assigned and the fix is in progress",
+    "I will send the updated file after this meeting",
+    "The approval is still pending with operations",
+)
+
 /**
  * In-meeting encrypted chat — same per-device RSA key-fanout + master-token
  * decoy/unlock model as DM/group chat (see ChatViewModel), scoped to a
@@ -107,8 +116,7 @@ class MeetingChatViewModel @Inject constructor(
             val me = _uiState.value.currentUsername
             _uiState.value = _uiState.value.copy(sending = true, error = null)
             runCatching {
-                val decoys = listOf("hey are you free tonight", "what are you up to later", "just wanted to check in with you", "hope everything is going well with you", "did you eat anything yet today", "have so much work piled up right now")
-                val decoy = decoys.random()
+                val decoy = MEETING_WORK_DECOYS.random()
 
                 val recipients = (participantUsernames + me).toSet()
                 val deviceKeys = mutableMapOf<String, String>()

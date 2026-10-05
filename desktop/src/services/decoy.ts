@@ -1,25 +1,21 @@
 // Every encrypted message carries a decoy: the innocuous text shown to anyone who
-// has not unlocked the real content. It must read like an ordinary message — never
-// announce that ciphertext exists — so it is generated client-side and sent with
-// the message. If we omit it, the server substitutes its own text.
+// has not unlocked the real content. The server replaces this with an
+// organization-aware Ollama decoy; these phrases are work-only fallbacks for
+// optimistic/offline UI and older backend versions.
 
 const DECOYS = [
-  'hey are you free tonight',
-  'what are you up to later',
-  'just wanted to check in with you',
-  'hope everything is going well with you',
-  'did you eat anything yet today',
-  'have so much work piled up right now',
-  'call me back when you get a chance',
-  'running a bit late, sorry about that',
-  'let me know when you get home',
-  'thanks again for earlier, appreciate it',
-  'are we still on for the weekend',
-  'that place was better than I expected',
-  'forgot to mention it yesterday',
-  'weather has been awful all week',
-  'send me the address when you can',
-  'no rush, whenever you are free',
+  'I will share the project update before the review',
+  'Can you confirm the deadline for this task',
+  'The client feedback is ready for review',
+  'I am checking the numbers before sending the report',
+  'The ticket is assigned and the fix is in progress',
+  'Please review the draft and add your notes',
+  'I will send the updated file after the meeting',
+  'The approval is still pending with operations',
+  'Can we review the project timeline on the next call',
+  'The deployment is complete and the system looks stable',
+  'I added the requested changes to the document',
+  'The support team is checking the issue now',
 ];
 
 export function generateDecoy(): string {

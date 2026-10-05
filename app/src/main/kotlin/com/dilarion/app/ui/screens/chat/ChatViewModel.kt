@@ -49,6 +49,23 @@ data class CopilotResultUi(val title: String, val loading: Boolean, val error: S
 
 enum class PendingUploadKind { IMAGE, DOCUMENT, VOICE }
 
+// The backend replaces these with organization-aware Ollama output. Keep the
+// client fallback strictly work-only for optimistic UI and older servers.
+private val WORK_DECOY_PHRASES = listOf(
+    "I will share the project update before the review",
+    "Can you confirm the deadline for this task",
+    "The client feedback is ready for review",
+    "I am checking the numbers before sending the report",
+    "The ticket is assigned and the fix is in progress",
+    "Please review the draft and add your notes",
+    "I will send the updated file after the meeting",
+    "The approval is still pending with operations",
+    "Can we review the project timeline on the next call",
+    "The deployment is complete and the system looks stable",
+)
+
+private fun workDecoy(): String = WORK_DECOY_PHRASES.random()
+
 // WhatsApp-style optimistic bubble — shown the instant a send starts, in the
 // spot the real bubble will land, removed once loadMedia() picks up the real
 // MediaItem (or on failure). Never persisted, purely a local placeholder.
@@ -479,8 +496,7 @@ class ChatViewModel @Inject constructor(
                 if (deviceKeys.isEmpty()) throw Exception("$targetUsername has no linked devices with encryption keys yet")
                 val (ciphertext, encKeysMap, iv) = cryptoManager.encryptGroupMessage(plain, deviceKeys)
                 val encryptedKeyJson = com.google.gson.Gson().toJson(encKeysMap)
-                val decoys = listOf("hey are you free tonight", "what are you up to later", "just checking in")
-                apiService.sendDm(bearer, SendDmRequest(targetUsername, ciphertext, encryptedKeyJson, iv, decoys.random(), forwardedFromMessageId = target.id))
+                apiService.sendDm(bearer, SendDmRequest(targetUsername, ciphertext, encryptedKeyJson, iv, workDecoy(), forwardedFromMessageId = target.id))
                 _uiState.value = _uiState.value.copy(forwardTarget = null)
             }.onFailure {
                 _uiState.value = _uiState.value.copy(forwardError = it.message ?: "Failed to forward message")
@@ -563,8 +579,7 @@ class ChatViewModel @Inject constructor(
             }
 
             runCatching {
-                val decoys = listOf("hey are you free tonight", "what are you up to later", "just wanted to check in with you", "hope everything is going well with you", "did you eat anything yet today", "have so much work piled up right now")
-                val decoy = decoys.random()
+                val decoy = workDecoy()
 
                 // Wrap the AES key once per active device (keyed by device_uuid) of
                 // every recipient and of ourselves, so all of everyone's devices read it.
@@ -617,7 +632,7 @@ class ChatViewModel @Inject constructor(
             val me = _uiState.value.currentUsername
             _uiState.value = _uiState.value.copy(isSending = true)
             runCatching {
-                val decoy = listOf("hey are you free tonight", "what are you up to later", "just wanted to check in with you", "hope everything is going well with you").random()
+                val decoy = workDecoy()
                 val recipients: Set<String> = if (groupId != null) {
                     (_uiState.value.groupMembers.map { it.username } + me).toSet()
                 } else {

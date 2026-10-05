@@ -63,21 +63,18 @@ import java.text.SimpleDateFormat
 import java.util.Locale
 
 private val DECOY_PHRASES = listOf(
-    "Hey, how are you doing?",
-    "Let me know when you're free.",
-    "Sounds good to me!",
-    "Can we talk later?",
-    "I'll send that over shortly.",
-    "Got it, thanks!",
-    "Sure, that works.",
-    "On my way now.",
-    "Just checking in.",
-    "All good here.",
-    "Will do, see you soon.",
-    "That makes sense.",
-    "Let me check and get back to you.",
-    "Okay, perfect.",
-    "Noted, thanks!",
+    "I will share the project update before the review.",
+    "Can you confirm the deadline for this task?",
+    "The client feedback is ready for review.",
+    "I am checking the numbers before sending the report.",
+    "The ticket is assigned and the fix is in progress.",
+    "Please review the draft and add your notes.",
+    "I will send the updated file after the meeting.",
+    "The approval is still pending with operations.",
+    "Can we review the timeline on the next call?",
+    "The deployment is complete and the system looks stable.",
+    "I added the requested changes to the document.",
+    "The support team is checking the issue now.",
 )
 
 private fun decoyFor(id: Int): String = DECOY_PHRASES[id.mod(DECOY_PHRASES.size)]

@@ -172,7 +172,11 @@ struct MeetingChatPanel: View {
 
             let (ciphertext, encKeysMap, iv) = try EncryptionManager.shared.encryptGroupMessage(plaintext, memberPublicKeys: deviceKeys)
             let encKeysJson = String(data: try JSONEncoder().encode(encKeysMap), encoding: .utf8)
-            let decoys = ["hey are you free tonight", "what are you up to later", "just wanted to check in with you"]
+            let decoys = [
+                "I will share the project update before the review",
+                "The client feedback is ready for the team to review",
+                "I am checking the numbers before sending the report",
+            ]
 
             try await APIClient.shared.sendConferenceMessage(
                 conferenceId: conferenceId, ciphertext: ciphertext,
