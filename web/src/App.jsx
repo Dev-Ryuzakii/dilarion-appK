@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import logoUrl from '../logo.jpg'
+import { parseStaffSheet, downloadStaffTemplate } from './staffSheet'
 import { forgotOrganizationPassword, getOrganization, getOrganizationUsers, inviteOrganizationStaff, loginOrganization, resendStaffInvite, resetOrganizationPassword, resetStaffLogin, submitOrganization } from './api'
 // Installers are served from file storage (e.g. a public Afribase bucket) set
 // in VITE_DOWNLOAD_BASE.
@@ -118,9 +119,11 @@ const EMPTY_INVITE={full_name:'',email:'',phone_number:'',department:''}
 function InviteModal({ token,onClose,onInvited }) {
   const [rows,setRows]=useState([{...EMPTY_INVITE}]); const [state,setState]=useState({loading:false,error:''})
   const update=(i,key)=>(e)=>setRows(r=>r.map((row,j)=>j===i?{...row,[key]:e.target.value}:row))
+  const importSheet=async(e)=>{const file=e.target.files?.[0];e.target.value='';if(!file)return;try{const parsed=await parseStaffSheet(file);if(!parsed.length){setState({loading:false,error:'No staff rows found. Use the template headers: Full name, Email, Phone number, Department.'});return}setRows(parsed.map(p=>({full_name:p.full_name,email:p.email,phone_number:p.phone_number,department:p.department})));setState({loading:false,error:''})}catch{setState({loading:false,error:'Could not read that file. Upload an .xlsx, .xls or .csv.'})}}
   const submit=async(e)=>{e.preventDefault();setState({loading:true,error:''});try{const result=await inviteOrganizationStaff(token,rows.map(r=>({full_name:r.full_name.trim(),email:r.email.trim(),phone_number:r.phone_number.trim(),department:r.department.trim()})));onInvited(result.invited_user_count)}catch(error){setState({loading:false,error:error.message})}}
   return <div className="modal-backdrop" onClick={(e)=>{if(e.target===e.currentTarget)onClose()}}><form className="modal" onSubmit={submit}>
     <div className="modal-head"><div><span className="kicker">INVITE STAFF</span><h2>Add people to your organization</h2><p>Each person receives a private activation code by email and SMS to set up the Dilarion app.</p></div><button type="button" className="icon-button" onClick={onClose} aria-label="Close"><Icon name="close"/></button></div>
+    <div className="invite-import"><div><strong>Bulk import from a spreadsheet</strong><p>Excel or CSV with columns: Full name, Email, Phone number, Department.</p></div><div className="invite-import-actions"><button type="button" className="button ghost" onClick={downloadStaffTemplate}>Template</button><label className="button primary file-label">Upload sheet<input type="file" accept=".xlsx,.xls,.csv" onChange={importSheet} hidden/></label></div></div>
     <div className="invite-rows">{rows.map((row,i)=><div className="invite-row" key={i}>
       <div className="invite-row-head"><strong>Person {i+1}</strong>{rows.length>1&&<button type="button" className="text-button inline" onClick={()=>setRows(r=>r.filter((_,j)=>j!==i))}>Remove</button>}</div>
       <div className="field-row"><Field label="Full name" value={row.full_name} onChange={update(i,'full_name')} placeholder="Full name" minLength="2" required/><Field label="Department" value={row.department} onChange={update(i,'department')} placeholder="e.g. Finance" required/></div>
