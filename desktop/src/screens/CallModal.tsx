@@ -25,7 +25,9 @@ interface Props {
   conferenceParticipants?: string[];
   callId?: number;       // set for incoming calls
   offerSdp?: string;     // set for incoming calls
-  /** No longer taken from stored state: answering prompts for it every time. */
+  /** Session master token (verified once in Settings). When present it answers
+   *  the call directly — no second prompt. Only if it's absent or rejected do
+   *  we fall back to asking. */
   masterToken?: string;
   onEnd: () => void;
   /** Redial this partner after the call ended, as a fresh outgoing call. */
@@ -116,6 +118,7 @@ function MasterTokenPrompt({ rejected, onCancel, onConfirm }: {
           onKeyDown={e => { if (e.key === 'Enter' && value.trim()) onConfirm(value.trim()); }}
           placeholder="Master token"
         />
+        <p style={{ ...mt.hint, marginTop: 6, fontSize: '0.72rem' }}>Press Enter to answer</p>
         <div style={mt.row}>
           <button style={mt.ghost} onClick={onCancel}>Cancel</button>
           <button
@@ -165,7 +168,7 @@ function fmtDur(s: number) {
 
 // ── CallModal ─────────────────────────────────────────────────────────────────
 
-export default function CallModal({ token, partner, callType, isIncoming, callId: incomingCallId, offerSdp: incomingOfferSdp, conferenceIdProp, conferenceParticipants, onEnd, onCallBack, onUpgradeToGallery, minimized = false, onMinimize, onMaximize }: Props) {
+export default function CallModal({ token, partner, callType, isIncoming, callId: incomingCallId, offerSdp: incomingOfferSdp, conferenceIdProp, conferenceParticipants, masterToken, onEnd, onCallBack, onUpgradeToGallery, minimized = false, onMinimize, onMaximize }: Props) {
   // calling = outgoing, waiting for callee to receive; ringing = callee's device is ringing; connecting = SDP negotiating
   const [state, setState] = useState<'calling' | 'ringing' | 'connecting' | 'connected' | 'ended'>(
     isIncoming ? 'ringing' : 'calling',
@@ -890,7 +893,7 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
         {state === 'ringing' && isIncoming && (
           <div style={cs.controls}>
             <ControlBtn icon="decline" color="#ef4444" label="Decline" onClick={handleEnd} />
-            <ControlBtn icon="accept" color="#25d366" label="Accept" onClick={() => setShowTokenPrompt(true)} />
+            <ControlBtn icon="accept" color="#25d366" label="Accept" onClick={() => { if (masterToken) acceptCall(masterToken); else setShowTokenPrompt(true); }} />
             {showTokenPrompt && (
               <MasterTokenPrompt
                 rejected={tokenRejected}
