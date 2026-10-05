@@ -7,11 +7,13 @@ interface Props {
   onBack?: () => void;
   /** Open straight on a view, e.g. 'activate' from the link-device screen. */
   initialView?: View;
+  /** Why the previous session ended, e.g. a newer sign-in replaced it. */
+  notice?: string | null;
 }
 
 export type View = 'login' | 'forgot' | 'signup' | 'recovery' | 'activate';
 
-export default function LoginScreen({ onLogin, onBack, initialView = 'login' }: Props) {
+export default function LoginScreen({ onLogin, onBack, initialView = 'login', notice }: Props) {
   const [view, setView] = useState<View>(initialView);
 
   // Invited staff: activation code + chosen token, then the mandatory profile.
@@ -405,6 +407,8 @@ export default function LoginScreen({ onLogin, onBack, initialView = 'login' }: 
             </button>
           </div>
 
+          {notice && <p style={s.notice}>{notice}</p>}
+
           {error && <p style={s.error}>{error}</p>}
 
           <button style={s.btn} type="submit" disabled={loading}>
@@ -557,6 +561,18 @@ const s: Record<string, React.CSSProperties> = {
     fontSize: '0.78rem',
     color: '#ef4444',
     textAlign: 'center',
+  },
+  // End-of-session banner: informational, not a failure the user caused, so it
+  // reads in muted text rather than the red of a bad token.
+  notice: {
+    fontSize: '0.78rem',
+    color: 'var(--text-secondary, #9ca3af)',
+    textAlign: 'center',
+    background: 'rgba(255,255,255,0.05)',
+    border: '1px solid rgba(255,255,255,0.09)',
+    borderRadius: 10,
+    padding: '8px 12px',
+    lineHeight: 1.4,
   },
   btn: {
     background: '#c0392b',

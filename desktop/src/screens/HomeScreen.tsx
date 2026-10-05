@@ -2258,7 +2258,9 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
     setLoadingContacts(true);
     getConversations(token)
       .then(users => setContacts(users.filter(u => u.username !== username)))
-      .catch(() => {})
+      // Not silent: an empty list used to look identical to a failed load, and
+      // a retired session then hid as "signed in but nothing works".
+      .catch(err => console.warn('[dilarion] conversations failed to load:', err))
       .finally(() => setLoadingContacts(false));
   }, [token, username]);
 
@@ -2267,7 +2269,9 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
   const [showJoinGroup, setShowJoinGroup] = useState(false);
 
   const refreshGroups = useCallback(() => {
-    return getGroups(token).then(gs => setGroups(gs)).catch(() => {});
+    return getGroups(token)
+      .then(gs => setGroups(gs))
+      .catch(err => console.warn('[dilarion] groups failed to load:', err));
   }, [token]);
 
   useEffect(() => {

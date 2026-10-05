@@ -8,9 +8,14 @@ import IdleLockScreen from './components/IdleLockScreen';
 import { ensureDeviceRegistered } from './services/keys';
 import { logoutSession } from './services/api';
 import { getLockedUser, isIdleExpired, markActive, setLockedUser } from './services/idleLock';
+import {
+  SESSION_KEY,
+  SESSION_INVALID_EVENT,
+  clearStoredSession,
+  takeInvalidReason,
+} from './services/session';
 import './App.css';
 
-const SESSION_KEY = 'dilarion_session';
 const SESSION_TTL = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 interface StoredSession {
@@ -57,9 +62,29 @@ const ACTIVITY_EVENTS = ['mousemove', 'mousedown', 'keydown', 'wheel', 'touchsta
 export default function App() {
   const [session, setSession] = useState<{ token: string; username: string } | null>(initialSession);
   const [lockedUser, setLockedUserState] = useState<string | null>(() => (session ? null : getLockedUser()));
+  // Set when the server retires the token out from under us, so the sign-in
+  // screen can say why instead of the app silently emptying itself.
+  const [sessionEndedNotice, setSessionEndedNotice] = useState<string | null>(() => takeInvalidReason());
   // QR linking is the default entry, username/token sign-in is the fallback.
   const [usePassword, setUsePassword] = useState(false);
   const [startView, setStartView] = useState<LoginView>('login');
+
+  // ── Session retired server-side ──────────────────────────────────────────
+  // A newer sign-in in the same platform group, or an expiry, deactivates this
+  // token. apiFetch reports it; all we can do is drop the dead session and ask
+  // the user to sign in again.
+  useEffect(() => {
+    const onInvalid = () => {
+      const reason = takeInvalidReason();
+      if (!session) return; // Nothing of ours to drop - leave the reason cleared.
+      clearStoredSession();
+      setSessionEndedNotice(reason);
+      setLockedUserState(null);
+      setSession(null);
+    };
+    window.addEventListener(SESSION_INVALID_EVENT, onInvalid);
+    return () => window.removeEventListener(SESSION_INVALID_EVENT, onInvalid);
+  }, [session]);
 
   // ── Idle auto-logout ─────────────────────────────────────────────────────
   useEffect(() => {
@@ -94,7 +119,7 @@ export default function App() {
 
   function lockForIdle() {
     if (!session) return;
-    localStorage.removeItem(SESSION_KEY);
+    clearStoredSession();
     setLockedUser(session.username);
     setLockedUserState(session.username);
     setSession(null);
@@ -106,6 +131,7 @@ export default function App() {
     // encrypt to it and it can find its own entry when decrypting.
     ensureDeviceRegistered(t, u).catch(() => {});
     markActive();
+    setSessionEndedNotice(null);
     setLockedUser(null);
     setLockedUserState(null);
     setSession({ token: t, username: u });
@@ -114,7 +140,7 @@ export default function App() {
 
   function handleLogout() {
     if (session) logoutSession(session.token);
-    localStorage.removeItem(SESSION_KEY);
+    clearStoredSession();
     setLockedUser(null);
     setLockedUserState(null);
     setSession(null);
@@ -133,7 +159,7 @@ export default function App() {
     );
   }
   if (usePassword) {
-    return <LoginScreen onLogin={handleLogin} onBack={() => { setUsePassword(false); setStartView('login'); }} initialView={startView} />;
+    return <LoginScreen onLogin={handleLogin} onBack={() => { setUsePassword(false); setStartView('login'); }} initialView={startView} notice={sessionEndedNotice} />;
   }
   return (
     <LinkDeviceScreen
