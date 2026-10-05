@@ -15,6 +15,8 @@ async function request(path, options = {}) {
 
 export const submitOrganization = (payload) => request('/organization-requests', { method: 'POST', body: JSON.stringify(payload) })
 export const loginOrganization = (payload) => request('/organization/auth/login', { method: 'POST', body: JSON.stringify(payload) })
+export const forgotOrganizationPassword = (payload) => request('/organization/auth/forgot-password', { method: 'POST', body: JSON.stringify(payload) })
+export const resetOrganizationPassword = (payload) => request('/organization/auth/reset-password', { method: 'POST', body: JSON.stringify(payload) })
 export const getOrganization = (token) => request('/organization/me', { headers: { Authorization: `Bearer ${token}` } })
 export const getOrganizationUsers = (token) => request('/organization/users', { headers: { Authorization: `Bearer ${token}` } })
 // Organizations can invite their own staff (no edit/suspend - that stays with Dilarion admins).
