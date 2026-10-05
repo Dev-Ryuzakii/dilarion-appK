@@ -1968,26 +1968,35 @@ private fun MessageBubble(
     }
 }
 
-private fun formatTimestamp(iso: String): String = runCatching {
-    val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.getDefault())
-    SimpleDateFormat("HH:mm", Locale.getDefault()).format(sdf.parse(iso)!!)
-}.getOrElse { "" }
+// Server timestamps are UTC (ISO-8601 with a +00:00 offset). Parse the offset
+// and convert to the device's own zone so messages show the viewer's real local
+// time (WAT for users in West Africa) — never the raw UTC wall-clock.
+private fun isoToLocal(iso: String): java.time.ZonedDateTime? = runCatching {
+    java.time.OffsetDateTime.parse(iso).atZoneSameInstant(java.time.ZoneId.systemDefault())
+}.getOrElse {
+    runCatching {
+        java.time.LocalDateTime.parse(iso).atZone(java.time.ZoneOffset.UTC)
+            .withZoneSameInstant(java.time.ZoneId.systemDefault())
+    }.getOrNull()
+}
 
-private fun isSameDay(iso1: String, iso2: String): Boolean =
-    iso1.take(10) == iso2.take(10)
+private fun formatTimestamp(iso: String): String =
+    isoToLocal(iso)?.format(java.time.format.DateTimeFormatter.ofPattern("HH:mm", Locale.getDefault())) ?: ""
+
+private fun isSameDay(iso1: String, iso2: String): Boolean {
+    val a = isoToLocal(iso1)?.toLocalDate() ?: return iso1.take(10) == iso2.take(10)
+    val b = isoToLocal(iso2)?.toLocalDate() ?: return iso1.take(10) == iso2.take(10)
+    return a == b
+}
 
 private fun formatDateLabel(iso: String): String = runCatching {
-    val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.getDefault())
-    val date = sdf.parse(iso) ?: return@runCatching ""
-    val cal = java.util.Calendar.getInstance().apply { time = date }
-    val today = java.util.Calendar.getInstance()
-    val yesterday = java.util.Calendar.getInstance().apply { add(java.util.Calendar.DATE, -1) }
-    when {
-        cal.get(java.util.Calendar.YEAR) == today.get(java.util.Calendar.YEAR) &&
-        cal.get(java.util.Calendar.DAY_OF_YEAR) == today.get(java.util.Calendar.DAY_OF_YEAR) -> "Today"
-        cal.get(java.util.Calendar.YEAR) == yesterday.get(java.util.Calendar.YEAR) &&
-        cal.get(java.util.Calendar.DAY_OF_YEAR) == yesterday.get(java.util.Calendar.DAY_OF_YEAR) -> "Yesterday"
-        else -> SimpleDateFormat("EEEE, d MMMM", Locale.getDefault()).format(date)
+    val zoned = isoToLocal(iso) ?: return@runCatching ""
+    val date = zoned.toLocalDate()
+    val today = java.time.LocalDate.now()
+    when (date) {
+        today -> "Today"
+        today.minusDays(1) -> "Yesterday"
+        else -> zoned.format(java.time.format.DateTimeFormatter.ofPattern("EEEE, d MMMM", Locale.getDefault()))
     }
 }.getOrElse { "" }
 

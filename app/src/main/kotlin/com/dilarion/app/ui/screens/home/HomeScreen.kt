@@ -502,14 +502,21 @@ private fun EmptyState(icon: ImageVector, title: String, subtitle: String) {
 }
 
 private fun formatTime(iso: String): String = runCatching {
-    val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.getDefault())
-    val date = sdf.parse(iso) ?: return ""
-    val diffHours = (System.currentTimeMillis() - date.time) / 3_600_000
-    when {
-        diffHours < 24  -> SimpleDateFormat("HH:mm", Locale.getDefault()).format(date)
-        diffHours < 168 -> SimpleDateFormat("EEE", Locale.getDefault()).format(date)
-        else            -> SimpleDateFormat("dd/MM/yy", Locale.getDefault()).format(date)
+    // Server times are UTC with a +00:00 offset; convert to the device's own
+    // zone so the list shows the viewer's real local time (WAT in West Africa).
+    val zoned = runCatching {
+        java.time.OffsetDateTime.parse(iso).atZoneSameInstant(java.time.ZoneId.systemDefault())
+    }.getOrElse {
+        java.time.LocalDateTime.parse(iso).atZone(java.time.ZoneOffset.UTC)
+            .withZoneSameInstant(java.time.ZoneId.systemDefault())
     }
+    val diffHours = (System.currentTimeMillis() - zoned.toInstant().toEpochMilli()) / 3_600_000
+    val pattern = when {
+        diffHours < 24  -> "HH:mm"
+        diffHours < 168 -> "EEE"
+        else            -> "dd/MM/yy"
+    }
+    zoned.format(java.time.format.DateTimeFormatter.ofPattern(pattern, Locale.getDefault()))
 }.getOrElse { "" }
 
 private fun formatDuration(seconds: Int) = "%02d:%02d".format(seconds / 60, seconds % 60)
