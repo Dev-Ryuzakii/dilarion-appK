@@ -243,6 +243,57 @@ struct GroupMember: Codable, Identifiable {
     }
 }
 
+// MARK: - Tasks (mirrors Android TaskItem / tasks API)
+struct TaskItem: Codable, Identifiable {
+    var id: Int { taskId }
+    let taskId: Int
+    let title: String
+    let description: String?
+    let dueAt: String?
+    let status: String
+    let isBreakout: Bool
+    let groupId: Int?
+    let createdBy: String?
+
+    enum CodingKeys: String, CodingKey {
+        case title, description, status
+        case taskId = "task_id"
+        case dueAt = "due_at"
+        case isBreakout = "is_breakout"
+        case groupId = "group_id"
+        case createdBy = "created_by"
+    }
+}
+
+struct TaskListResponse: Codable {
+    let tasks: [TaskItem]
+    let count: Int?
+}
+
+struct TaskCreateRequest: Codable {
+    let title: String
+    let description: String?
+    let dueAt: String?
+    let groupId: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case title, description
+        case dueAt = "due_at"
+        case groupId = "group_id"
+    }
+
+    init(title: String, description: String? = nil, dueAt: String? = nil, groupId: Int? = nil) {
+        self.title = title
+        self.description = description
+        self.dueAt = dueAt
+        self.groupId = groupId
+    }
+}
+
+struct TaskStatusUpdateRequest: Codable {
+    let status: String
+}
+
 // MARK: - Calls
 struct IncomingCallData: Codable, Identifiable {
     let id: Int

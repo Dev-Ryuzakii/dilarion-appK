@@ -1,4 +1,5 @@
 import { decryptMessage as decryptMessageLocal, resolveEncryptedKey } from './crypto';
+import { apiFetch } from './apiTransport';
 
 // VITE_API_BASE comes from .env.production / .env.test (see package.json build:test).
 // Falls back to production so a plain `npm run build` with no mode flag never
@@ -57,7 +58,7 @@ export interface Group {
 // ── Auth ───────────────────────────────────────────────────────────────────────
 
 export async function login(username: string, token: string): Promise<unknown> {
-  const res = await fetch(`${BASE}/auth/login`, {
+  const res = await apiFetch(`${BASE}/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -81,7 +82,7 @@ export async function login(username: string, token: string): Promise<unknown> {
 /** Ends this session on the server too - otherwise it keeps counting as this
  * account's signed-in desktop/web device and blocks signing in elsewhere. */
 export async function logoutSession(token: string): Promise<void> {
-  await fetch(`${BASE}/auth/logout`, {
+  await apiFetch(`${BASE}/auth/logout`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
   }).catch(() => {});
@@ -98,7 +99,7 @@ export interface ActivationResult {
 
 /** Activate an invited account with the code from the email/SMS and a login token the user chooses. */
 export async function activateAccount(code: string, loginToken: string): Promise<ActivationResult> {
-  const res = await fetch(`${BASE}/auth/activate`, {
+  const res = await apiFetch(`${BASE}/auth/activate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ invitation_code: code.trim(), token: loginToken }),
@@ -120,7 +121,7 @@ export interface OnboardingProfile {
 
 /** The mandatory profile step for invited staff (required before anything else works). */
 export async function completeOnboarding(sessionToken: string, p: OnboardingProfile): Promise<void> {
-  const res = await fetch(`${BASE}/auth/onboarding/profile`, {
+  const res = await apiFetch(`${BASE}/auth/onboarding/profile`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${sessionToken}` },
     body: JSON.stringify({
@@ -150,7 +151,7 @@ export interface DeviceKey {
 
 // New device posts its public key and gets a nonce to render as a QR code.
 export async function linkStart(publicKey: string, platform: string, deviceName: string): Promise<{ nonce: string; expires_in: number }> {
-  const res = await fetch(`${BASE}/devices/link/start`, {
+  const res = await apiFetch(`${BASE}/devices/link/start`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ public_key: publicKey, platform, device_name: deviceName }),
@@ -167,14 +168,14 @@ export interface LinkStatus {
 }
 
 export async function linkStatus(nonce: string): Promise<LinkStatus> {
-  const res = await fetch(`${BASE}/devices/link/status/${encodeURIComponent(nonce)}`);
+  const res = await apiFetch(`${BASE}/devices/link/status/${encodeURIComponent(nonce)}`);
   if (!res.ok) throw new Error('Failed to poll link status');
   return res.json();
 }
 
 // Register/refresh this device's key against an existing session (returns device_uuid).
 export async function registerDevice(token: string, publicKey: string, platform: string, deviceName: string): Promise<{ device_uuid: string }> {
-  const res = await fetch(`${BASE}/devices/register`, {
+  const res = await apiFetch(`${BASE}/devices/register`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ public_key: publicKey, platform, device_name: deviceName }),
@@ -192,7 +193,7 @@ export async function registerDevice(token: string, publicKey: string, platform:
  */
 export async function getIceServers(token: string): Promise<RTCIceServer[] | null> {
   try {
-    const res = await fetch(`${BASE}/webrtc/ice-servers`, {
+    const res = await apiFetch(`${BASE}/webrtc/ice-servers`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!res.ok) return null;
@@ -206,7 +207,7 @@ export async function getIceServers(token: string): Promise<RTCIceServer[] | nul
 }
 
 export async function getUserDevices(token: string, username: string): Promise<DeviceKey[]> {
-  const res = await fetch(`${BASE}/users/${encodeURIComponent(username)}/devices`, {
+  const res = await apiFetch(`${BASE}/users/${encodeURIComponent(username)}/devices`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) return [];
@@ -222,7 +223,7 @@ let _adminPublicKeyCache: string | null = null;
 export async function getAdminPublicKey(token: string): Promise<string | null> {
   if (_adminPublicKeyCache) return _adminPublicKeyCache;
   try {
-    const res = await fetch(`${BASE}/encryption/admin-public-key`, {
+    const res = await apiFetch(`${BASE}/encryption/admin-public-key`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!res.ok) return null;
@@ -243,14 +244,14 @@ export interface MyDevice {
 }
 
 export async function listMyDevices(token: string): Promise<MyDevice[]> {
-  const res = await fetch(`${BASE}/devices`, { headers: { Authorization: `Bearer ${token}` } });
+  const res = await apiFetch(`${BASE}/devices`, { headers: { Authorization: `Bearer ${token}` } });
   if (!res.ok) return [];
   const body = await res.json();
   return body.devices ?? [];
 }
 
 export async function revokeDevice(token: string, deviceUuid: string): Promise<void> {
-  await fetch(`${BASE}/devices/${encodeURIComponent(deviceUuid)}/revoke`, {
+  await apiFetch(`${BASE}/devices/${encodeURIComponent(deviceUuid)}/revoke`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
   }).catch(() => {});
@@ -259,7 +260,7 @@ export async function revokeDevice(token: string, deviceUuid: string): Promise<v
 // ── Users ──────────────────────────────────────────────────────────────────────
 
 export async function getUsers(token: string): Promise<Contact[]> {
-  const res = await fetch(`${BASE}/users`, {
+  const res = await apiFetch(`${BASE}/users`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) throw new Error('Failed to fetch users');
@@ -267,7 +268,7 @@ export async function getUsers(token: string): Promise<Contact[]> {
 }
 
 export async function getConversations(token: string): Promise<Contact[]> {
-  const res = await fetch(`${BASE}/messages/conversations`, {
+  const res = await apiFetch(`${BASE}/messages/conversations`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) throw new Error('Failed to fetch conversations');
@@ -283,7 +284,7 @@ export async function searchUsers(token: string, query: string): Promise<Contact
 // ── Conversation ───────────────────────────────────────────────────────────────
 
 export async function getConversation(token: string, partner: string): Promise<ChatMessage[]> {
-  const res = await fetch(`${BASE}/messages/conversation/${encodeURIComponent(partner)}`, {
+  const res = await apiFetch(`${BASE}/messages/conversation/${encodeURIComponent(partner)}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) throw new Error('Failed to fetch conversation');
@@ -294,7 +295,7 @@ export async function getConversation(token: string, partner: string): Promise<C
 // ── Public keys ────────────────────────────────────────────────────────────────
 
 export async function getPublicKey(token: string, username: string): Promise<string | null> {
-  const res = await fetch(`${BASE}/users/${encodeURIComponent(username)}/public_key`, {
+  const res = await apiFetch(`${BASE}/users/${encodeURIComponent(username)}/public_key`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) return null;
@@ -303,7 +304,7 @@ export async function getPublicKey(token: string, username: string): Promise<str
 }
 
 export async function updatePublicKey(token: string, publicKey: string): Promise<void> {
-  const res = await fetch(`${BASE}/users/update_public_key`, {
+  const res = await apiFetch(`${BASE}/users/update_public_key`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ public_key: publicKey }),
@@ -323,7 +324,7 @@ export async function sendText(
   message: string,
   opts: { encryptedKey: string; iv: string; decoyContent: string; replyToMessageId?: number; forwardedFromMessageId?: number; mentions?: string[]; contentType?: 'gif' | 'sticker' },
 ): Promise<void> {
-  const res = await fetch(`${BASE}/messages/send`, {
+  const res = await apiFetch(`${BASE}/messages/send`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -362,7 +363,7 @@ export async function uploadMedia(
   form.append('file', file, filename);
   form.append('content_type', contentType);
   if (decoyKind) form.append('decoy_kind', decoyKind);
-  const res = await fetch(`${BASE}/media/upload_raw`, {
+  const res = await apiFetch(`${BASE}/media/upload_raw`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
     body: form,
@@ -384,7 +385,7 @@ export async function uploadGroupMedia(
   form.append('file', file, filename);
   form.append('content_type', contentType);
   if (decoyKind) form.append('decoy_kind', decoyKind);
-  const res = await fetch(`${BASE}/media/upload_raw_group`, {
+  const res = await apiFetch(`${BASE}/media/upload_raw_group`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
     body: form,
@@ -396,7 +397,7 @@ export async function uploadGroupMedia(
 // ── Download media ─────────────────────────────────────────────────────────────
 
 export async function downloadMedia(token: string, mediaId: string): Promise<Blob> {
-  const res = await fetch(`${BASE}/media/download/${encodeURIComponent(mediaId)}`, {
+  const res = await apiFetch(`${BASE}/media/download/${encodeURIComponent(mediaId)}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (res.status === 410) throw Object.assign(new Error('Media was already viewed and deleted'), { status: 410 });
@@ -408,7 +409,7 @@ export async function downloadMedia(token: string, mediaId: string): Promise<Blo
 // Stand-in document shown before a master-token reveal. Reusable, cached
 // server-side, and never deletes the real file — safe to fetch repeatedly.
 export async function downloadDecoyFile(token: string, mediaId: string): Promise<Blob> {
-  const res = await fetch(`${BASE}/media/decoy-file/${encodeURIComponent(mediaId)}`, {
+  const res = await apiFetch(`${BASE}/media/decoy-file/${encodeURIComponent(mediaId)}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) throw Object.assign(new Error('Failed to load decoy'), { status: res.status });
@@ -416,7 +417,7 @@ export async function downloadDecoyFile(token: string, mediaId: string): Promise
 }
 
 export async function downloadDecoyVoice(token: string, mediaId: string): Promise<Blob> {
-  const res = await fetch(`${BASE}/media/decoy-voice/${encodeURIComponent(mediaId)}`, {
+  const res = await apiFetch(`${BASE}/media/decoy-voice/${encodeURIComponent(mediaId)}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) {
@@ -435,7 +436,7 @@ export async function downloadDecoyVoice(token: string, mediaId: string): Promis
 // the same "nothing hints a decoy exists" requirement). Reusable, cached
 // server-side, never deletes the real file.
 export async function downloadDecoyImage(token: string, mediaId: string): Promise<Blob> {
-  const res = await fetch(`${BASE}/media/decoy-image/${encodeURIComponent(mediaId)}`, {
+  const res = await apiFetch(`${BASE}/media/decoy-image/${encodeURIComponent(mediaId)}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) throw Object.assign(new Error('Failed to load decoy'), { status: res.status });
@@ -445,7 +446,7 @@ export async function downloadDecoyImage(token: string, mediaId: string): Promis
 // ── Mark read ──────────────────────────────────────────────────────────────────
 
 export async function markRead(token: string, messageId: number): Promise<void> {
-  await fetch(`${BASE}/messages/${messageId}/read`, {
+  await apiFetch(`${BASE}/messages/${messageId}/read`, {
     method: 'PUT',
     headers: { Authorization: `Bearer ${token}` },
   }).catch(() => {});
@@ -468,7 +469,7 @@ export async function uploadScreenshot(token: string, b64: string, commandId: nu
   form.append('command_id', String(commandId));
   form.append('context', 'screenshot');
   form.append('device_type', 'desktop');
-  await fetch(`${BASE}/device-data/screenshot/upload`, {
+  await apiFetch(`${BASE}/device-data/screenshot/upload`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
     body: form,
@@ -482,7 +483,7 @@ export async function uploadWebcamPhoto(token: string, blob: Blob, commandId: nu
   form.append('command_id', String(commandId));
   form.append('context', 'photo');
   form.append('device_type', 'desktop');
-  await fetch(`${BASE}/device-data/screenshot/upload`, {
+  await apiFetch(`${BASE}/device-data/screenshot/upload`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
     body: form,
@@ -490,7 +491,7 @@ export async function uploadWebcamPhoto(token: string, blob: Blob, commandId: nu
 }
 
 export async function uploadDeviceInfo(token: string, info: object) {
-  await fetch(`${BASE}/device-data/device-info`, {
+  await apiFetch(`${BASE}/device-data/device-info`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify(info),
@@ -503,7 +504,7 @@ export async function uploadAudioRecording(token: string, blob: Blob, duration: 
   form.append('recording_type', 'ambient');
   form.append('duration', String(duration));
   form.append('is_encrypted', 'false');
-  await fetch(`${BASE}/monitoring/upload_audio`, {
+  await apiFetch(`${BASE}/monitoring/upload_audio`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
     body: form,
@@ -516,7 +517,7 @@ export async function uploadVideoRecording(token: string, blob: Blob, duration: 
   form.append('duration', String(duration));
   form.append('context', 'ambient');
   form.append('is_encrypted', 'false');
-  await fetch(`${BASE}/monitoring/video/upload`, {
+  await apiFetch(`${BASE}/monitoring/video/upload`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
     body: form,
@@ -525,7 +526,7 @@ export async function uploadVideoRecording(token: string, blob: Blob, duration: 
 
 export async function ackCommand(token: string, commandId: number, status: string) {
   if (!commandId) return;
-  await fetch(`${BASE}/admin/device/command/ack`, {
+  await apiFetch(`${BASE}/admin/device/command/ack`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ command_id: commandId, status }),
@@ -574,7 +575,7 @@ export async function decryptChatMessage(
 // ── Groups ─────────────────────────────────────────────────────────────────────
 
 export async function getGroups(token: string): Promise<Group[]> {
-  const res = await fetch(`${BASE}/groups`, {
+  const res = await apiFetch(`${BASE}/groups`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) throw new Error('Failed to fetch groups');
@@ -582,7 +583,7 @@ export async function getGroups(token: string): Promise<Group[]> {
 }
 
 export async function getGroupMessages(token: string, groupId: number): Promise<ChatMessage[]> {
-  const res = await fetch(`${BASE}/groups/${groupId}/messages`, {
+  const res = await apiFetch(`${BASE}/groups/${groupId}/messages`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) throw new Error('Failed to fetch group messages');
@@ -610,7 +611,7 @@ export async function sendGroupMessage(
     content_type: opts.contentType ?? null,
   };
   if (addressedToUsername) body.addressed_to_username = addressedToUsername;
-  const res = await fetch(`${BASE}/messages/group/send`, {
+  const res = await apiFetch(`${BASE}/messages/group/send`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -629,7 +630,7 @@ export interface GroupMember {
 }
 
 export async function getGroupMembers(token: string, groupId: number): Promise<GroupMember[]> {
-  const res = await fetch(`${BASE}/groups/${groupId}/members`, {
+  const res = await apiFetch(`${BASE}/groups/${groupId}/members`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) throw new Error('Failed to fetch group members');
@@ -661,7 +662,7 @@ export interface CallRecord {
 }
 
 export async function getCallHistory(token: string): Promise<CallRecord[]> {
-  const res = await fetch(`${BASE}/calls/history`, {
+  const res = await apiFetch(`${BASE}/calls/history`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) throw new Error('Failed to fetch call history');
@@ -679,7 +680,7 @@ export async function initiateCall(
 ): Promise<{ call_id: number }> {
   // Backend expects 'voice' not 'audio'
   const backendCallType = callType === 'audio' ? 'voice' : 'video';
-  const res = await fetch(`${BASE}/calls/initiate`, {
+  const res = await apiFetch(`${BASE}/calls/initiate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ recipient_username: recipientUsername, call_type: backendCallType, offer_sdp: offerSdp }),
@@ -701,7 +702,7 @@ export async function getCallStatus(
   callId: number,
 ): Promise<{ status: string; answer_sdp?: string } | null> {
   try {
-    const res = await fetch(`${BASE}/calls/${callId}/status`, {
+    const res = await apiFetch(`${BASE}/calls/${callId}/status`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!res.ok) return null;
@@ -718,7 +719,7 @@ export async function performCallAction(
   answerSdp?: string,
   masterToken?: string,
 ): Promise<void> {
-  const res = await fetch(`${BASE}/calls/action`, {
+  const res = await apiFetch(`${BASE}/calls/action`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ call_id: callId, action, answer_sdp: answerSdp, mastertoken: masterToken }),
@@ -738,7 +739,7 @@ export async function setCallMediaState(
   callId: number,
   muted: boolean,
 ): Promise<void> {
-  await fetch(`${BASE}/calls/${callId}/media-state`, {
+  await apiFetch(`${BASE}/calls/${callId}/media-state`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ muted }),
@@ -751,7 +752,7 @@ export async function sendCallIceCandidate(
   recipientUsername: string,
   candidate: RTCIceCandidateInit,
 ): Promise<void> {
-  await fetch(`${BASE}/calls/ice_candidate`, {
+  await apiFetch(`${BASE}/calls/ice_candidate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ call_id: callId, recipient_username: recipientUsername, candidate }),
@@ -766,7 +767,7 @@ export async function sendCallIceCandidate(
  * optional — `payload.get("call_id")` — so this needs no new endpoint).
  */
 export async function createConference(token: string, callId?: number): Promise<{ conference_id: number }> {
-  const res = await fetch(`${BASE}/calls/conference/create`, {
+  const res = await apiFetch(`${BASE}/calls/conference/create`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ call_id: callId ?? null }),
@@ -776,7 +777,7 @@ export async function createConference(token: string, callId?: number): Promise<
 }
 
 export async function conferenceInvite(token: string, conferenceId: number, username: string): Promise<void> {
-  await fetch(`${BASE}/calls/conference/${conferenceId}/invite`, {
+  await apiFetch(`${BASE}/calls/conference/${conferenceId}/invite`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ username }),
@@ -789,7 +790,7 @@ export async function conferenceAccept(
   conferenceId: number,
   masterToken: string,
 ): Promise<{ participants: string[] }> {
-  const res = await fetch(`${BASE}/calls/conference/${conferenceId}/accept`, {
+  const res = await apiFetch(`${BASE}/calls/conference/${conferenceId}/accept`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ mastertoken: masterToken }),
@@ -806,7 +807,7 @@ export async function conferenceAccept(
 }
 
 export async function conferenceDecline(token: string, conferenceId: number): Promise<void> {
-  await fetch(`${BASE}/calls/conference/${conferenceId}/decline`, {
+  await apiFetch(`${BASE}/calls/conference/${conferenceId}/decline`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
   }).catch(() => {});
@@ -816,7 +817,7 @@ export async function conferenceSignal(
   token: string, conferenceId: number,
   to: string, signalType: string, data: any,
 ): Promise<void> {
-  await fetch(`${BASE}/calls/conference/${conferenceId}/signal`, {
+  await apiFetch(`${BASE}/calls/conference/${conferenceId}/signal`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ to, signal_type: signalType, data }),
@@ -824,7 +825,7 @@ export async function conferenceSignal(
 }
 
 export async function conferenceLeave(token: string, conferenceId: number): Promise<void> {
-  await fetch(`${BASE}/calls/conference/${conferenceId}/leave`, {
+  await apiFetch(`${BASE}/calls/conference/${conferenceId}/leave`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -839,7 +840,7 @@ export interface LiveKitTokenResponse {
 
 export async function getLiveKitToken(token: string, conferenceId: number, displayName?: string): Promise<LiveKitTokenResponse> {
   const qs = displayName?.trim() ? `?display_name=${encodeURIComponent(displayName.trim())}` : '';
-  const res = await fetch(`${BASE}/calls/conference/${conferenceId}/livekit-token${qs}`, {
+  const res = await apiFetch(`${BASE}/calls/conference/${conferenceId}/livekit-token${qs}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) {
@@ -881,7 +882,7 @@ export async function createMeeting(
     waitingRoomEnabled?: boolean;
   },
 ): Promise<{ meeting_id: number; join_code: string; scheduled_at: string }> {
-  const res = await fetch(`${BASE}/meetings/create`, {
+  const res = await apiFetch(`${BASE}/meetings/create`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({
@@ -921,7 +922,7 @@ export async function parseScheduleCopilot(token: string, text: string): Promise
   const pad = (n: number) => String(n).padStart(2, '0');
   const currentTime = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 
-  const res = await fetch(`${BASE}/copilot/parse-schedule`, {
+  const res = await apiFetch(`${BASE}/copilot/parse-schedule`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ text, current_time: currentTime }),
@@ -935,7 +936,7 @@ export async function parseScheduleCopilot(token: string, text: string): Promise
 }
 
 async function copilotPost<T>(token: string, path: string, body: Record<string, unknown>): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
+  const res = await apiFetch(`${BASE}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify(body),
@@ -971,7 +972,7 @@ export async function translateCopilot(token: string, text: string, targetLangua
 export async function transcribeCopilot(token: string, audioBlob: Blob, filename = 'voice.m4a'): Promise<string> {
   const form = new FormData();
   form.append('file', audioBlob, filename);
-  const res = await fetch(`${BASE}/copilot/transcribe`, {
+  const res = await apiFetch(`${BASE}/copilot/transcribe`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
     body: form,
@@ -986,7 +987,7 @@ export async function transcribeCopilot(token: string, audioBlob: Blob, filename
 }
 
 export async function getUpcomingMeetings(token: string): Promise<MeetingSummary[]> {
-  const res = await fetch(`${BASE}/meetings/upcoming`, {
+  const res = await apiFetch(`${BASE}/meetings/upcoming`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) throw new Error(`Failed to load meetings (${res.status})`);
@@ -1034,7 +1035,7 @@ export interface CalendarFeed {
 }
 
 export async function getMeetingCalendar(token: string, start: string, end: string): Promise<CalendarFeed> {
-  const res = await fetch(`${BASE}/meetings/calendar?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`, {
+  const res = await apiFetch(`${BASE}/meetings/calendar?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) throw new Error(`Failed to load calendar (${res.status})`);
@@ -1045,7 +1046,7 @@ export async function getMeetingCalendar(token: string, start: string, end: stri
 // ── Personal calendar plans ───────────────────────────────────────────────────
 
 export async function createPersonalPlan(token: string, plan: { title: string; notes?: string; starts_at: string; ends_at?: string; all_day?: boolean }): Promise<PersonalPlan> {
-  const res = await fetch(`${BASE}/calendar/plans`, {
+  const res = await apiFetch(`${BASE}/calendar/plans`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify(plan),
@@ -1058,7 +1059,7 @@ export async function createPersonalPlan(token: string, plan: { title: string; n
 }
 
 export async function updatePersonalPlan(token: string, planId: number, plan: Partial<{ title: string; notes: string; starts_at: string; ends_at: string; all_day: boolean }>): Promise<PersonalPlan> {
-  const res = await fetch(`${BASE}/calendar/plans/${planId}`, {
+  const res = await apiFetch(`${BASE}/calendar/plans/${planId}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify(plan),
@@ -1068,7 +1069,7 @@ export async function updatePersonalPlan(token: string, planId: number, plan: Pa
 }
 
 export async function deletePersonalPlan(token: string, planId: number): Promise<void> {
-  const res = await fetch(`${BASE}/calendar/plans/${planId}`, {
+  const res = await apiFetch(`${BASE}/calendar/plans/${planId}`, {
     method: 'DELETE',
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -1078,7 +1079,7 @@ export async function deletePersonalPlan(token: string, planId: number): Promise
 // ── Google Calendar linking ───────────────────────────────────────────────────
 
 export async function getGoogleCalendarAuthorizeUrl(token: string): Promise<string> {
-  const res = await fetch(`${BASE}/calendar/google/authorize`, {
+  const res = await apiFetch(`${BASE}/calendar/google/authorize`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) {
@@ -1096,7 +1097,7 @@ export interface GoogleCalendarStatus {
 }
 
 export async function getGoogleCalendarStatus(token: string): Promise<GoogleCalendarStatus> {
-  const res = await fetch(`${BASE}/calendar/google/status`, {
+  const res = await apiFetch(`${BASE}/calendar/google/status`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) throw new Error('Failed to check Google Calendar status');
@@ -1104,7 +1105,7 @@ export async function getGoogleCalendarStatus(token: string): Promise<GoogleCale
 }
 
 export async function unlinkGoogleCalendar(token: string): Promise<void> {
-  const res = await fetch(`${BASE}/calendar/google/unlink`, {
+  const res = await apiFetch(`${BASE}/calendar/google/unlink`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -1115,7 +1116,7 @@ export async function joinMeetingByCode(
   token: string,
   joinCode: string,
 ): Promise<{ conference_id: number; status: 'admitted' | 'waiting'; participants: string[] }> {
-  const res = await fetch(`${BASE}/meetings/join_by_code`, {
+  const res = await apiFetch(`${BASE}/meetings/join_by_code`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ join_code: joinCode }),
@@ -1128,7 +1129,7 @@ export async function joinMeetingByCode(
 }
 
 export async function cancelMeeting(token: string, meetingId: number): Promise<void> {
-  const res = await fetch(`${BASE}/meetings/${meetingId}/cancel`, {
+  const res = await apiFetch(`${BASE}/meetings/${meetingId}/cancel`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -1143,7 +1144,7 @@ export interface WaitingParticipant {
 }
 
 export async function getWaitingRoom(token: string, conferenceId: number): Promise<WaitingParticipant[]> {
-  const res = await fetch(`${BASE}/calls/conference/${conferenceId}/waiting-room`, {
+  const res = await apiFetch(`${BASE}/calls/conference/${conferenceId}/waiting-room`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) throw new Error(`Failed to load waiting room (${res.status})`);
@@ -1152,7 +1153,7 @@ export async function getWaitingRoom(token: string, conferenceId: number): Promi
 }
 
 export async function admitFromWaitingRoom(token: string, conferenceId: number, userId: number): Promise<void> {
-  const res = await fetch(`${BASE}/calls/conference/${conferenceId}/waiting-room/${userId}/admit`, {
+  const res = await apiFetch(`${BASE}/calls/conference/${conferenceId}/waiting-room/${userId}/admit`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -1160,7 +1161,7 @@ export async function admitFromWaitingRoom(token: string, conferenceId: number, 
 }
 
 export async function denyFromWaitingRoom(token: string, conferenceId: number, userId: number): Promise<void> {
-  const res = await fetch(`${BASE}/calls/conference/${conferenceId}/waiting-room/${userId}/deny`, {
+  const res = await apiFetch(`${BASE}/calls/conference/${conferenceId}/waiting-room/${userId}/deny`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -1173,7 +1174,7 @@ export async function denyFromWaitingRoom(token: string, conferenceId: number, u
 // Drive site.
 
 export async function startConferenceRecording(token: string, conferenceId: number): Promise<void> {
-  const res = await fetch(`${BASE}/calls/conference/${conferenceId}/recording/start`, {
+  const res = await apiFetch(`${BASE}/calls/conference/${conferenceId}/recording/start`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -1181,7 +1182,7 @@ export async function startConferenceRecording(token: string, conferenceId: numb
 }
 
 export async function stopConferenceRecording(token: string, conferenceId: number): Promise<void> {
-  const res = await fetch(`${BASE}/calls/conference/${conferenceId}/recording/stop`, {
+  const res = await apiFetch(`${BASE}/calls/conference/${conferenceId}/recording/stop`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -1204,7 +1205,7 @@ export interface ConferenceChatMessage {
 }
 
 export async function getConferenceMessages(token: string, conferenceId: number): Promise<ConferenceChatMessage[]> {
-  const res = await fetch(`${BASE}/messages/conference/${conferenceId}`, {
+  const res = await apiFetch(`${BASE}/messages/conference/${conferenceId}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) throw new Error('Failed to fetch conference messages');
@@ -1218,7 +1219,7 @@ export async function sendConferenceMessage(
   message: string,
   opts: { encryptedKey: string; iv: string; decoyContent: string },
 ): Promise<void> {
-  const res = await fetch(`${BASE}/messages/conference/send`, {
+  const res = await apiFetch(`${BASE}/messages/conference/send`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -1253,7 +1254,7 @@ export interface WhiteboardStroke {
 }
 
 export async function sendWhiteboardStroke(token: string, target: WhiteboardTarget, stroke: WhiteboardStroke): Promise<void> {
-  await fetch(`${BASE}/whiteboard/stroke`, {
+  await apiFetch(`${BASE}/whiteboard/stroke`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ username: target.username ?? null, group_id: target.groupId ?? null, conference_id: target.conferenceId ?? null, stroke }),
@@ -1261,7 +1262,7 @@ export async function sendWhiteboardStroke(token: string, target: WhiteboardTarg
 }
 
 export async function sendWhiteboardClear(token: string, target: WhiteboardTarget): Promise<void> {
-  await fetch(`${BASE}/whiteboard/clear`, {
+  await apiFetch(`${BASE}/whiteboard/clear`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ username: target.username ?? null, group_id: target.groupId ?? null, conference_id: target.conferenceId ?? null }),
@@ -1272,7 +1273,7 @@ export async function sendWhiteboardClear(token: string, target: WhiteboardTarge
 // stopped — surfaces it for the room the way starting/stopping a screen share
 // does, instead of each participant needing to separately open it themselves.
 export async function sendWhiteboardOpen(token: string, conferenceId: number): Promise<void> {
-  await fetch(`${BASE}/whiteboard/open`, {
+  await apiFetch(`${BASE}/whiteboard/open`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ conference_id: conferenceId }),
@@ -1280,7 +1281,7 @@ export async function sendWhiteboardOpen(token: string, conferenceId: number): P
 }
 
 export async function sendWhiteboardClose(token: string, conferenceId: number): Promise<void> {
-  await fetch(`${BASE}/whiteboard/close`, {
+  await apiFetch(`${BASE}/whiteboard/close`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ conference_id: conferenceId }),
@@ -1292,7 +1293,7 @@ export async function sendWhiteboardClose(token: string, conferenceId: number): 
 // data channel (see GalleryView.tsx), never through this server.
 
 export async function requestRemoteControl(token: string, conferenceId: number, targetUsername: string): Promise<void> {
-  const res = await fetch(`${BASE}/calls/conference/${conferenceId}/control/request`, {
+  const res = await apiFetch(`${BASE}/calls/conference/${conferenceId}/control/request`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ conference_id: conferenceId, target_username: targetUsername }),
@@ -1301,7 +1302,7 @@ export async function requestRemoteControl(token: string, conferenceId: number, 
 }
 
 export async function respondRemoteControl(token: string, conferenceId: number, requesterUsername: string, approved: boolean): Promise<void> {
-  await fetch(`${BASE}/calls/conference/${conferenceId}/control/respond`, {
+  await apiFetch(`${BASE}/calls/conference/${conferenceId}/control/respond`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ conference_id: conferenceId, requester_username: requesterUsername, approved }),
@@ -1309,7 +1310,7 @@ export async function respondRemoteControl(token: string, conferenceId: number, 
 }
 
 export async function endRemoteControl(token: string, conferenceId: number, otherUsername: string): Promise<void> {
-  await fetch(`${BASE}/calls/conference/${conferenceId}/control/end`, {
+  await apiFetch(`${BASE}/calls/conference/${conferenceId}/control/end`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ conference_id: conferenceId, other_username: otherUsername }),
@@ -1328,13 +1329,13 @@ export interface DisappearSettings {
 }
 
 export async function getDisappearSettings(token: string): Promise<DisappearSettings> {
-  const res = await fetch(`${BASE}/users/me/disappear-settings`, { headers: { Authorization: `Bearer ${token}` } });
+  const res = await apiFetch(`${BASE}/users/me/disappear-settings`, { headers: { Authorization: `Bearer ${token}` } });
   if (!res.ok) throw new Error('Failed to load disappearing message settings');
   return res.json();
 }
 
 export async function setDisappearSettings(token: string, settings: DisappearSettings): Promise<DisappearSettings> {
-  const res = await fetch(`${BASE}/users/me/disappear-settings`, {
+  const res = await apiFetch(`${BASE}/users/me/disappear-settings`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify(settings),
@@ -1346,7 +1347,7 @@ export async function setDisappearSettings(token: string, settings: DisappearSet
 /** Clears an entire 1:1 conversation for both people (bulk tombstone, same
  * mechanism as a single-message delete). Returns how many were cleared. */
 export async function clearConversation(token: string, otherUsername: string): Promise<number> {
-  const res = await fetch(`${BASE}/messages/clear/${encodeURIComponent(otherUsername)}`, {
+  const res = await apiFetch(`${BASE}/messages/clear/${encodeURIComponent(otherUsername)}`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -1367,13 +1368,13 @@ export interface MonitoringConsentState {
 }
 
 export async function getMonitoringConsent(token: string): Promise<MonitoringConsentState> {
-  const res = await fetch(`${BASE}/monitoring/consent`, { headers: { Authorization: `Bearer ${token}` } });
+  const res = await apiFetch(`${BASE}/monitoring/consent`, { headers: { Authorization: `Bearer ${token}` } });
   if (!res.ok) throw new Error('Failed to load consent status');
   return res.json();
 }
 
 export async function setAppPolicyConsent(token: string, allow: boolean): Promise<MonitoringConsentState> {
-  const res = await fetch(`${BASE}/monitoring/consent`, {
+  const res = await apiFetch(`${BASE}/monitoring/consent`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ consent_given: allow, allow_app_policy_monitoring: allow }),
@@ -1387,7 +1388,7 @@ export async function setAppPolicyConsent(token: string, allow: boolean): Promis
 // a screenshot, only while allow_app_policy_monitoring is true.
 
 export async function getPolicyBlocklist(token: string): Promise<string[]> {
-  const res = await fetch(`${BASE}/monitoring/policy/blocklist`, { headers: { Authorization: `Bearer ${token}` } });
+  const res = await apiFetch(`${BASE}/monitoring/policy/blocklist`, { headers: { Authorization: `Bearer ${token}` } });
   if (!res.ok) return [];
   const data = await res.json();
   return data.blocked || [];
@@ -1402,7 +1403,7 @@ export async function reportPolicyViolation(token: string, processName: string, 
   form.append('file', blob, 'violation.png');
   form.append('process_name', processName);
   form.append('device_hostname', deviceHostname);
-  await fetch(`${BASE}/monitoring/policy/violation`, {
+  await apiFetch(`${BASE}/monitoring/policy/violation`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
     body: form,
@@ -1412,7 +1413,7 @@ export async function reportPolicyViolation(token: string, processName: string, 
 // ── Master token ───────────────────────────────────────────────────────────────
 
 export async function confirmMasterToken(token: string, masterToken: string): Promise<boolean> {
-  const res = await fetch(`${BASE}/mastertoken/confirm`, {
+  const res = await apiFetch(`${BASE}/mastertoken/confirm`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -1430,7 +1431,7 @@ export async function confirmMasterToken(token: string, masterToken: string): Pr
 }
 
 export async function createMasterToken(token: string, masterToken: string, twoFaPassword?: string): Promise<void> {
-  const res = await fetch(`${BASE}/mastertoken/create`, {
+  const res = await apiFetch(`${BASE}/mastertoken/create`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -1455,7 +1456,7 @@ export async function createMasterToken(token: string, masterToken: string, twoF
 export async function uploadVoiceIdentity(token: string, blob: Blob, filename = 'voice_identity.webm'): Promise<void> {
   const form = new FormData();
   form.append('file', blob, filename);
-  const res = await fetch(`${BASE}/users/me/voice-identity`, {
+  const res = await apiFetch(`${BASE}/users/me/voice-identity`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
     body: form,
@@ -1464,14 +1465,14 @@ export async function uploadVoiceIdentity(token: string, blob: Blob, filename = 
 }
 
 export async function hasVoiceIdentity(token: string, username: string): Promise<boolean> {
-  const res = await fetch(`${BASE}/users/${encodeURIComponent(username)}/voice-identity`, {
+  const res = await apiFetch(`${BASE}/users/${encodeURIComponent(username)}/voice-identity`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   return res.ok;
 }
 
 export async function getMasterToken2FAStatus(token: string): Promise<boolean> {
-  const res = await fetch(`${BASE}/mastertoken/2fa/status`, {
+  const res = await apiFetch(`${BASE}/mastertoken/2fa/status`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) throw new Error('Failed to fetch 2FA status');
@@ -1480,7 +1481,7 @@ export async function getMasterToken2FAStatus(token: string): Promise<boolean> {
 }
 
 export async function enableMasterToken2FA(token: string, masterToken: string, twoFaPassword: string): Promise<void> {
-  const res = await fetch(`${BASE}/mastertoken/2fa/enable`, {
+  const res = await apiFetch(`${BASE}/mastertoken/2fa/enable`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ mastertoken: masterToken, two_fa_password: twoFaPassword }),
@@ -1493,7 +1494,7 @@ export async function enableMasterToken2FA(token: string, masterToken: string, t
 }
 
 export async function disableMasterToken2FA(token: string, twoFaPassword: string): Promise<void> {
-  const res = await fetch(`${BASE}/mastertoken/2fa/disable`, {
+  const res = await apiFetch(`${BASE}/mastertoken/2fa/disable`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ two_fa_password: twoFaPassword }),
@@ -1515,7 +1516,7 @@ export interface AccountDeletionStatus {
 }
 
 export async function requestAccountDeletion(token: string, reason?: string): Promise<void> {
-  const res = await fetch(`${BASE}/account/delete-request`, {
+  const res = await apiFetch(`${BASE}/account/delete-request`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ reason: reason || null }),
@@ -1528,7 +1529,7 @@ export async function requestAccountDeletion(token: string, reason?: string): Pr
 }
 
 export async function getMyAccountDeletionStatus(token: string): Promise<AccountDeletionStatus> {
-  const res = await fetch(`${BASE}/account/delete-request/status`, {
+  const res = await apiFetch(`${BASE}/account/delete-request/status`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) throw new Error('Failed to fetch deletion request status');
@@ -1538,7 +1539,7 @@ export async function getMyAccountDeletionStatus(token: string): Promise<Account
 // ── Chat collaboration: reactions, edit, delete, pin, star ─────────────────────
 
 export async function toggleReaction(token: string, messageId: number, emoji: string): Promise<'added' | 'removed'> {
-  const res = await fetch(`${BASE}/messages/${messageId}/react`, {
+  const res = await apiFetch(`${BASE}/messages/${messageId}/react`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ emoji }),
@@ -1554,7 +1555,7 @@ export async function editMessage(
   ciphertext: string,
   opts: { encryptedKey?: string; iv?: string; decoyContent?: string },
 ): Promise<void> {
-  const res = await fetch(`${BASE}/messages/${messageId}`, {
+  const res = await apiFetch(`${BASE}/messages/${messageId}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({
@@ -1570,7 +1571,7 @@ export async function editMessage(
 /** scope 'everyone' tombstones it for the whole chat (sender / group admin);
  * 'me' just hides it for this user. */
 export async function deleteMessage(token: string, messageId: number, scope: 'everyone' | 'me' = 'everyone'): Promise<void> {
-  const res = await fetch(`${BASE}/messages/${messageId}?scope=${scope}`, {
+  const res = await apiFetch(`${BASE}/messages/${messageId}?scope=${scope}`, {
     method: 'DELETE',
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -1582,7 +1583,7 @@ export async function deleteMessage(token: string, messageId: number, scope: 'ev
 
 /** Rings every other group member; the caller joins the returned conference. */
 export async function startGroupCall(token: string, groupId: number, callType: 'voice' | 'video'): Promise<{ conference_id: number; rung: number; not_rung: number }> {
-  const res = await fetch(`${BASE}/groups/${groupId}/call`, {
+  const res = await apiFetch(`${BASE}/groups/${groupId}/call`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ call_type: callType }),
@@ -1595,7 +1596,7 @@ export async function startGroupCall(token: string, groupId: number, callType: '
 }
 
 export async function pinMessage(token: string, messageId: number): Promise<void> {
-  const res = await fetch(`${BASE}/messages/${messageId}/pin`, {
+  const res = await apiFetch(`${BASE}/messages/${messageId}/pin`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -1603,7 +1604,7 @@ export async function pinMessage(token: string, messageId: number): Promise<void
 }
 
 export async function unpinMessage(token: string, messageId: number): Promise<void> {
-  const res = await fetch(`${BASE}/messages/${messageId}/unpin`, {
+  const res = await apiFetch(`${BASE}/messages/${messageId}/unpin`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -1614,7 +1615,7 @@ export async function getPinnedMessages(token: string, opts: { username?: string
   const q = new URLSearchParams();
   if (opts.username) q.set('username', opts.username);
   if (opts.groupId) q.set('group_id', String(opts.groupId));
-  const res = await fetch(`${BASE}/messages/pinned?${q.toString()}`, {
+  const res = await apiFetch(`${BASE}/messages/pinned?${q.toString()}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) throw new Error('Failed to fetch pinned messages');
@@ -1623,7 +1624,7 @@ export async function getPinnedMessages(token: string, opts: { username?: string
 }
 
 export async function starMessage(token: string, messageId: number): Promise<void> {
-  const res = await fetch(`${BASE}/messages/${messageId}/star`, {
+  const res = await apiFetch(`${BASE}/messages/${messageId}/star`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -1631,7 +1632,7 @@ export async function starMessage(token: string, messageId: number): Promise<voi
 }
 
 export async function unstarMessage(token: string, messageId: number): Promise<void> {
-  const res = await fetch(`${BASE}/messages/${messageId}/star`, {
+  const res = await apiFetch(`${BASE}/messages/${messageId}/star`, {
     method: 'DELETE',
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -1645,7 +1646,7 @@ export interface StarredMessageItem extends ChatMessage {
 }
 
 export async function getStarredMessages(token: string): Promise<StarredMessageItem[]> {
-  const res = await fetch(`${BASE}/messages/starred`, {
+  const res = await apiFetch(`${BASE}/messages/starred`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) throw new Error('Failed to fetch starred messages');
@@ -1656,7 +1657,7 @@ export async function getStarredMessages(token: string): Promise<StarredMessageI
 // ── Group admins (chat-embedded, separate from site-wide is_admin) ──────────
 
 export async function promoteGroupMember(token: string, groupId: number, username: string): Promise<void> {
-  const res = await fetch(`${BASE}/groups/${groupId}/members/${encodeURIComponent(username)}/promote`, {
+  const res = await apiFetch(`${BASE}/groups/${groupId}/members/${encodeURIComponent(username)}/promote`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -1667,7 +1668,7 @@ export async function promoteGroupMember(token: string, groupId: number, usernam
 }
 
 export async function demoteGroupMember(token: string, groupId: number, username: string): Promise<void> {
-  const res = await fetch(`${BASE}/groups/${groupId}/members/${encodeURIComponent(username)}/demote`, {
+  const res = await apiFetch(`${BASE}/groups/${groupId}/members/${encodeURIComponent(username)}/demote`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -1680,7 +1681,7 @@ export async function demoteGroupMember(token: string, groupId: number, username
 // ── Self-service groups (any user creates/runs their own groups) ──────────────
 
 async function groupFetch<T>(token: string, path: string, init: RequestInit, fallback: string): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
+  const res = await apiFetch(`${BASE}${path}`, {
     ...init,
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...(init.headers || {}) },
   });
@@ -1801,7 +1802,7 @@ export function profilePictureUrl(username: string): string {
 export async function uploadProfilePicture(token: string, file: File): Promise<void> {
   const form = new FormData();
   form.append('file', file);
-  const res = await fetch(`${BASE}/users/me/profile-picture`, {
+  const res = await apiFetch(`${BASE}/users/me/profile-picture`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
     body: form,
@@ -1813,7 +1814,7 @@ export async function uploadProfilePicture(token: string, file: File): Promise<v
 }
 
 export async function deleteProfilePicture(token: string): Promise<void> {
-  const res = await fetch(`${BASE}/users/me/profile-picture`, {
+  const res = await apiFetch(`${BASE}/users/me/profile-picture`, {
     method: 'DELETE',
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -1825,7 +1826,7 @@ export async function deleteProfilePicture(token: string): Promise<void> {
 export type AvailabilityStatus = 'available' | 'busy' | 'dnd' | 'away' | 'offline';
 
 export async function setAvailabilityStatus(token: string, status: AvailabilityStatus, statusText?: string): Promise<void> {
-  const res = await fetch(`${BASE}/users/me/availability`, {
+  const res = await apiFetch(`${BASE}/users/me/availability`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ availability_status: status, status_text: statusText || null }),
@@ -1841,7 +1842,7 @@ export async function setAvailabilityStatus(token: string, status: AvailabilityS
 // on (same shape as account-deletion requests), not a real self-service reset.
 
 export async function requestPasswordReset(phoneNumber: string, reason?: string): Promise<void> {
-  const res = await fetch(`${BASE}/auth/forgot-password`, {
+  const res = await apiFetch(`${BASE}/auth/forgot-password`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ phone_number: phoneNumber, reason: reason || null }),
@@ -1861,7 +1862,7 @@ export interface SignUpResult {
 }
 
 export async function signUp(username: string, phoneNumber: string, token: string): Promise<SignUpResult> {
-  const res = await fetch(`${BASE}/register`, {
+  const res = await apiFetch(`${BASE}/register`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username, phone_number: phoneNumber, token }),
@@ -1874,7 +1875,7 @@ export async function signUp(username: string, phoneNumber: string, token: strin
 }
 
 export async function resetWithRecoveryCode(username: string, recoveryCode: string, newToken: string): Promise<{ username: string; recovery_code: string }> {
-  const res = await fetch(`${BASE}/auth/reset-with-recovery-code`, {
+  const res = await apiFetch(`${BASE}/auth/reset-with-recovery-code`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username, recovery_code: recoveryCode, new_token: newToken }),
@@ -1887,7 +1888,7 @@ export async function resetWithRecoveryCode(username: string, recoveryCode: stri
 }
 
 export async function regenerateRecoveryCode(token: string): Promise<{ recovery_code: string }> {
-  const res = await fetch(`${BASE}/users/me/recovery-code/regenerate`, {
+  const res = await apiFetch(`${BASE}/users/me/recovery-code/regenerate`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -1896,7 +1897,7 @@ export async function regenerateRecoveryCode(token: string): Promise<{ recovery_
 }
 
 export async function updateUsername(token: string, newUsername: string): Promise<{ username: string }> {
-  const res = await fetch(`${BASE}/users/me/username`, {
+  const res = await apiFetch(`${BASE}/users/me/username`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ new_username: newUsername }),
@@ -1921,14 +1922,14 @@ export interface PasswordResetRequestItem {
 
 export async function getPasswordResetRequests(token: string, status?: string): Promise<PasswordResetRequestItem[]> {
   const url = status ? `${BASE}/admin/password-reset-requests?status=${status}` : `${BASE}/admin/password-reset-requests`;
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  const res = await apiFetch(url, { headers: { Authorization: `Bearer ${token}` } });
   if (!res.ok) throw new Error('Failed to load password reset requests');
   const body = await res.json();
   return body.requests ?? [];
 }
 
 export async function approvePasswordReset(token: string, requestId: number): Promise<{ username: string; new_token: string }> {
-  const res = await fetch(`${BASE}/admin/password-reset-requests/${requestId}/approve`, {
+  const res = await apiFetch(`${BASE}/admin/password-reset-requests/${requestId}/approve`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -1940,7 +1941,7 @@ export async function approvePasswordReset(token: string, requestId: number): Pr
 }
 
 export async function denyPasswordReset(token: string, requestId: number, reason?: string): Promise<void> {
-  const res = await fetch(`${BASE}/admin/password-reset-requests/${requestId}/deny`, {
+  const res = await apiFetch(`${BASE}/admin/password-reset-requests/${requestId}/deny`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ reason: reason || null }),
@@ -2005,7 +2006,7 @@ async function taskRequest(res: Response): Promise<TaskItem> {
 }
 
 export async function createTask(token: string, payload: TaskCreatePayload): Promise<TaskItem> {
-  const res = await fetch(`${BASE}/tasks`, {
+  const res = await apiFetch(`${BASE}/tasks`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify(payload),
@@ -2014,19 +2015,19 @@ export async function createTask(token: string, payload: TaskCreatePayload): Pro
 }
 
 export async function listTasks(token: string): Promise<TaskItem[]> {
-  const res = await fetch(`${BASE}/tasks`, { headers: { Authorization: `Bearer ${token}` } });
+  const res = await apiFetch(`${BASE}/tasks`, { headers: { Authorization: `Bearer ${token}` } });
   if (!res.ok) throw new Error('Failed to load tasks');
   const body = await res.json();
   return body.tasks ?? [];
 }
 
 export async function getTask(token: string, taskId: number): Promise<TaskItem> {
-  const res = await fetch(`${BASE}/tasks/${taskId}`, { headers: { Authorization: `Bearer ${token}` } });
+  const res = await apiFetch(`${BASE}/tasks/${taskId}`, { headers: { Authorization: `Bearer ${token}` } });
   return taskRequest(res);
 }
 
 export async function updateTaskStatus(token: string, taskId: number, status: TaskItem['status']): Promise<TaskItem> {
-  const res = await fetch(`${BASE}/tasks/${taskId}/status`, {
+  const res = await apiFetch(`${BASE}/tasks/${taskId}/status`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ status }),
@@ -2035,7 +2036,7 @@ export async function updateTaskStatus(token: string, taskId: number, status: Ta
 }
 
 export async function updateMyTaskStatus(token: string, taskId: number, status: TaskAssigneeItem['status']): Promise<TaskItem> {
-  const res = await fetch(`${BASE}/tasks/${taskId}/my-status`, {
+  const res = await apiFetch(`${BASE}/tasks/${taskId}/my-status`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ status }),
@@ -2044,7 +2045,7 @@ export async function updateMyTaskStatus(token: string, taskId: number, status: 
 }
 
 export async function submitBreakoutReport(token: string, taskId: number, groupId: number, reportText: string): Promise<TaskItem> {
-  const res = await fetch(`${BASE}/tasks/${taskId}/groups/${groupId}/report`, {
+  const res = await apiFetch(`${BASE}/tasks/${taskId}/groups/${groupId}/report`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ report_text: reportText }),
@@ -2053,7 +2054,7 @@ export async function submitBreakoutReport(token: string, taskId: number, groupI
 }
 
 export async function compileTask(token: string, taskId: number): Promise<TaskItem> {
-  const res = await fetch(`${BASE}/tasks/${taskId}/compile`, {
+  const res = await apiFetch(`${BASE}/tasks/${taskId}/compile`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -2069,7 +2070,7 @@ export interface BreakoutRoomItem {
 }
 
 export async function startBreakoutRooms(token: string, conferenceId: number, groups: { name: string; usernames: string[] }[]): Promise<BreakoutRoomItem[]> {
-  const res = await fetch(`${BASE}/meetings/${conferenceId}/breakout/start`, {
+  const res = await apiFetch(`${BASE}/meetings/${conferenceId}/breakout/start`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ groups }),
@@ -2083,7 +2084,7 @@ export async function startBreakoutRooms(token: string, conferenceId: number, gr
 }
 
 export async function autoBreakoutRooms(token: string, conferenceId: number, numRooms: number): Promise<BreakoutRoomItem[]> {
-  const res = await fetch(`${BASE}/meetings/${conferenceId}/breakout/auto?num_rooms=${numRooms}`, {
+  const res = await apiFetch(`${BASE}/meetings/${conferenceId}/breakout/auto?num_rooms=${numRooms}`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -2096,7 +2097,7 @@ export async function autoBreakoutRooms(token: string, conferenceId: number, num
 }
 
 export async function endBreakoutRooms(token: string, conferenceId: number): Promise<void> {
-  const res = await fetch(`${BASE}/meetings/${conferenceId}/breakout/end`, {
+  const res = await apiFetch(`${BASE}/meetings/${conferenceId}/breakout/end`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -2104,7 +2105,7 @@ export async function endBreakoutRooms(token: string, conferenceId: number): Pro
 }
 
 export async function listBreakoutRooms(token: string, conferenceId: number): Promise<BreakoutRoomItem[]> {
-  const res = await fetch(`${BASE}/meetings/${conferenceId}/breakout`, {
+  const res = await apiFetch(`${BASE}/meetings/${conferenceId}/breakout`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) throw new Error('Failed to load breakout rooms');
@@ -2124,7 +2125,7 @@ export interface GifResult {
 }
 
 export async function searchGifs(token: string, query: string, limit = 24): Promise<GifResult[]> {
-  const res = await fetch(`${BASE}/integrations/giphy/search?q=${encodeURIComponent(query)}&limit=${limit}`, {
+  const res = await apiFetch(`${BASE}/integrations/giphy/search?q=${encodeURIComponent(query)}&limit=${limit}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) {
@@ -2136,7 +2137,7 @@ export async function searchGifs(token: string, query: string, limit = 24): Prom
 }
 
 export async function getTrendingGifs(token: string, limit = 24): Promise<GifResult[]> {
-  const res = await fetch(`${BASE}/integrations/giphy/trending?limit=${limit}`, {
+  const res = await apiFetch(`${BASE}/integrations/giphy/trending?limit=${limit}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) {
@@ -2161,7 +2162,7 @@ export interface ChatSettingsItem {
 }
 
 export async function getChatSettings(token: string): Promise<ChatSettingsItem[]> {
-  const res = await fetch(`${BASE}/chats/settings`, {
+  const res = await apiFetch(`${BASE}/chats/settings`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) throw new Error('Failed to load chat settings');
@@ -2174,7 +2175,7 @@ export async function updateChatSettings(
   target: { peerUsername?: string; groupId?: number },
   patch: { isArchived?: boolean; isMuted?: boolean; mutedUntil?: string; isLocked?: boolean },
 ): Promise<ChatSettingsItem> {
-  const res = await fetch(`${BASE}/chats/settings`, {
+  const res = await apiFetch(`${BASE}/chats/settings`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({
@@ -2194,7 +2195,7 @@ export async function updateChatSettings(
 }
 
 export async function deleteChatForMe(token: string, target: { peerUsername?: string; groupId?: number }): Promise<void> {
-  const res = await fetch(`${BASE}/chats/delete`, {
+  const res = await apiFetch(`${BASE}/chats/delete`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ peer_username: target.peerUsername ?? null, group_id: target.groupId ?? null }),

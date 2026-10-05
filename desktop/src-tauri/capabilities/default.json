@@ -8,7 +8,13 @@
     "core:webview:allow-create-webview-window",
     "core:event:allow-emit-to",
     "opener:default",
-    "http:default",
+    {
+      "identifier": "http:default",
+      "allow": [
+        { "url": "https://testdilarion.eibstratoc.com/**" },
+        { "url": "https://apidilarion.eibstratoc.com/**" }
+      ]
+    },
     "notification:default"
   ]
 }

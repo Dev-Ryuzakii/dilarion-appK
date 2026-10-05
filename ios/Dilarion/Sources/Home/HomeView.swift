@@ -9,7 +9,7 @@ import SwiftUI
 // - Empty states
 // - Call history rows
 
-enum HomeTab { case chats, groups, calls }
+enum HomeTab { case chats, groups, tasks, calls }
 
 struct HomeView: View {
     let onLogout: () -> Void
@@ -34,6 +34,8 @@ struct HomeView: View {
                             ChatsTab(state: vm.state, onOpenChat: { peer in navigateTo = peer })
                         case .groups:
                             GroupsTab(state: vm.state, onOpenGroup: { group in navigateToGroup = group })
+                        case .tasks:
+                            TasksTab()
                         case .calls:
                             CallsTab(state: vm.state)
                                 .onAppear { vm.loadCallHistory() }
@@ -229,6 +231,255 @@ struct GroupsTab: View {
     }
 }
 
+// MARK: — Tasks (parity with Android's task list/create workflow)
+struct TasksTab: View {
+    @State private var tasks: [TaskItem] = []
+    @State private var isLoading = true
+    @State private var isCreating = false
+    @State private var errorMessage: String?
+    @State private var filter = "all"
+    @State private var showCreate = false
+
+    private let filters = ["all", "open", "in_progress", "completed", "cancelled"]
+    private var filteredTasks: [TaskItem] {
+        filter == "all" ? tasks : tasks.filter { $0.status == filter }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Tasks")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundColor(.textPrimary)
+                Spacer()
+                Menu {
+                    ForEach(filters, id: \.self) { item in
+                        Button {
+                            filter = item
+                        } label: {
+                            if filter == item {
+                                Label(item.filterLabel, systemImage: "checkmark")
+                            } else {
+                                Text(item.filterLabel)
+                            }
+                        }
+                    }
+                } label: {
+                    Label(filter.filterLabel, systemImage: "line.3.horizontal.decrease.circle")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(.dilarionRed)
+                }
+                Button { showCreate = true } label: {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.system(size: 25))
+                        .foregroundColor(.dilarionRed)
+                        .padding(.leading, 8)
+                }
+                .accessibilityLabel("Create task")
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(Color.surfaceWhite)
+
+            if isLoading {
+                Spacer()
+                ProgressView("Loading tasks…")
+                Spacer()
+            } else if filteredTasks.isEmpty {
+                Spacer()
+                EmptyStateView(
+                    icon: "checklist",
+                    title: filter == "all" ? "No tasks yet" : "No \(filter.filterLabel.lowercased()) tasks",
+                    subtitle: "Tap + to create a task"
+                )
+                Spacer()
+            } else {
+                List(filteredTasks) { task in
+                    TaskRow(task: task, onStatusChange: { status in
+                        Task { await updateStatus(task, to: status) }
+                    })
+                    .listRowInsets(.init(top: 5, leading: 12, bottom: 5, trailing: 12))
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                }
+                .listStyle(.plain)
+                .refreshable { await loadTasks() }
+            }
+        }
+        .background(Color.backgroundGrey)
+        .task { await loadTasks() }
+        .sheet(isPresented: $showCreate) {
+            CreateTaskSheet(isSaving: $isCreating) { title, description in
+                await createTask(title: title, description: description)
+            }
+        }
+        .alert("Tasks", isPresented: Binding(
+            get: { errorMessage != nil },
+            set: { if !$0 { errorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) { errorMessage = nil }
+        } message: {
+            Text(errorMessage ?? "")
+        }
+    }
+
+    @MainActor
+    private func loadTasks() async {
+        isLoading = tasks.isEmpty
+        do {
+            let response: TaskListResponse = try await APIClient.shared.get("/tasks")
+            tasks = response.tasks
+            isLoading = false
+        } catch {
+            isLoading = false
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func createTask(title: String, description: String?) async -> Bool {
+        guard !isCreating else { return false }
+        isCreating = true
+        defer { isCreating = false }
+        do {
+            let _: TaskItem = try await APIClient.shared.post(
+                "/tasks",
+                body: TaskCreateRequest(title: title, description: description)
+            )
+            await loadTasks()
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    @MainActor
+    private func updateStatus(_ task: TaskItem, to status: String) async {
+        do {
+            let _: TaskItem = try await APIClient.shared.put(
+                "/tasks/\(task.taskId)/my-status",
+                body: TaskStatusUpdateRequest(status: status)
+            )
+            await loadTasks()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+}
+
+private struct TaskRow: View {
+    let task: TaskItem
+    let onStatusChange: (String) -> Void
+
+    private var statusColor: Color {
+        switch task.status {
+        case "in_progress": return .blue
+        case "completed": return .onlineGreen
+        case "cancelled": return .dilarionRed
+        default: return .textSecondary
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: task.status == "completed" ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 19))
+                    .foregroundColor(statusColor)
+                    .padding(.top, 1)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(task.title)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(.textPrimary)
+                    if let description = task.description, !description.isEmpty {
+                        Text(description)
+                            .font(.system(size: 13))
+                            .foregroundColor(.textSecondary)
+                            .lineLimit(3)
+                    }
+                    HStack(spacing: 5) {
+                        Text(task.status.filterLabel)
+                            .foregroundColor(statusColor)
+                        if let dueAt = task.dueAt, !dueAt.isEmpty {
+                            Text("· Due \(String(dueAt.prefix(10)))")
+                                .foregroundColor(.textSecondary)
+                        }
+                    }
+                    .font(.system(size: 11, weight: .medium))
+                }
+                Spacer(minLength: 4)
+                Menu {
+                    ForEach(["open", "in_progress", "completed", "cancelled"], id: \.self) { status in
+                        Button(status.filterLabel) {
+                            onStatusChange(status)
+                        }
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .foregroundColor(.textSecondary)
+                        .padding(6)
+                        .contentShape(Rectangle())
+                }
+                .accessibilityLabel("Change task status")
+            }
+        }
+        .padding(13)
+        .background(Color.surfaceWhite)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+}
+
+private struct CreateTaskSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Binding var isSaving: Bool
+    let onSave: (String, String?) async -> Bool
+    @State private var title = ""
+    @State private var description = ""
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Task") {
+                    TextField("Title", text: $title)
+                    TextField("Description (optional)", text: $description, axis: .vertical)
+                        .lineLimit(3...6)
+                }
+            }
+            .navigationTitle("New task")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(isSaving ? "Saving…" : "Create") {
+                        Task {
+                            if await onSave(title.trimmingCharacters(in: .whitespacesAndNewlines), description.isEmpty ? nil : description) {
+                                dismiss()
+                            }
+                        }
+                    }
+                    .disabled(isSaving || title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+        }
+    }
+}
+
+private extension String {
+    var filterLabel: String {
+        switch self {
+        case "all": return "All"
+        case "open": return "Open"
+        case "in_progress": return "In progress"
+        case "completed": return "Completed"
+        case "cancelled": return "Cancelled"
+        default: return self
+        }
+    }
+}
+
 // MARK: — Calls Tab
 struct CallsTab: View {
     let state: HomeUiState
@@ -407,6 +658,7 @@ struct BottomNavBar: View {
         HStack(spacing: 0) {
             TabBarItem(icon: "bubble.left.and.bubble.right.fill", label: "Chats", tab: .chats, selected: $selected)
             TabBarItem(icon: "person.3.fill", label: "Groups", tab: .groups, selected: $selected)
+            TabBarItem(icon: "checklist", label: "Tasks", tab: .tasks, selected: $selected)
             TabBarItem(icon: "phone.fill", label: "Calls", tab: .calls, selected: $selected)
         }
         .frame(height: 64)
