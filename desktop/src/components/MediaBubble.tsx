@@ -78,6 +78,7 @@ function MediaLightbox({ src, kind, onClose }: { src: string; kind: MediaKind; o
 
   return createPortal(
     <div
+      className="media-lightbox"
       onClick={onClose}
       style={{
         position: 'fixed',
@@ -91,6 +92,7 @@ function MediaLightbox({ src, kind, onClose }: { src: string; kind: MediaKind; o
       }}
     >
       <button
+        className="media-lightbox-close"
         onClick={onClose}
         title="Close (Esc)"
         style={{

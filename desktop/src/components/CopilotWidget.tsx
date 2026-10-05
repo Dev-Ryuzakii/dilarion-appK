@@ -161,7 +161,7 @@ export default function CopilotWidget({ token, onScheduleDraft }: {
   return (
     <>
       {open && (
-        <div style={{
+        <div className="copilot-panel" style={{
           position: 'fixed', bottom: panelBottom, right: panelRight, width: PANEL_W, height: PANEL_H, zIndex: 960,
           maxHeight: `calc(100vh - ${MARGIN * 2}px)`,
           background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 16,

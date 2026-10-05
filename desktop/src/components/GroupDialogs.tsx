@@ -532,10 +532,11 @@ export function GroupInfoDrawer({
 
   return (
     <div
+      className="mobile-drawer-overlay"
       style={{ position: 'fixed', inset: 0, zIndex: 950, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'flex-end' }}
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div style={{ width: 360, maxWidth: '100vw', height: '100%', background: 'var(--bg-panel)', display: 'flex', flexDirection: 'column', boxShadow: '-8px 0 30px rgba(0,0,0,0.4)' }}>
+      <div className="mobile-drawer" style={{ width: 360, maxWidth: '100vw', height: '100%', background: 'var(--bg-panel)', display: 'flex', flexDirection: 'column', boxShadow: '-8px 0 30px rgba(0,0,0,0.4)' }}>
         <div style={ds.head}>
           <span style={ds.title}>Group info</span>
           <button style={ds.closeBtn} onClick={onClose} aria-label="Close"><CloseIcon size={16} /></button>

@@ -95,14 +95,14 @@ export default function LinkDeviceScreen({ onLinked, onUsePassword, onActivate }
   const showSpinner = phase === 'starting' || phase === 'approved';
 
   return (
-    <div style={s.root}>
-      <div style={s.card}>
+    <div className="auth-page" style={s.root}>
+      <div className="auth-card" style={s.card}>
         <h1 style={s.title}>Link this device</h1>
         <p style={s.sub}>
           On your phone open <strong>Settings → Linked devices → Link a device</strong> and scan this code.
         </p>
 
-        <div style={s.qrBox}>
+        <div className="link-device-qr" style={s.qrBox}>
           {phase === 'waiting' && qrDataUrl ? (
             <img src={qrDataUrl} alt="Link QR code" style={{ width: 260, height: 260, borderRadius: 8 }} />
           ) : (

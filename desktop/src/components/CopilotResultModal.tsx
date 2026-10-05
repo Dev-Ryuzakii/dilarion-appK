@@ -12,10 +12,12 @@ export default function CopilotResultModal({ title, loading, error, content, onC
 }) {
   return (
     <div
+      className="responsive-overlay"
       onClick={onClose}
       style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 970, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
     >
       <div
+        className="responsive-dialog"
         onClick={e => e.stopPropagation()}
         style={{
           background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 16,

@@ -250,9 +250,9 @@ export default function GroupCallView({ token, myUsername, info, onEnd }: {
   const label = info.call_type === 'video' ? 'Group video call' : 'Group voice call';
 
   return (
-    <div style={{ position: 'fixed', inset: 0, background: '#0b141a', display: 'flex', flexDirection: 'column', color: '#fff', fontFamily: 'inherit' }}>
+    <div className="group-call" style={{ position: 'fixed', inset: 0, background: '#0b141a', display: 'flex', flexDirection: 'column', color: '#fff', fontFamily: 'inherit' }}>
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '16px 22px', flexShrink: 0 }}>
+      <div className="group-call-header" style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '16px 22px', flexShrink: 0 }}>
         <div style={{
           width: 40, height: 40, borderRadius: '50%', background: colorFor(info.group_name),
           display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: '0.9rem',
@@ -266,7 +266,7 @@ export default function GroupCallView({ token, myUsername, info, onEnd }: {
       </div>
 
       {/* Body */}
-      <div style={{ flex: 1, minHeight: 0, padding: '0 16px 12px', display: 'flex' }}>
+      <div className="group-call-body" style={{ flex: 1, minHeight: 0, padding: '0 16px 12px', display: 'flex' }}>
         {status === 'active' && count > 1 ? (
           <div style={{
             flex: 1, display: 'grid', gap: 10,

@@ -59,6 +59,7 @@ export default function MeetingLobby({
 
   return (
     <div
+      className="meeting-lobby"
       style={{
         position: 'fixed', inset: 0, zIndex: 900,
         background: '#0b0b10',

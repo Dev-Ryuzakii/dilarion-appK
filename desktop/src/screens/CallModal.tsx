@@ -818,8 +818,8 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
   }
 
   return (
-    <div style={cs.overlay}>
-      <div style={cs.modal}>
+    <div className="call-overlay" style={cs.overlay}>
+      <div className="call-card" style={cs.modal}>
 
         {/* Video area */}
         {isVideo && (

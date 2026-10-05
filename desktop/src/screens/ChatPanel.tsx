@@ -1278,11 +1278,11 @@ export default function ChatPanel({
   // ── Render ───────────────────────────────────────────────────────────────────
 
   return (
-    <div style={cs.root}>
+    <div className="chat-panel" style={cs.root}>
 
       {/* Header */}
-      <div style={cs.header}>
-        <div style={cs.headerLeft}>
+      <div className="chat-header" style={cs.header}>
+        <div className="chat-header-identity" style={cs.headerLeft}>
           {onBack && (
             <button onClick={onBack} style={cs.backBtn} title="Back to conversations" aria-label="Back">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1315,7 +1315,7 @@ export default function ChatPanel({
           </button>
         </div>
         {/* Call buttons */}
-        <div style={{ display: 'flex', gap: 6 }}>
+        <div className="chat-header-actions" style={{ display: 'flex', gap: 6 }}>
           <button onClick={handleClearChat} style={cs.callBtn} title="Clear chat">
             <TrashIcon />
           </button>
@@ -1336,7 +1336,7 @@ export default function ChatPanel({
       </div>
 
       {/* Messages area */}
-      <div style={cs.messagesArea}>
+      <div className="chat-messages" style={cs.messagesArea}>
         {loading ? (
           <MessageSkeleton />
         ) : messages.length === 0 && pending.length === 0 ? (
@@ -1491,8 +1491,8 @@ export default function ChatPanel({
       )}
 
       {forwardTarget && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 900, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 12, padding: 20, width: 320 }}>
+        <div className="responsive-overlay" style={{ position: 'fixed', inset: 0, zIndex: 900, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div className="responsive-dialog" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 12, padding: 20, width: 320 }}>
             <h3 style={{ margin: 0, marginBottom: 12, fontSize: '0.95rem' }}>Forward message</h3>
             <input
               autoFocus
@@ -1511,7 +1511,7 @@ export default function ChatPanel({
       )}
 
       {/* Input bar */}
-      <div style={{ ...cs.inputBar, position: 'relative' }}>
+      <div className="chat-input-bar" style={{ ...cs.inputBar, position: 'relative' }}>
         <input
           ref={fileInputRef}
           type="file"

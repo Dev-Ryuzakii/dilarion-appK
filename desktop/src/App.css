@@ -15,14 +15,18 @@ body {
   color: var(--text);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
-  height: 100vh;
+  min-height: 100vh;
+  min-height: 100dvh;
   overflow: hidden;
+  overscroll-behavior: none;
 }
 
 #root {
   height: 100vh;
+  height: 100dvh;
   display: flex;
   flex-direction: column;
+  min-width: 0;
 }
 
 button { cursor: pointer; border: none; outline: none; font-family: inherit; }
@@ -55,4 +59,516 @@ input  { font-family: inherit; outline: none; }
 }
 .reaction-float {
   animation: reaction-float 2.5s ease-out forwards;
+}
+
+.mobile-settings-tab,
+.mobile-pane-back {
+  display: none;
+}
+
+/* Keep medium-size browser windows usable before the phone layout takes over. */
+@media (max-width: 1100px) {
+  .app-tab-bar {
+    width: 76px !important;
+    min-width: 76px !important;
+  }
+
+  .app-nav-row {
+    width: calc(100% - 12px) !important;
+    margin-inline: 6px !important;
+    justify-content: center !important;
+    gap: 0 !important;
+    padding-inline: 8px !important;
+  }
+
+  /* The rail is 60px of usable width once it collapses, so the avatar, the
+     username and the settings glyph cannot all fit — drop the name and keep
+     the two icons. Without this the profile row overflows the rail. */
+  .app-nav-label,
+  .profile-username,
+  .desktop-profile-actions button > span:last-child,
+  .desktop-profile-actions > button:last-child {
+    display: none !important;
+  }
+
+  .desktop-profile-actions button {
+    justify-content: center !important;
+    gap: 0 !important;
+  }
+
+  .app-list-panel {
+    width: min(320px, 34vw) !important;
+    min-width: 240px !important;
+  }
+
+  .app-main-panel {
+    min-width: 0 !important;
+  }
+}
+
+/* Phone and narrow-tablet shell: one page at a time with reachable bottom nav. */
+@media (max-width: 760px) {
+  html, body, #root {
+    width: 100%;
+    height: 100%;
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  button, input, textarea, select {
+    font-size: 16px;
+  }
+
+  .app-shell {
+    position: relative !important;
+    width: 100% !important;
+    height: 100dvh !important;
+    padding-bottom: calc(62px + env(safe-area-inset-bottom)) !important;
+    overflow: hidden !important;
+  }
+
+  .app-tab-bar {
+    position: fixed !important;
+    z-index: 800 !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    height: calc(62px + env(safe-area-inset-bottom)) !important;
+    padding: 4px 4px env(safe-area-inset-bottom) !important;
+    flex-direction: row !important;
+    align-items: stretch !important;
+    gap: 2px !important;
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+    border: 0 !important;
+    border-top: 1px solid var(--border-color) !important;
+    background: var(--bg-panel) !important;
+    scrollbar-width: none;
+  }
+
+  .app-tab-bar::-webkit-scrollbar { display: none; }
+
+  .app-nav-row {
+    flex: 1 0 48px !important;
+    min-width: 48px !important;
+    width: auto !important;
+    height: 54px !important;
+    margin: 0 !important;
+    padding: 5px 4px !important;
+    border-radius: 10px !important;
+    flex-direction: column !important;
+    justify-content: center !important;
+    gap: 2px !important;
+    font-size: 0.62rem !important;
+    text-align: center !important;
+  }
+
+  .app-nav-label {
+    display: block !important;
+    flex: 0 !important;
+    width: 100% !important;
+    max-width: 56px !important;
+    font-size: 0.58rem !important;
+    line-height: 1.1 !important;
+    text-align: center !important;
+  }
+
+  .app-nav-badge {
+    position: absolute;
+    transform: translate(12px, -13px);
+  }
+
+  .mobile-settings-tab {
+    display: contents;
+  }
+
+  .desktop-profile-actions,
+  .app-column-resizer {
+    display: none !important;
+  }
+
+  .app-list-panel,
+  .app-main-panel {
+    position: absolute !important;
+    inset: 0 0 calc(62px + env(safe-area-inset-bottom)) 0 !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    border: 0 !important;
+    overflow: hidden !important;
+  }
+
+  .mobile-pane-list .app-main-panel,
+  .mobile-pane-main .app-list-panel {
+    display: none !important;
+  }
+
+  .mobile-pane-list .app-list-panel,
+  .mobile-pane-main .app-main-panel {
+    display: flex !important;
+  }
+
+  .mobile-pane-back {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex-shrink: 0;
+    min-height: 44px;
+    padding: max(8px, env(safe-area-inset-top)) 14px 8px;
+    color: var(--accent);
+    background: var(--header-bg, var(--bg-panel));
+    border: 0;
+    border-bottom: 1px solid var(--border-color);
+    font: 600 0.86rem inherit;
+    text-align: left;
+  }
+
+  .mobile-pane-back span { font-size: 1.5rem; line-height: 1; }
+
+  .auth-page,
+  .onboarding-page {
+    min-height: 100dvh !important;
+    height: auto !important;
+    align-items: flex-start !important;
+    overflow-y: auto !important;
+    padding: max(16px, env(safe-area-inset-top)) 14px max(20px, env(safe-area-inset-bottom)) !important;
+  }
+
+  .auth-card,
+  .onboarding-card {
+    width: 100% !important;
+    max-width: 100% !important;
+    padding: 22px 16px !important;
+    border-radius: 16px !important;
+    margin: auto 0 !important;
+  }
+
+  .link-device-qr {
+    width: min(76vw, 280px) !important;
+    height: min(76vw, 280px) !important;
+  }
+
+  .link-device-qr img {
+    width: calc(100% - 16px) !important;
+    height: calc(100% - 16px) !important;
+  }
+
+  .responsive-overlay {
+    padding: max(12px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom)) !important;
+    align-items: flex-end !important;
+  }
+
+  .responsive-dialog {
+    width: 100% !important;
+    max-width: 100% !important;
+    max-height: min(88dvh, 720px) !important;
+    overflow-y: auto !important;
+    border-radius: 16px !important;
+    padding: 18px 16px !important;
+  }
+
+  .tasks-layout,
+  .calendar-layout {
+    min-width: 0 !important;
+    overflow-y: auto !important;
+  }
+
+  .tasks-layout {
+    flex-direction: column !important;
+  }
+
+  .tasks-list,
+  .tasks-detail {
+    width: 100% !important;
+    max-width: none !important;
+    min-height: auto !important;
+    flex: 0 0 auto !important;
+    border-right: 0 !important;
+  }
+
+  .tasks-list { min-height: 48dvh !important; }
+  .tasks-detail { border-top: 1px solid var(--border-color); }
+
+  .calendar-layout {
+    flex-direction: column !important;
+  }
+
+  .calendar-main,
+  .calendar-detail {
+    width: 100% !important;
+    min-width: 0 !important;
+    flex: 0 0 auto !important;
+    padding: 12px !important;
+  }
+
+  .calendar-grid {
+    min-height: 430px !important;
+  }
+
+  .settings-scroll-page {
+    padding: 18px 14px !important;
+    gap: 18px !important;
+  }
+
+  .chat-panel {
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  .chat-header {
+    min-width: 0 !important;
+    padding: max(8px, env(safe-area-inset-top)) 10px 8px !important;
+    gap: 6px !important;
+  }
+
+  .chat-header-identity {
+    min-width: 0 !important;
+    flex: 1 1 auto !important;
+    gap: 7px !important;
+    overflow: hidden !important;
+  }
+
+  .chat-header-identity > button:last-child,
+  .chat-header-identity > div:last-child {
+    min-width: 0 !important;
+    overflow: hidden !important;
+  }
+
+  .chat-header-identity > button:last-child > div:last-child,
+  .chat-header-identity > div:last-child {
+    min-width: 0 !important;
+  }
+
+  .chat-header-actions {
+    flex: 0 0 auto !important;
+    max-width: 44vw !important;
+    overflow-x: auto !important;
+    scrollbar-width: none;
+  }
+
+  .chat-header-actions::-webkit-scrollbar { display: none; }
+
+  .chat-header-actions button {
+    width: 34px !important;
+    height: 34px !important;
+    padding: 7px !important;
+    flex: 0 0 34px !important;
+  }
+
+  .chat-messages {
+    padding: 12px 10px !important;
+    overscroll-behavior: contain;
+  }
+
+  .chat-input-bar {
+    min-width: 0 !important;
+    padding: 8px 8px max(8px, env(safe-area-inset-bottom)) !important;
+    gap: 4px !important;
+  }
+
+  .chat-input-bar textarea,
+  .chat-input-bar input:not([type='file']) {
+    min-width: 0 !important;
+    padding-inline: 12px !important;
+  }
+
+  .chat-input-bar button {
+    flex-shrink: 0 !important;
+  }
+
+  .mobile-drawer-overlay {
+    align-items: flex-end !important;
+  }
+
+  .mobile-drawer {
+    width: 100% !important;
+    max-width: 100% !important;
+    height: min(88dvh, 760px) !important;
+    margin-top: auto !important;
+    border-left: 0 !important;
+    border-top: 1px solid var(--border-color) !important;
+    border-radius: 18px 18px 0 0 !important;
+    padding-bottom: env(safe-area-inset-bottom) !important;
+  }
+
+  .meeting-lobby {
+    justify-content: flex-start !important;
+    overflow-y: auto !important;
+    gap: 14px !important;
+    padding: max(18px, env(safe-area-inset-top)) 14px max(18px, env(safe-area-inset-bottom)) !important;
+  }
+
+  .meeting-lobby > div {
+    max-width: 100% !important;
+  }
+
+  .incoming-call-overlay {
+    padding: max(12px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom)) !important;
+  }
+
+  .incoming-call-card {
+    width: 100% !important;
+    min-width: 0 !important;
+    padding: 18px 16px !important;
+  }
+
+  .copilot-panel {
+    inset: max(10px, env(safe-area-inset-top)) 10px calc(70px + env(safe-area-inset-bottom)) 10px !important;
+    width: auto !important;
+    height: auto !important;
+    max-height: none !important;
+    border-radius: 14px !important;
+  }
+
+  .call-overlay {
+    padding: 0 !important;
+  }
+
+  .call-card {
+    width: 100% !important;
+    max-width: 100% !important;
+    height: 100dvh !important;
+    max-height: 100dvh !important;
+    min-width: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+  }
+
+  .gallery-call {
+    width: 100% !important;
+    height: 100dvh !important;
+    overflow: hidden !important;
+  }
+
+  .gallery-toolbar {
+    padding: max(8px, env(safe-area-inset-top)) 10px 8px !important;
+    gap: 8px !important;
+    align-items: flex-start !important;
+  }
+
+  .gallery-toolbar > span {
+    min-width: 0 !important;
+    flex: 1 !important;
+    flex-wrap: wrap !important;
+  }
+
+  .gallery-toolbar > div {
+    max-width: 52vw !important;
+    overflow-x: auto !important;
+    scrollbar-width: none;
+  }
+
+  .gallery-toolbar > div::-webkit-scrollbar { display: none; }
+
+  .gallery-two-up,
+  .gallery-stage {
+    padding: 8px !important;
+    gap: 6px !important;
+  }
+
+  .gallery-two-up {
+    flex-direction: column !important;
+  }
+
+  .gallery-strip {
+    width: 92px !important;
+    gap: 6px !important;
+  }
+
+  .gallery-controls {
+    max-width: 100vw !important;
+    justify-content: flex-start !important;
+    overflow-x: auto !important;
+    padding: 10px 12px max(12px, env(safe-area-inset-bottom)) !important;
+    scrollbar-width: none;
+  }
+
+  .gallery-controls::-webkit-scrollbar { display: none; }
+
+  .whiteboard-card {
+    width: 100% !important;
+    height: min(88dvh, 760px) !important;
+    border-radius: 16px 16px 0 0 !important;
+  }
+
+  .waiting-screen {
+    padding: max(20px, env(safe-area-inset-top)) 18px max(20px, env(safe-area-inset-bottom)) !important;
+    text-align: center !important;
+  }
+
+  /* The composer popover is a fixed 340px anchored to the input bar, which
+     overflows anything narrower than that. Pin it to the viewport instead and
+     let it run edge to edge above the composer. */
+  .media-picker {
+    position: fixed !important;
+    left: 8px !important;
+    right: 8px !important;
+    bottom: calc(70px + env(safe-area-inset-bottom)) !important;
+    width: auto !important;
+    max-width: none !important;
+    height: min(58dvh, 380px) !important;
+  }
+
+  /* Fullscreen media viewer: 32px of dead padding on a phone wastes the whole
+     frame, and the close button needs to clear the notch. */
+  .media-lightbox {
+    padding: max(12px, env(safe-area-inset-top)) 10px calc(12px + env(safe-area-inset-bottom)) !important;
+  }
+
+  .media-lightbox-close {
+    top: max(10px, env(safe-area-inset-top)) !important;
+    right: 12px !important;
+  }
+
+  /* Group call is a fixed full-bleed surface — it needs the same safe-area
+     treatment as the other call screens, which it never had. */
+  .group-call {
+    padding-top: env(safe-area-inset-top) !important;
+    padding-bottom: env(safe-area-inset-bottom) !important;
+  }
+
+  .group-call-header {
+    padding: 12px 14px !important;
+    gap: 10px !important;
+  }
+
+  .group-call-body {
+    padding: 0 10px 10px !important;
+  }
+
+  /* Toast sits at bottom-right, which is behind the new bottom nav. Lift it
+     clear and let it use the full width. */
+  .app-toast {
+    left: 12px !important;
+    right: 12px !important;
+    bottom: calc(74px + env(safe-area-inset-bottom)) !important;
+  }
+
+  /* The message actions menu drops below its chevron, so on the last message
+     in a long thread half of it lands under the composer. Float it as a
+     bottom sheet instead — same shape as the composer popover. */
+  .message-action-menu {
+    position: fixed !important;
+    top: auto !important;
+    bottom: calc(70px + env(safe-area-inset-bottom)) !important;
+    left: 8px !important;
+    right: 8px !important;
+    margin: 0 !important;
+    min-width: 0 !important;
+    max-height: min(56dvh, 380px);
+    overflow-y: auto;
+    border-radius: 14px !important;
+  }
+}
+
+@media (max-width: 390px) {
+  .app-nav-row {
+    flex-basis: 44px !important;
+    min-width: 44px !important;
+  }
+
+  .app-nav-label { display: none !important; }
+  .calendar-grid { min-height: 360px !important; }
 }

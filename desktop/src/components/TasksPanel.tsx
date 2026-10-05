@@ -28,8 +28,8 @@ export default function TasksPanel({ token, myUsername, groups }: { token: strin
   const selected = tasks.find(t => t.task_id === selectedId) ?? null;
 
   return (
-    <div style={{ display: 'flex', height: '100%' }}>
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: 20, minWidth: 0, maxWidth: 420, borderRight: '1px solid var(--border-color)' }}>
+    <div className="tasks-layout" style={{ display: 'flex', height: '100%' }}>
+      <div className="tasks-list" style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: 20, minWidth: 0, maxWidth: 420, borderRight: '1px solid var(--border-color)' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
           <h2 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-primary)' }}>Tasks</h2>
           <button onClick={() => setShowCreate(true)} style={{ background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 8, padding: '6px 14px', fontSize: '0.8rem', fontWeight: 700, cursor: 'pointer' }}>
@@ -86,7 +86,7 @@ export default function TasksPanel({ token, myUsername, groups }: { token: strin
         </div>
       </div>
 
-      <div style={{ flex: 1, padding: 20, overflowY: 'auto' }}>
+      <div className="tasks-detail" style={{ flex: 1, padding: 20, overflowY: 'auto' }}>
         {selected ? (
           <TaskDetail task={selected} myUsername={myUsername} token={token} onChanged={reload} />
         ) : (
@@ -358,10 +358,11 @@ function CreateTaskModal({ token, myUsername, groups, onClose, onCreated }: { to
 
   return (
     <div
+      className="responsive-overlay"
       style={{ position: 'fixed', inset: 0, zIndex: 950, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <form onSubmit={handleSubmit} style={{ width: 420, maxHeight: '85vh', overflowY: 'auto', background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 14, padding: 22, display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <form className="responsive-dialog" onSubmit={handleSubmit} style={{ width: 420, maxHeight: '85vh', overflowY: 'auto', background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 14, padding: 22, display: 'flex', flexDirection: 'column', gap: 10 }}>
         <div style={{ fontWeight: 700, fontSize: '1rem', color: 'var(--text-primary)' }}>New Task</div>
 
         <input value={title} onChange={e => setTitle(e.target.value)} placeholder="Title" required autoFocus style={inputStyle} />

@@ -118,10 +118,12 @@ export default function ContactInfoPanel({
 
   return (
     <div
+      className="mobile-drawer-overlay"
       style={{ position: 'fixed', inset: 0, zIndex: 940, background: 'rgba(0,0,0,0.45)', display: 'flex', justifyContent: 'flex-end' }}
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div
+        className="mobile-drawer"
         ref={panelRef}
         style={{
           width: 360, maxWidth: '90vw', height: '100%', background: 'var(--bg-panel)',

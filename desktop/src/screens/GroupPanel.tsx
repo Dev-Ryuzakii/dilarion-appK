@@ -1023,10 +1023,10 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
   const avatarBg = avatarColors[group.id % avatarColors.length];
 
   return (
-    <div style={gs.root}>
+    <div className="chat-panel" style={gs.root}>
       {/* Header */}
-      <div style={{ ...gs.header, justifyContent: 'space-between' }}>
-        <div style={gs.headerLeft}>
+      <div className="chat-header" style={{ ...gs.header, justifyContent: 'space-between' }}>
+        <div className="chat-header-identity" style={gs.headerLeft}>
           {onBack && (
             <button onClick={onBack} style={gs.backBtn} title="Back to groups" aria-label="Back">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1043,7 +1043,7 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
             </div>
           </div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+        <div className="chat-header-actions" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
         {onStartGroupCall && (
           <>
             <button onClick={() => onStartGroupCall(group, 'voice')} style={gs.iconBtn} title="Group voice call">
@@ -1090,7 +1090,7 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
       )}
 
       {/* Messages */}
-      <div style={gs.messagesArea}>
+      <div className="chat-messages" style={gs.messagesArea}>
         {loading ? (
           <MessageSkeleton />
         ) : messages.length === 0 ? (
@@ -1228,8 +1228,8 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
       )}
 
       {forwardTarget && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 900, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 12, padding: 20, width: 320 }}>
+        <div className="responsive-overlay" style={{ position: 'fixed', inset: 0, zIndex: 900, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div className="responsive-dialog" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 12, padding: 20, width: 320 }}>
             <h3 style={{ margin: 0, marginBottom: 12, fontSize: '0.95rem' }}>Forward message</h3>
             <input
               autoFocus
@@ -1305,7 +1305,7 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
       )}
 
       {/* Input bar */}
-      <div style={{ ...gs.inputBar, flexDirection: 'column', gap: 6, alignItems: 'stretch' }}>
+      <div className="chat-input-bar" style={{ ...gs.inputBar, flexDirection: 'column', gap: 6, alignItems: 'stretch' }}>
         {taggedUser && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span style={{ fontSize: '0.75rem', color: '#a78bfa', background: 'var(--bg-card)', border: '1px solid #4c1d95', borderRadius: 8, padding: '3px 10px', display: 'flex', alignItems: 'center', gap: 5 }}>

@@ -109,12 +109,12 @@ export default function WhiteboardModal({
   const colors = ['#e5484d', '#0ea5e9', '#22c55e', '#f59e0b', '#111827'];
 
   return (
-    <div style={{
+    <div className="responsive-overlay" style={{
       position: 'fixed', inset: 0, zIndex: 900,
       background: 'rgba(0,0,0,0.7)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
     }}>
-      <div style={{
+      <div className="whiteboard-card" style={{
         background: 'var(--bg-panel)',
         border: '1px solid var(--border-color)',
         borderRadius: 16,

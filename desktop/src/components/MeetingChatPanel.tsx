@@ -114,10 +114,11 @@ export default function MeetingChatPanel({
 
   return (
     <div
+      className="mobile-drawer-overlay"
       style={{ position: 'fixed', inset: 0, zIndex: 950, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'flex-end' }}
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div style={{ width: 340, height: '100%', background: '#16161c', display: 'flex', flexDirection: 'column', boxShadow: '-8px 0 30px rgba(0,0,0,0.4)' }}>
+      <div className="mobile-drawer" style={{ width: 340, height: '100%', background: '#16161c', display: 'flex', flexDirection: 'column', boxShadow: '-8px 0 30px rgba(0,0,0,0.4)' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 18px', borderBottom: '1px solid rgba(255,255,255,0.08)', flexShrink: 0 }}>
           <span style={{ color: '#fff', fontWeight: 700, fontSize: '0.9rem' }}>In-meeting chat</span>
           <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: '#aaa', cursor: 'pointer', display: 'flex' }}><CloseIcon size={16} color="#aaa" /></button>

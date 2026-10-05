@@ -96,8 +96,8 @@ export default function OnboardingScreen({ sessionToken, username, onDone, onCan
   }
 
   return (
-    <div style={o.root}>
-      <form style={o.card} onSubmit={submit}>
+    <div className="onboarding-page" style={o.root}>
+      <form className="onboarding-card" style={o.card} onSubmit={submit}>
         <h1 style={o.title}>Complete your profile</h1>
         <p style={o.sub}>Welcome, {username}. Your organization requires these details and a live photo before you can start using Dilarion.</p>
 

@@ -222,10 +222,10 @@ function NavRow({ icon, label, active, badge, onClick, style }: {
   icon: React.ReactNode; label: string; active: boolean; badge?: number; onClick: () => void; style?: React.CSSProperties;
 }) {
   return (
-    <button style={{ ...hs.tabBtn, ...(active ? hs.tabBtnActive : {}), ...style }} onClick={onClick}>
+    <button className="app-nav-row" aria-label={label} style={{ ...hs.tabBtn, ...(active ? hs.tabBtnActive : {}), ...style }} onClick={onClick}>
       {icon}
-      <span style={hs.tabBtnLabel}>{label}</span>
-      {!!badge && <span style={hs.tabBtnBadge}>{badge > 99 ? '99+' : badge}</span>}
+      <span className="app-nav-label" style={hs.tabBtnLabel}>{label}</span>
+      {!!badge && <span className="app-nav-badge" style={hs.tabBtnBadge}>{badge > 99 ? '99+' : badge}</span>}
     </button>
   );
 }
@@ -306,6 +306,7 @@ function ColumnResizer({ width, range, onChange }: {
 
   return (
     <div
+      className="app-column-resizer"
       role="separator"
       aria-orientation="vertical"
       title="Drag to resize"
@@ -1204,7 +1205,7 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
 
   if (page === 'appearance') {
     return (
-      <div style={{ flex: 1, overflowY: 'auto', padding: '32px 40px', display: 'flex', flexDirection: 'column', gap: 28, background: 'var(--bg-base)' }}>
+      <div className="settings-scroll-page" style={{ flex: 1, overflowY: 'auto', padding: '32px 40px', display: 'flex', flexDirection: 'column', gap: 28, background: 'var(--bg-base)' }}>
         <div style={{ fontSize: '1.1rem', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.03em' }}>Appearance</div>
 
         <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 12, padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 18 }}>
@@ -1309,7 +1310,7 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
 
   // Account page (default)
   return (
-    <div style={{ flex: 1, overflowY: 'auto', padding: '32px 40px', display: 'flex', flexDirection: 'column', gap: 28, background: 'var(--bg-base)' }}>
+    <div className="settings-scroll-page" style={{ flex: 1, overflowY: 'auto', padding: '32px 40px', display: 'flex', flexDirection: 'column', gap: 28, background: 'var(--bg-base)' }}>
       {/* Profile */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
         <div
@@ -1939,6 +1940,7 @@ function stopRinging() {
 
 export default function HomeScreen({ token, username, onLogout }: Props) {
   const [activeTab, setActiveTab] = useState<Tab>('chats');
+  const [mobilePane, setMobilePane] = useState<'list' | 'main'>('list');
   const [layout, setLayout] = useState(loadLayout);
   useEffect(() => {
     try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout)); } catch { /* storage unavailable */ }
@@ -2296,6 +2298,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
     setShowJoinGroup(false);
     setGroups(prev => (prev.some(x => x.id === g.id) ? prev.map(x => (x.id === g.id ? { ...x, ...g } : x)) : [g, ...prev]));
     setSelectedGroup(g.id);
+    setMobilePane('main');
     refreshGroups();
   }
 
@@ -2312,6 +2315,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
   // Tab changes: reset selections
   function switchTab(tab: Tab) {
     setActiveTab(tab);
+    setMobilePane(tab === 'calendar' || tab === 'tasks' ? 'main' : 'list');
     if (tab !== 'chats') setSelectedChat(null);
     if (tab !== 'groups') setSelectedGroup(null);
     if (tab !== 'calls') setSelectedCallId(null);
@@ -2327,6 +2331,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
       return;
     }
     setSelectedChat(c);
+    setMobilePane('main');
     setUnread(prev => {
       const next = new Set(prev);
       next.delete(c);
@@ -2340,6 +2345,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
       return;
     }
     setSelectedGroup(id);
+    setMobilePane('main');
   }
 
   async function handleLockPromptSubmit() {
@@ -2977,13 +2983,13 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
           calls={calls}
           loading={loadingCalls}
           selectedCallId={selectedCallId}
-          onSelectCall={setSelectedCallId}
+          onSelectCall={id => { setSelectedCallId(id); setMobilePane('main'); }}
         />
       );
     }
 
     if (activeTab === 'settings') {
-      return <SettingsListPanel selected={settingsPage} onSelect={setSettingsPage} />;
+      return <SettingsListPanel selected={settingsPage} onSelect={page => { setSettingsPage(page); setMobilePane('main'); }} />;
     }
 
     return null;
@@ -3007,7 +3013,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
             onMasterTokenSaved={() => {}}
             onCall={handleCall}
             onJoinMeeting={handleJoinMeetingFromChat}
-            onBack={() => setSelectedChat(null)}
+            onBack={() => { setSelectedChat(null); setMobilePane('list'); }}
             isMuted={!!settingsForContact(selectedChat)?.is_muted}
             isArchived={!!settingsForContact(selectedChat)?.is_archived}
             isLocked={!!settingsForContact(selectedChat)?.is_locked}
@@ -3051,7 +3057,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
               masterToken={null}
               onMasterTokenSaved={() => {}}
               onJoinMeeting={handleJoinMeetingFromChat}
-              onBack={() => setSelectedGroup(null)}
+              onBack={() => { setSelectedGroup(null); setMobilePane('list'); }}
               onGroupChanged={g => setGroups(prev => prev.map(x => (x.id === g.id ? { ...x, ...g } : x)))}
               onGroupGone={() => {
                 setGroups(prev => prev.filter(x => x.id !== group.id));
@@ -3151,19 +3157,22 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
   // ── Render ───────────────────────────────────────────────────────────────────
 
   return (
-    <div style={hs.root}>
+    <div className={`app-shell mobile-pane-${mobilePane}`} style={hs.root}>
 
       {/* ── SIDEBAR (WhatsApp Desktop-style, labeled rows) ─────────────── */}
-      <nav style={{ ...hs.tabBar, width: layout.nav }}>
+      <nav className="app-tab-bar" aria-label="Primary navigation" style={{ ...hs.tabBar, width: layout.nav }}>
         <NavRow icon={<ChatTabIcon active={activeTab === 'chats'} />} label="Chats" active={activeTab === 'chats'} badge={unread.size} onClick={() => switchTab('chats')} />
         <NavRow icon={<GroupTabIcon active={activeTab === 'groups'} />} label="Groups" active={activeTab === 'groups'} onClick={() => switchTab('groups')} />
         <NavRow icon={<MeetingsTabIcon active={activeTab === 'meetings'} />} label="Meetings" active={activeTab === 'meetings'} onClick={() => switchTab('meetings')} />
         <NavRow icon={<CalendarTabIcon active={activeTab === 'calendar'} />} label="Calendar" active={activeTab === 'calendar'} onClick={() => switchTab('calendar')} />
         <NavRow icon={<TasksTabIcon active={activeTab === 'tasks'} />} label="Tasks" active={activeTab === 'tasks'} onClick={() => switchTab('tasks')} />
         <NavRow icon={<CallTabIcon active={activeTab === 'calls'} />} label="Calls" active={activeTab === 'calls'} onClick={() => switchTab('calls')} />
+        <div className="mobile-settings-tab">
+          <NavRow icon={<SettingsTabIcon active={activeTab === 'settings'} />} label="Settings" active={activeTab === 'settings'} onClick={() => switchTab('settings')} />
+        </div>
 
         {/* Profile row + logout pinned to the bottom, WhatsApp-style */}
-        <div style={{ marginTop: 'auto', width: '100%', borderTop: '1px solid var(--border-color)', paddingTop: 8 }}>
+        <div className="desktop-profile-actions" style={{ marginTop: 'auto', width: '100%', borderTop: '1px solid var(--border-color)', paddingTop: 8 }}>
           <button
             onClick={() => switchTab('settings')}
             style={{
@@ -3179,7 +3188,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
             }}>
               {initials(username)}
             </div>
-            <span style={{ flex: 1, fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <span className="profile-username" style={{ flex: 1, fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {username}
             </span>
             <SettingsTabIcon active={activeTab === 'settings'} />
@@ -3207,7 +3216,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
       <ColumnResizer width={layout.nav} range={NAV_WIDTH} onChange={nav => setLayout(l => ({ ...l, nav }))} />
 
       {/* ── LIST PANEL (resizable, 320px default) ───────────────────────── */}
-      <aside style={{ ...hs.listPanel, width: layout.list }}>
+      <aside className="app-list-panel" style={{ ...hs.listPanel, width: layout.list }}>
         {renderListHeader()}
         {renderListContent()}
       </aside>
@@ -3215,12 +3224,18 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
       <ColumnResizer width={layout.list} range={LIST_WIDTH} onChange={list => setLayout(l => ({ ...l, list }))} />
 
       {/* ── MAIN PANEL (flex 1) ─────────────────────────────────────────── */}
-      <main style={hs.mainPanel}>
+      <main className="app-main-panel" style={hs.mainPanel}>
+        {(activeTab === 'calls' || activeTab === 'settings') && mobilePane === 'main' && (
+          <button className="mobile-pane-back" onClick={() => setMobilePane('list')}>
+            <span aria-hidden="true">‹</span> {activeTab === 'calls' ? 'Calls' : 'Settings'}
+          </button>
+        )}
         {renderMainContent()}
       </main>
 
       {chatJoinError && (
         <div
+          className="app-toast"
           style={{
             position: 'fixed', bottom: 20, right: 20, zIndex: 950,
             background: '#ef4444', color: '#fff', borderRadius: 10,
@@ -3297,8 +3312,8 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
 
       {/* ── GROUP CALL INVITE ───────────────────────────────────────────── */}
       {conferenceInvite && !callWindowOpen && !activeGalleryCall && (
-        <div style={ci.backdrop}>
-          <div style={ci.card}>
+        <div className="responsive-overlay" style={ci.backdrop}>
+          <div className="responsive-dialog" style={ci.card}>
             <p style={ci.kicker}>
               {conferenceInvite.callType === 'video' ? 'Group video call' : conferenceInvite.callType === 'voice' ? 'Group voice call' : 'Group call'}
               {conferenceInvite.groupName ? ` · ${conferenceInvite.groupName}` : ''}
@@ -3352,8 +3367,8 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
 
       {/* ── LOCKED CHAT — MASTER TOKEN GATE ──────────────────────────────── */}
       {blockedLogin && (
-        <div style={ci.backdrop}>
-          <div style={ci.card}>
+        <div className="responsive-overlay" style={ci.backdrop}>
+          <div className="responsive-dialog" style={ci.card}>
             <p style={{ ...ci.kicker, color: '#ef4444' }}>Security alert</p>
             <h3 style={ci.title}>Sign-in attempt blocked</h3>
             <p style={{ ...ci.hint, color: 'var(--text-secondary, #9ca3af)', lineHeight: 1.6 }}>
@@ -3384,8 +3399,8 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
       )}
 
       {lockPrompt && (
-        <div style={ci.backdrop}>
-          <div style={ci.card}>
+        <div className="responsive-overlay" style={ci.backdrop}>
+          <div className="responsive-dialog" style={ci.card}>
             <p style={ci.kicker}>Locked chat</p>
             <h3 style={ci.title}>
               {lockPrompt.kind === 'contact' ? lockPrompt.target : groups.find(g => g.id === lockPrompt.target)?.name || 'Group'}
@@ -3456,12 +3471,12 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
 
       {/* ── INCOMING CALL OVERLAY ────────────────────────────────────────── */}
       {incomingCall && !callWindowOpen && !activeGalleryCall && (
-        <div style={{
+        <div className="incoming-call-overlay" style={{
           position: 'fixed', inset: 0, zIndex: 900,
           display: 'flex', alignItems: 'flex-end', justifyContent: 'flex-end',
           padding: 24, pointerEvents: 'none',
         }}>
-          <div style={{
+          <div className="incoming-call-card" style={{
             background: '#1a1a1a',
             border: '1px solid #2a2a2a',
             borderRadius: 16,
@@ -3574,6 +3589,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
       {/* ── NEW CHAT MODAL ───────────────────────────────────────────────── */}
       {showNewChat && (
         <div
+          className="responsive-overlay"
           style={{
             position: 'fixed', inset: 0, zIndex: 800,
             background: 'rgba(0,0,0,0.7)',
@@ -3581,7 +3597,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
           }}
           onClick={e => { if (e.target === e.currentTarget) { setShowNewChat(false); setUserSearch(''); } }}
         >
-          <div style={{
+          <div className="responsive-dialog" style={{
             background: 'var(--bg-panel)',
             border: '1px solid var(--border-color)',
             borderRadius: 16,
@@ -3659,6 +3675,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
 
       {showNewMeeting && (
         <div
+          className="responsive-overlay"
           style={{
             position: 'fixed', inset: 0, zIndex: 800,
             background: 'rgba(0,0,0,0.7)',
@@ -3666,7 +3683,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
           }}
           onClick={e => { if (e.target === e.currentTarget) { setShowNewMeeting(false); setMeetingSearch(''); } }}
         >
-          <div style={{
+          <div className="responsive-dialog" style={{
             background: 'var(--bg-panel)',
             border: '1px solid var(--border-color)',
             borderRadius: 16,
@@ -3778,6 +3795,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
 
       {showMeetings && (
         <div
+          className="responsive-overlay"
           style={{
             position: 'fixed', inset: 0, zIndex: 800,
             background: 'rgba(0,0,0,0.7)',
@@ -3785,7 +3803,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
           }}
           onClick={e => { if (e.target === e.currentTarget) setShowMeetings(false); }}
         >
-          <div style={{
+          <div className="responsive-dialog" style={{
             background: 'var(--bg-panel)',
             border: '1px solid var(--border-color)',
             borderRadius: 18,

@@ -29,6 +29,7 @@ export default function WaitingForHostScreen({
 
   return (
     <div
+      className="waiting-screen"
       style={{
         position: 'fixed', inset: 0, zIndex: 900,
         background: '#0b0b10',

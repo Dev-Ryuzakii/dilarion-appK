@@ -191,6 +191,7 @@ export function MessageMenuTrigger({
         <>
           <div style={{ position: 'fixed', inset: 0, zIndex: 20 }} onClick={() => setOpen(false)} />
           <div
+            className="message-action-menu"
             style={{
               position: 'absolute', top: '100%', marginTop: 4, [isMine ? 'right' : 'left']: 0, zIndex: 25,
               background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 10,

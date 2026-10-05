@@ -175,8 +175,8 @@ export default function LoginScreen({ onLogin, onBack, initialView = 'login' }: 
 
   if (revealedCode) {
     return (
-      <div style={s.root}>
-        <div style={s.card}>
+      <div className="auth-page" style={s.root}>
+        <div className="auth-card" style={s.card}>
           <div style={s.logoWrap}>
             <img src="/logo.jpg" alt="Dilarion" style={s.logo} onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
           </div>
@@ -206,8 +206,8 @@ export default function LoginScreen({ onLogin, onBack, initialView = 'login' }: 
   }
 
   return (
-    <div style={s.root}>
-      <div style={s.card}>
+    <div className="auth-page" style={s.root}>
+      <div className="auth-card" style={s.card}>
         <div style={s.logoWrap}>
           <img
             src="/logo.jpg"

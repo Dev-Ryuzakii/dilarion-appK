@@ -622,12 +622,12 @@ export default function GalleryView({
   }
 
   return (
-    <div style={{
+    <div className="gallery-call" style={{
       position: 'fixed', inset: 0, zIndex: 900,
       background: '#0b0b10',
       display: 'flex', flexDirection: 'column',
     }}>
-      <div style={{
+      <div className="gallery-toolbar" style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         padding: '14px 20px', flexShrink: 0,
       }}>
@@ -826,7 +826,7 @@ export default function GalleryView({
 
         if (tileList.length === 2) {
           return (
-            <div style={{ flex: 1, display: 'flex', gap: 10, padding: 16, minHeight: 0 }}>
+            <div className="gallery-two-up" style={{ flex: 1, display: 'flex', gap: 10, padding: 16, minHeight: 0 }}>
               {tileList.map(tile => (
                 <div key={tile.identity} style={{ flex: 1, minWidth: 0 }}>
                   <TileCard
@@ -852,9 +852,9 @@ export default function GalleryView({
         const sideTiles = tileList.filter(t => t.identity !== mainTile?.identity);
 
         return (
-          <div style={{ flex: 1, display: 'flex', gap: 10, padding: 16, overflow: 'hidden' }}>
+          <div className="gallery-stage" style={{ flex: 1, display: 'flex', gap: 10, padding: 16, overflow: 'hidden' }}>
             {sideTiles.length > 0 && (
-              <div style={{
+              <div className="gallery-strip" style={{
                 width: 150, flexShrink: 0, display: 'flex', flexDirection: 'column',
                 gap: 10, overflowY: 'auto',
               }}>
@@ -894,7 +894,7 @@ export default function GalleryView({
       </div>
 
       {!connecting && !error && (
-        <div style={{ position: 'relative', display: 'flex', justifyContent: 'center', gap: 14, padding: '16px 0 24px' }}>
+        <div className="gallery-controls" style={{ position: 'relative', display: 'flex', justifyContent: 'center', gap: 14, padding: '16px 0 24px' }}>
           {showReactionPicker && (
             <div
               style={{

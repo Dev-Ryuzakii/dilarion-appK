@@ -41,8 +41,8 @@ export default function MasterTokenPromptModal({ token, onConfirmed, onCancel }:
   }
 
   return (
-    <div onClick={onCancel} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 980, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <div onClick={e => e.stopPropagation()} style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 16, width: 340, padding: 20, boxShadow: '0 16px 48px rgba(0,0,0,0.35)' }}>
+    <div className="responsive-overlay" onClick={onCancel} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 980, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div className="responsive-dialog" onClick={e => e.stopPropagation()} style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 16, width: 340, padding: 20, boxShadow: '0 16px 48px rgba(0,0,0,0.35)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
           <LockIcon size={16} color="var(--text-muted)" />
           <span style={{ fontWeight: 800, fontSize: '0.9rem', color: 'var(--text-primary)', flex: 1 }}>Master token required</span>

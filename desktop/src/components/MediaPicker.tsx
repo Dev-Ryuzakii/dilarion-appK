@@ -56,6 +56,7 @@ export default function MediaPicker({
   return (
     <div
       ref={rootRef}
+      className="media-picker"
       style={{
         position: 'absolute', ...anchorStyle,
         width: 340, height: 380, display: 'flex', flexDirection: 'column',

@@ -16,10 +16,11 @@ export default function DeleteMessageDialog({ canDeleteForEveryone, isMine, onPi
   };
   return (
     <div
+      className="responsive-overlay"
       style={{ position: 'fixed', inset: 0, zIndex: 980, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
       onClick={e => { if (e.target === e.currentTarget) onCancel(); }}
     >
-      <div style={{
+      <div className="responsive-dialog" style={{
         width: 340, maxWidth: '100%', background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 14,
         padding: '20px 20px 16px', display: 'flex', flexDirection: 'column', gap: 10, boxShadow: '0 20px 60px rgba(0,0,0,0.45)',
       }}>

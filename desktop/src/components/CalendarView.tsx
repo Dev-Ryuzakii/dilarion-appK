@@ -155,8 +155,8 @@ export default function CalendarView({
   }
 
   return (
-    <div style={{ display: 'flex', height: '100%' }}>
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: 20, minWidth: 0 }}>
+    <div className="calendar-layout" style={{ display: 'flex', height: '100%' }}>
+      <div className="calendar-main" style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: 20, minWidth: 0 }}>
         {/* Toolbar */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
           <h2 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 700, color: 'var(--text-primary)' }}>
@@ -190,7 +190,7 @@ export default function CalendarView({
         </div>
 
         {/* Month grid */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gridAutoRows: '1fr', gap: 4, flex: 1, minHeight: 0 }}>
+        <div className="calendar-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gridAutoRows: '1fr', gap: 4, flex: 1, minHeight: 0 }}>
           {days.map(day => {
             const inMonth = day.getMonth() === cursor.getMonth();
             const isToday = isSameDay(day, today);
@@ -235,7 +235,7 @@ export default function CalendarView({
       </div>
 
       {/* Selected day panel */}
-      <div style={{ width: 300, borderLeft: '1px solid var(--border-color)', padding: 20, flexShrink: 0, overflowY: 'auto' }}>
+      <div className="calendar-detail" style={{ width: 300, borderLeft: '1px solid var(--border-color)', padding: 20, flexShrink: 0, overflowY: 'auto' }}>
         <h3 style={{ margin: 0, marginBottom: 14, fontSize: '0.95rem', fontWeight: 700 }}>
           {selectedDay.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}
         </h3>
@@ -300,10 +300,11 @@ export default function CalendarView({
 
       {showNewPlan && (
         <div
+          className="responsive-overlay"
           style={{ position: 'fixed', inset: 0, zIndex: 950, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
           onClick={e => { if (e.target === e.currentTarget) setShowNewPlan(false); }}
         >
-          <form onSubmit={handleCreatePlan} style={{ width: 340, background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 14, padding: 20, display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <form className="responsive-dialog" onSubmit={handleCreatePlan} style={{ width: 340, background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 14, padding: 20, display: 'flex', flexDirection: 'column', gap: 10 }}>
             <div style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--text-primary)' }}>New personal plan</div>
             <input
               autoFocus
