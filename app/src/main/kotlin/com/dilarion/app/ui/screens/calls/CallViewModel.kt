@@ -208,6 +208,8 @@ class CallViewModel @Inject constructor(
                         callId, "accept",
                         answerSdp = answerSdp,
                         mastertoken = masterToken,
+                        deviceId = presenceService.deviceId,
+                        deviceName = presenceService.deviceName,
                     ),
                 )
                 // Retrofit does not throw on 4xx/5xx. Without this check a rejected

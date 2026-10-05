@@ -366,7 +366,11 @@ private fun CallHistoryRow(
                 Spacer(Modifier.width(4.dp))
                 Text(
                     buildString {
-                        append(if (isOutgoing) "Outgoing" else if (missed) "Missed" else "Incoming")
+                        append(
+                            if (isOutgoing) "Outgoing"
+                            else if (call.answeredElsewhere) "Answered on another device"
+                            else if (missed) "Missed" else "Incoming"
+                        )
                         append(" · ")
                         append(if (isVideo) "Video" else "Voice")
                         if (call.duration > 0) append(" · ${formatDuration(call.duration)}")

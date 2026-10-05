@@ -487,7 +487,10 @@ interface ApiService {
     ): Response<Unit>
 
     @GET("calls/history")
-    suspend fun getCallHistory(@Header("Authorization") bearer: String): Response<CallHistoryResponse>
+    suspend fun getCallHistory(
+        @Header("Authorization") bearer: String,
+        @Query("device_id") deviceId: String? = null,
+    ): Response<CallHistoryResponse>
 
     // ─── Conference ────────────────────────────────────────────────────────────
 

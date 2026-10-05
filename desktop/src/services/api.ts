@@ -659,10 +659,13 @@ export interface CallRecord {
   started_at: string;
   ended_at: string | null;
   is_caller: boolean;
+  /** Incoming call that this account answered on a different device. */
+  answered_elsewhere?: boolean;
+  answered_device_name?: string | null;
 }
 
 export async function getCallHistory(token: string): Promise<CallRecord[]> {
-  const res = await apiFetch(`${BASE}/calls/history`, {
+  const res = await apiFetch(`${BASE}/calls/history?device_id=${encodeURIComponent(deviceId())}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) throw new Error('Failed to fetch call history');
@@ -722,7 +725,12 @@ export async function performCallAction(
   const res = await apiFetch(`${BASE}/calls/action`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ call_id: callId, action, answer_sdp: answerSdp, mastertoken: masterToken }),
+    // device_id = the same id this device's WebSocket uses, so the server
+    // can stop the account's other devices ringing once this one answers.
+    body: JSON.stringify({
+      call_id: callId, action, answer_sdp: answerSdp, mastertoken: masterToken,
+      device_id: deviceId(), device_name: deviceName(),
+    }),
   });
   if (!res.ok) {
     // Callers need the code: 401 on accept means a bad master token, which is

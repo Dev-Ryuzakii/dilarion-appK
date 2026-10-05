@@ -44,14 +44,15 @@ class PresenceService @Inject constructor(
 
     // ── Device identity (persists across sessions) ─────────────────────────────
 
-    private val deviceId: String by lazy {
+    /** This install's id - the same one the WebSocket connects with. */
+    val deviceId: String by lazy {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         prefs.getString(KEY_DEVICE_ID, null) ?: UUID.randomUUID().toString().also {
             prefs.edit().putString(KEY_DEVICE_ID, it).apply()
         }
     }
 
-    private val deviceName: String by lazy {
+    val deviceName: String by lazy {
         val model = Build.MODEL ?: "Android"
         val manufacturer = Build.MANUFACTURER ?: ""
         if (model.startsWith(manufacturer, ignoreCase = true)) model

@@ -1747,6 +1747,7 @@ function CallsList({ calls, loading, selectedCallId, onSelectCall }: CallsListPr
         const isMissed = call.status === 'missed' && !call.is_caller;
         const isCompleted = call.duration > 0 || ['completed', 'end', 'ended', 'accept', 'accepted'].includes(call.status);
         const isActive = selectedCallId === call.id;
+        const elsewhere = !!call.answered_elsewhere;
         let statusColor = '#6b7280';
         if (isMissed) statusColor = '#ef4444';
         else if (isCompleted) statusColor = '#10b981';
@@ -1777,8 +1778,8 @@ function CallsList({ calls, loading, selectedCallId, onSelectCall }: CallsListPr
               </span>
               <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
                 {callIcon}
-                <span style={{ fontSize: '0.72rem', color: statusColor }}>
-                  {call.status}
+                <span style={{ fontSize: '0.72rem', color: elsewhere ? 'var(--text-secondary)' : statusColor }}>
+                  {elsewhere ? 'Answered on another device' : call.status}
                   {call.duration > 0 ? ` · ${fmtDuration(call.duration)}` : ''}
                 </span>
               </div>
@@ -1854,6 +1855,14 @@ function CallDetailPanel({ call, onCall }: {
           <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Direction</span>
           <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{call.is_caller ? 'Outgoing' : 'Incoming'}</span>
         </div>
+        {call.answered_elsewhere && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Answered</span>
+            <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+              On another device{call.answered_device_name ? ` (${call.answered_device_name})` : ''}
+            </span>
+          </div>
+        )}
         {isCompleted && call.duration > 0 && (
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Duration</span>
@@ -1938,7 +1947,11 @@ function stopRinging() {
 
 // ── Main HomeScreen ────────────────────────────────────────────────────────────
 
+// Voice/video calls need the desktop or phone app (the web build has no call window).
+const CALLS_UNAVAILABLE = 'Calling is not available on this version. Use the Dilarion phone or desktop app to make and receive calls.';
+
 export default function HomeScreen({ token, username, onLogout }: Props) {
+  const callsSupported = isTauri();
   const [activeTab, setActiveTab] = useState<Tab>('chats');
   const [mobilePane, setMobilePane] = useState<'list' | 'main'>('list');
   const [layout, setLayout] = useState(loadLayout);
@@ -2167,6 +2180,11 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
         const callId = data.call_id as number;
         const offerSdp = data.offer_sdp as string | undefined;
         if (caller) {
+          if (!callsSupported) {
+            // Web build: don't ring a call this version can't answer.
+            setChatJoinError(`${caller} is calling. Calling is not available on this version - answer on your phone or desktop app.`);
+            return;
+          }
           startRinging();
           setIncomingCall({ from: caller, callType, callId, offerSdp });
         }
@@ -2186,11 +2204,26 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
         const groupId = (data.group_id as number) || undefined;
         const callType = data.call_type === 'voice' || data.call_type === 'video' ? data.call_type as 'voice' | 'video' : undefined;
         if (confId) {
+          if (!callsSupported && groupName) {
+            setChatJoinError(`${invitedBy} started a group call in ${groupName}. Calling is not available on this version - join from your phone or desktop app.`);
+            return;
+          }
           startRinging();
           setConfTokenInput('');
           setConfTokenRejected(false);
           setConferenceInvite({ conferenceId: confId, invitedBy, participants, groupId, groupName, callType });
         }
+      } else if (msg.type === 'call_answered_elsewhere') {
+        // Picked up on another of this account's devices - stop ringing here,
+        // and don't record it as missed.
+        const answeredId = (msg as any).data?.call_id as number | undefined;
+        setIncomingCall(prev => {
+          if (prev && (!answeredId || prev.callId === answeredId)) {
+            stopRinging();
+            return null;
+          }
+          return prev;
+        });
       } else if (msg.type === 'call_status_update') {
         const data = (msg as any).data || {};
         // "missed" is what the server reports when the caller hangs up before we
@@ -2402,6 +2435,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
   }
 
   function openGroupCallWindow(info: GroupCallInfo) {
+    if (!callsSupported) { setChatJoinError(CALLS_UNAVAILABLE); return; }
     setCallWindowOpen(true);
     openCallWindow(
       {
@@ -2416,6 +2450,8 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
   // WhatsApp-style group call (separate from meetings): rings every other
   // member and opens the dedicated call window — not the meeting gallery.
   async function handleStartGroupCall(group: Group, callType: 'voice' | 'video') {
+    // Checked before the API call - starting one rings every member.
+    if (!callsSupported) { setChatJoinError(CALLS_UNAVAILABLE); return; }
     if (activeGalleryCall || callWindowOpen) {
       setChatJoinError('You are already on a call');
       return;
@@ -2431,6 +2467,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
   }
 
   function handleCall(partner: string, callType: CallType) {
+    if (!callsSupported) { setChatJoinError(CALLS_UNAVAILABLE); return; }
     setCallWindowOpen(true);
     openCallWindow(
       { token, my_username: username, partner, call_type: callType, is_incoming: false },
@@ -2656,6 +2693,10 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
     setChatJoinError(null);
     if (m.kind === 'instant') {
       setConferenceInvite({ conferenceId: m.conferenceId, invitedBy: m.invitedBy, participants: [] });
+      return;
+    }
+    if (m.kind === 'group_call' && !callsSupported) {
+      setChatJoinError(CALLS_UNAVAILABLE);
       return;
     }
     if (m.kind === 'group_call') {

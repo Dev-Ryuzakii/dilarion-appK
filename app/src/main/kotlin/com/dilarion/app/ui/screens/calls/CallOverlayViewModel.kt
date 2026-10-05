@@ -101,6 +101,17 @@ class CallOverlayViewModel @Inject constructor(
                         val offerSdp = data.get("offer_sdp")?.asString
                         _incomingCall.value = IncomingCallData(callId, caller, callType, offerSdp)
                     }
+                    // Answered on another of this account's devices - stop ringing
+                    // here and don't count it as missed.
+                    "call_answered_elsewhere" -> {
+                        val callId = data.get("call_id")?.asInt
+                        val ringing = _incomingCall.value
+                        if (ringing != null && (callId == null || callId == ringing.callId)) {
+                            NotificationHelper.stopRingtone()
+                            NotificationHelper.cancelCall(context)
+                            _incomingCall.value = null
+                        }
+                    }
                     // The caller gave up before we answered. The server reports
                     // that as "missed", not "end" — ignoring it here is what left
                     // this overlay ringing after they had already hung up.

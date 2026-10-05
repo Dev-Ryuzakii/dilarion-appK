@@ -552,6 +552,9 @@ data class CallActionRequest(
     val action: String,
     @SerializedName("answer_sdp") val answerSdp: String? = null,
     val mastertoken: String? = null,
+    /** Which device acted - on accept, the account's other devices stop ringing. */
+    @SerializedName("device_id") val deviceId: String? = null,
+    @SerializedName("device_name") val deviceName: String? = null,
 )
 
 data class CallResponse(
@@ -740,6 +743,9 @@ data class CallHistoryItem(
     @SerializedName("started_at")           val startedAt: String? = null,
     @SerializedName("ended_at")             val endedAt: String? = null,
     @SerializedName("is_caller")            val isCaller: Boolean = false,
+    /** Incoming call this account answered on a different device. */
+    @SerializedName("answered_elsewhere")   val answeredElsewhere: Boolean = false,
+    @SerializedName("answered_device_name") val answeredDeviceName: String? = null,
 )
 
 data class CallHistoryResponse(

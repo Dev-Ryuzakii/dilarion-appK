@@ -73,7 +73,7 @@ class HomeViewModel @Inject constructor(
             val token = sessionManager.sessionToken.first() ?: return@launch
             _uiState.value = _uiState.value.copy(isCallHistoryLoading = true)
             runCatching {
-                val resp = apiService.getCallHistory("Bearer $token")
+                val resp = apiService.getCallHistory("Bearer $token", presenceService.deviceId)
                 val history = resp.body()?.calls ?: emptyList()
                 _uiState.value = _uiState.value.copy(callHistory = history, isCallHistoryLoading = false)
             }.onFailure {
