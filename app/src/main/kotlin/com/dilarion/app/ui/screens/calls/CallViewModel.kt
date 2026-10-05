@@ -643,7 +643,11 @@ class CallViewModel @Inject constructor(
             val resp = apiService.conferenceAccept(
                 "Bearer $token",
                 conferenceId,
-                mapOf("mastertoken" to masterToken),
+                mapOf(
+                    "mastertoken" to masterToken,
+                    "device_id" to presenceService.deviceId,
+                    "device_name" to presenceService.deviceName,
+                ),
             )
             if (resp.code() == 401) return "Master token rejected"
             if (!resp.isSuccessful) return "Could not join the call (${resp.code()})"
@@ -678,7 +682,11 @@ class CallViewModel @Inject constructor(
             val resp = apiService.conferenceAccept(
                 "Bearer $token",
                 conferenceId,
-                mapOf("mastertoken" to masterToken),
+                mapOf(
+                    "mastertoken" to masterToken,
+                    "device_id" to presenceService.deviceId,
+                    "device_name" to presenceService.deviceName,
+                ),
             )
             if (resp.code() == 401) return "Master token rejected"
             if (!resp.isSuccessful) return "Could not join the call (${resp.code()})"

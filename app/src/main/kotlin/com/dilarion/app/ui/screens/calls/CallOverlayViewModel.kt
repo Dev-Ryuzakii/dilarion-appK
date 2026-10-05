@@ -103,6 +103,15 @@ class CallOverlayViewModel @Inject constructor(
                     }
                     // Answered on another of this account's devices - stop ringing
                     // here and don't count it as missed.
+                    // Joined the group call on another of this account's devices.
+                    "conference_answered_elsewhere" -> {
+                        val confId = data.get("conference_id")?.asInt
+                        val invite = _conferenceInvite.value
+                        if (invite != null && (confId == null || confId == invite.conferenceId)) {
+                            NotificationHelper.stopRingtone()
+                            _conferenceInvite.value = null
+                        }
+                    }
                     "call_answered_elsewhere" -> {
                         val callId = data.get("call_id")?.asInt
                         val ringing = _incomingCall.value

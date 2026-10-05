@@ -801,7 +801,7 @@ export async function conferenceAccept(
   const res = await apiFetch(`${BASE}/calls/conference/${conferenceId}/accept`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ mastertoken: masterToken }),
+    body: JSON.stringify({ mastertoken: masterToken, device_id: deviceId(), device_name: deviceName() }),
   });
   if (!res.ok) {
     const err: Error & { status?: number } = new Error(

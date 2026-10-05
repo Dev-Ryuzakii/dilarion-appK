@@ -2213,6 +2213,16 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
           setConfTokenRejected(false);
           setConferenceInvite({ conferenceId: confId, invitedBy, participants, groupId, groupName, callType });
         }
+      } else if (msg.type === 'conference_answered_elsewhere') {
+        // Joined the group call on another of this account's devices.
+        const confId = (msg as any).data?.conference_id as number | undefined;
+        setConferenceInvite(prev => {
+          if (prev && (!confId || prev.conferenceId === confId)) {
+            stopRinging();
+            return null;
+          }
+          return prev;
+        });
       } else if (msg.type === 'call_answered_elsewhere') {
         // Picked up on another of this account's devices - stop ringing here,
         // and don't record it as missed.
