@@ -3162,27 +3162,46 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
         <NavRow icon={<TasksTabIcon active={activeTab === 'tasks'} />} label="Tasks" active={activeTab === 'tasks'} onClick={() => switchTab('tasks')} />
         <NavRow icon={<CallTabIcon active={activeTab === 'calls'} />} label="Calls" active={activeTab === 'calls'} onClick={() => switchTab('calls')} />
 
-        {/* Profile row pinned to the bottom, WhatsApp-style — opens Settings */}
-        <button
-          onClick={() => switchTab('settings')}
-          style={{
-            marginTop: 'auto', display: 'flex', alignItems: 'center', gap: 12,
-            width: 'calc(100% - 16px)', margin: '8px 8px 0', padding: '10px 12px',
-            borderRadius: 10, background: activeTab === 'settings' ? 'var(--tab-active-bg)' : 'transparent',
-            border: 'none', borderTop: '1px solid var(--border-color)', cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit',
-          }}
-        >
-          <div style={{
-            width: 30, height: 30, borderRadius: '50%', background: 'var(--accent)', color: '#fff',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '0.68rem', flexShrink: 0,
-          }}>
-            {initials(username)}
-          </div>
-          <span style={{ flex: 1, fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {username}
-          </span>
-          <SettingsTabIcon active={activeTab === 'settings'} />
-        </button>
+        {/* Profile row + logout pinned to the bottom, WhatsApp-style */}
+        <div style={{ marginTop: 'auto', width: '100%', borderTop: '1px solid var(--border-color)', paddingTop: 8 }}>
+          <button
+            onClick={() => switchTab('settings')}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 12,
+              width: 'calc(100% - 16px)', margin: '0 8px', padding: '10px 12px',
+              borderRadius: 10, background: activeTab === 'settings' ? 'var(--tab-active-bg)' : 'transparent',
+              border: 'none', cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit',
+            }}
+          >
+            <div style={{
+              width: 30, height: 30, borderRadius: '50%', background: 'var(--accent)', color: '#fff',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '0.68rem', flexShrink: 0,
+            }}>
+              {initials(username)}
+            </div>
+            <span style={{ flex: 1, fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {username}
+            </span>
+            <SettingsTabIcon active={activeTab === 'settings'} />
+          </button>
+          <button
+            onClick={() => { if (window.confirm('Log out of Dilarion on this device?')) onLogout(); }}
+            title="Log out"
+            style={{
+              display: 'flex', alignItems: 'center', gap: 12,
+              width: 'calc(100% - 16px)', margin: '4px 8px 8px', padding: '9px 12px',
+              borderRadius: 10, background: 'transparent', border: 'none', cursor: 'pointer',
+              textAlign: 'left', fontFamily: 'inherit', color: '#ef4444', fontSize: '0.85rem', fontWeight: 600,
+            }}
+          >
+            <span style={{ width: 30, display: 'flex', justifyContent: 'center', flexShrink: 0 }}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" />
+              </svg>
+            </span>
+            Log out
+          </button>
+        </div>
       </nav>
 
       <ColumnResizer width={layout.nav} range={NAV_WIDTH} onChange={nav => setLayout(l => ({ ...l, nav }))} />

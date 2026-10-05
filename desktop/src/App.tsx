@@ -6,6 +6,7 @@ import LinkDeviceScreen from './screens/LinkDeviceScreen';
 import HomeScreen from './screens/HomeScreen';
 import IdleLockScreen from './components/IdleLockScreen';
 import { ensureDeviceRegistered } from './services/keys';
+import { logoutSession } from './services/api';
 import { getLockedUser, isIdleExpired, markActive, setLockedUser } from './services/idleLock';
 import './App.css';
 
@@ -112,6 +113,7 @@ export default function App() {
   }
 
   function handleLogout() {
+    if (session) logoutSession(session.token);
     localStorage.removeItem(SESSION_KEY);
     setLockedUser(null);
     setLockedUserState(null);

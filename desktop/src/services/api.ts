@@ -78,6 +78,15 @@ export async function login(username: string, token: string): Promise<unknown> {
   return res.json();
 }
 
+/** Ends this session on the server too - otherwise it keeps counting as this
+ * account's signed-in desktop/web device and blocks signing in elsewhere. */
+export async function logoutSession(token: string): Promise<void> {
+  await fetch(`${BASE}/auth/logout`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  }).catch(() => {});
+}
+
 // ── Invited staff: activation + first-run profile ─────────────────────────────
 
 export interface ActivationResult {
