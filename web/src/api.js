@@ -1,4 +1,4 @@
-const API_BASE = (import.meta.env.VITE_API_BASE || 'https://apidilarion.eibstratoc.com').replace(/\/$/, '')
+const API_BASE = (import.meta.env.VITE_API_BASE || 'https://testdilarion.eibstratoc.com').replace(/\/$/, '')
 
 async function request(path, options = {}) {
   const response = await fetch(`${API_BASE}${path}`, {
