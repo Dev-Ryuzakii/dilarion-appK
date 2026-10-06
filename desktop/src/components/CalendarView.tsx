@@ -1,4 +1,21 @@
 import { useEffect, useMemo, useState } from 'react';
+import { isTauri } from '../services/platform';
+
+// Open a URL in the user's real system browser. Inside the desktop app a plain
+// window.open does nothing (no browser context), so use Tauri's opener plugin;
+// on the web build fall back to a normal new tab.
+async function openExternal(url: string) {
+  if (isTauri()) {
+    try {
+      const { openUrl } = await import('@tauri-apps/plugin-opener');
+      await openUrl(url);
+      return;
+    } catch {
+      // fall through to window.open as a last resort
+    }
+  }
+  window.open(url, '_blank', 'noopener,noreferrer');
+}
 import {
   getMeetingCalendar, CalendarOccurrence, PersonalPlan, GoogleCalendarEvent,
   createPersonalPlan, deletePersonalPlan,
@@ -136,7 +153,7 @@ export default function CalendarView({
     setGoogleError(null);
     try {
       const url = await getGoogleCalendarAuthorizeUrl(token);
-      window.open(url, '_blank');
+      await openExternal(url);
     } catch (err: any) {
       setGoogleError(err?.message || 'Google Calendar linking is not available');
     } finally {
