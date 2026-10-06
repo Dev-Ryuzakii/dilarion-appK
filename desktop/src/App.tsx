@@ -8,6 +8,7 @@ import IdleLockScreen from './components/IdleLockScreen';
 import { ensureDeviceRegistered } from './services/keys';
 import { logoutSession } from './services/api';
 import { getLockedUser, isIdleExpired, markActive, setLockedUser } from './services/idleLock';
+import { runUpdateCheck } from './services/updater';
 import {
   SESSION_KEY,
   SESSION_INVALID_EVENT,
@@ -68,6 +69,11 @@ export default function App() {
   // QR linking is the default entry, username/token sign-in is the fallback.
   const [usePassword, setUsePassword] = useState(false);
   const [startView, setStartView] = useState<LoginView>('login');
+
+  // ── OTA auto-update (production desktop build only) ────────────────────────
+  useEffect(() => {
+    runUpdateCheck();
+  }, []);
 
   // ── Session retired server-side ──────────────────────────────────────────
   // A newer sign-in in the same platform group, or an expiry, deactivates this

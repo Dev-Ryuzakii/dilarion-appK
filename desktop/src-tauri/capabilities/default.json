@@ -16,6 +16,8 @@
         { "url": "https://apidilarion.eibstratoc.com/**" }
       ]
     },
-    "notification:default"
+    "notification:default",
+    "updater:default",
+    "process:default"
   ]
 }

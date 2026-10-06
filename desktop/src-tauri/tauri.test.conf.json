@@ -4,5 +4,13 @@
   "build": {
     "beforeDevCommand": "npm run dev:test",
     "beforeBuildCommand": "npm run build:test"
+  },
+  "bundle": {
+    "createUpdaterArtifacts": false
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": []
+    }
   }
 }
