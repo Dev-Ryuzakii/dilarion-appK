@@ -1,18 +1,21 @@
 # AppVeyor: build the production Windows MSI (+ NSIS exe) for Dilarion desktop.
-# The build points at production (apidilarion) via the default Tauri config.
-# createUpdaterArtifacts is on, so a Tauri signing key is required:
-# add TAURI_SIGNING_PRIVATE_KEY as a SECURE environment variable in the
-# AppVeyor project settings (same value as the GitHub secret).
+# Requires a Tauri signing key (createUpdaterArtifacts is on): add
+# TAURI_SIGNING_PRIVATE_KEY as a SECURE environment variable in the AppVeyor
+# project settings (same value as the GitHub secret).
 image: Visual Studio 2022
 
 environment:
   nodejs_version: "20"
   TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+  # Put Cargo on PATH for every build phase (rustup installs here).
+  PATH: 'C:\Users\appveyor\.cargo\bin;%PATH%'
 
 install:
   - ps: Install-Product node $env:nodejs_version
-  - cmd: rustup default stable
-  - cmd: rustup target add x86_64-pc-windows-msvc
+  # Rust is not preinstalled on this image — install via rustup.
+  - ps: Invoke-WebRequest -Uri https://win.rustup.rs/x86_64 -OutFile rustup-init.exe
+  - cmd: rustup-init.exe -y --profile minimal --default-toolchain stable
+  - cmd: rustc --version && cargo --version
   - cmd: cd desktop && npm ci && cd ..
 
 build_script:
@@ -23,6 +26,3 @@ artifacts:
     name: msi
   - path: desktop\src-tauri\target\release\bundle\nsis\*.exe
     name: nsis
-
-# No deploy step: these artifacts are for manual distribution. OTA updates are
-# published by the GitHub Actions workflow, not AppVeyor.
