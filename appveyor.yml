@@ -1,31 +1,28 @@
+# AppVeyor: build the production Windows MSI (+ NSIS exe) for Dilarion desktop.
+# The build points at production (apidilarion) via the default Tauri config.
+# createUpdaterArtifacts is on, so a Tauri signing key is required:
+# add TAURI_SIGNING_PRIVATE_KEY as a SECURE environment variable in the
+# AppVeyor project settings (same value as the GitHub secret).
 image: Visual Studio 2022
 
 environment:
-  TAURI_SIGNING_PRIVATE_KEY: ''
-  # AppVeyor sets CI=True (capital T); tauri-cli's --ci flag reads this env
-  # var and its parser only accepts lowercase true/false, so it fails as-is.
-  CI: 'true'
+  nodejs_version: "20"
+  TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
 
 install:
-  - ps: Install-Product node 20 x64
+  - ps: Install-Product node $env:nodejs_version
+  - cmd: rustup default stable
+  - cmd: rustup target add x86_64-pc-windows-msvc
+  - cmd: cd desktop && npm ci && cd ..
 
 build_script:
-  - cmd: >-
-      curl -sSf -o rustup-init.exe https://win.rustup.rs/x86_64 &&
-      rustup-init.exe -y --default-toolchain stable &&
-      set PATH=%USERPROFILE%\.cargo\bin;%PATH% &&
-      cd desktop &&
-      npm install &&
-      npm run tauri:test
+  - cmd: cd desktop && npm run tauri build && cd ..
 
 artifacts:
   - path: desktop\src-tauri\target\release\bundle\msi\*.msi
     name: msi
   - path: desktop\src-tauri\target\release\bundle\nsis\*.exe
-    name: nsis-exe
+    name: nsis
 
-# Manual "New Build" from the AppVeyor dashboard also works — this just
-# controls automatic triggers on push.
-branches:
-  only:
-    - main
+# No deploy step: these artifacts are for manual distribution. OTA updates are
+# published by the GitHub Actions workflow, not AppVeyor.

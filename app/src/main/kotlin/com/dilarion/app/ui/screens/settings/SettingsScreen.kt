@@ -642,9 +642,9 @@ fun SettingsScreen(
 
             Spacer(Modifier.height(24.dp))
 
-            // App version
+            // App version — reads the real build version so OTA bumps show here.
             Text(
-                "Dilarion v1.0.0 · Secure · Private · Encrypted",
+                "Dilarion v${com.dilarion.app.BuildConfig.VERSION_NAME} · Secure · Private · Encrypted",
                 style = MaterialTheme.typography.bodySmall,
                 color = TextSecondary.copy(alpha = 0.6f),
                 modifier = Modifier

@@ -1952,6 +1952,15 @@ const CALLS_UNAVAILABLE = 'Calling is not available on this version. Use the Dil
 
 export default function HomeScreen({ token, username, onLogout }: Props) {
   const callsSupported = isTauri();
+  // Real app version from Tauri (falls back gracefully on the web build), so
+  // the version shown in the UI tracks OTA updates automatically.
+  const [appVersion, setAppVersion] = useState('');
+  useEffect(() => {
+    import('@tauri-apps/api/app')
+      .then(m => m.getVersion())
+      .then(setAppVersion)
+      .catch(() => {});
+  }, []);
   const [activeTab, setActiveTab] = useState<Tab>('chats');
   const [mobilePane, setMobilePane] = useState<'list' | 'main'>('list');
   const [layout, setLayout] = useState(loadLayout);
@@ -3082,7 +3091,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
       return (
         <WelcomePlaceholder
           title="Dilarion"
-          subtitle="Version 1.0.0"
+          subtitle={appVersion ? `Version ${appVersion}` : 'Dilarion'}
           footer={
             <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.75rem', color: 'var(--text-muted)' }}>
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
