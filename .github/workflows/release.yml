@@ -58,3 +58,52 @@ jobs:
           prerelease: false
           includeUpdaterJson: true
           args: ${{ matrix.args }}
+
+  android:
+    # Builds the signed production APK and attaches it + android-latest.json to
+    # the same release the desktop jobs created. Android self-updates from here.
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Decode release keystore
+        run: echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/dilarion-release.jks"
+
+      - name: Build signed production APK
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/dilarion-release.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: ./gradlew :app:assembleProductionRelease --no-daemon
+
+      - name: Prepare APK + android-latest.json
+        run: |
+          set -e
+          APK=$(find app/build/outputs/apk/production/release -name "*.apk" | head -n1)
+          VERSION_CODE=$(grep -E 'versionCode[[:space:]]*=' app/build.gradle.kts | head -n1 | grep -oE '[0-9]+')
+          VERSION_NAME=$(grep -E 'versionName[[:space:]]*=' app/build.gradle.kts | head -n1 | sed -E 's/.*"([^"]+)".*/\1/')
+          OUT="Dilarion-${VERSION_NAME}-production.apk"
+          cp "$APK" "$OUT"
+          URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/${OUT}"
+          cat > android-latest.json <<JSON
+          {
+            "versionCode": ${VERSION_CODE},
+            "versionName": "${VERSION_NAME}",
+            "notes": "Automated production release.",
+            "url": "${URL}"
+          }
+          JSON
+          echo "APK_OUT=$OUT" >> "$GITHUB_ENV"
+
+      - name: Upload to the release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${GITHUB_REF_NAME}" "${APK_OUT}" android-latest.json --clobber

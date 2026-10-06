@@ -19,10 +19,34 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    // Release signing from environment (CI secrets) or a local keystore.properties.
+    // A stable keystore is REQUIRED for OTA: Android rejects an update whose
+    // signature differs from the installed app. If no keystore is configured the
+    // release build is simply left unsigned (local/dev), so nothing breaks.
+    val ksPath = System.getenv("ANDROID_KEYSTORE_PATH")
+    val ksPassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+    val ksAlias = System.getenv("ANDROID_KEY_ALIAS") ?: "dilarion"
+    val ksKeyPassword = System.getenv("ANDROID_KEY_PASSWORD") ?: ksPassword
+    val hasReleaseKeystore = ksPath != null && file(ksPath).exists() && ksPassword != null
+
+    signingConfigs {
+        if (hasReleaseKeystore) {
+            create("release") {
+                storeFile = file(ksPath!!)
+                storePassword = ksPassword
+                keyAlias = ksAlias
+                keyPassword = ksKeyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            if (hasReleaseKeystore) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
         debug {
             isDebuggable = true

@@ -106,6 +106,9 @@ class MainActivity : FragmentActivity() {
                 AppNavigation(pendingIncomingCall = pendingIncomingCall)
             }
         }
+
+        // OTA: production build checks GitHub for a newer signed APK on launch.
+        com.dilarion.app.update.AppUpdater.checkOnLaunch(this)
     }
 
     // Home button / recents while a meeting is on screen — same "minimize like
