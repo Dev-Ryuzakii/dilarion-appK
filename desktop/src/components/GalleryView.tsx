@@ -116,6 +116,8 @@ export default function GalleryView({
 
   const [waiting, setWaiting] = useState<WaitingParticipant[]>([]);
   const [admitting, setAdmitting] = useState<number | null>(null);
+  // Identity of a tile the viewer has pinned to the main view; null = automatic.
+  const [pinnedIdentity, setPinnedIdentity] = useState<string | null>(null);
 
   const [isHost, setIsHost] = useState(false);
   const [recording, setRecording] = useState(false);
@@ -840,10 +842,12 @@ export default function GalleryView({
           );
         }
 
-        // Whoever I'm actively controlling always wins the big slot — precise
-        // mouse mapping needs a large surface, and it's also just the tile you
-        // want to be looking at while you're driving their screen.
+        // A manually pinned tile wins the big slot above everything else. Then
+        // whoever I'm actively controlling (precise mouse mapping needs a large
+        // surface), then screen share, active speaker, any remote, finally self.
+        const pinnedTile = pinnedIdentity ? tileList.find(t => t.identity === pinnedIdentity) : undefined;
         const mainTile =
+          pinnedTile ??
           tileList.find(t => t.identity === controllingUsername) ??
           tileList.find(t => t.isScreenShare) ??
           tileList.find(t => t.isSpeaking && !t.isLocal) ??
@@ -859,17 +863,34 @@ export default function GalleryView({
                 gap: 10, overflowY: 'auto',
               }}>
                 {sideTiles.map(tile => (
-                  <TileCard key={tile.identity} tile={tile} videoRefs={videoRefs} trackRefs={trackRefs} compact />
+                  <div
+                    key={tile.identity}
+                    onClick={() => setPinnedIdentity(tile.identity)}
+                    title={`Pin ${tile.displayName || tile.identity} to the main view`}
+                    style={{ position: 'relative', cursor: 'pointer', flexShrink: 0 }}
+                  >
+                    <TileCard tile={tile} videoRefs={videoRefs} trackRefs={trackRefs} compact />
+                    <span style={pinHintStyle}><PinIcon /></span>
+                  </div>
                 ))}
               </div>
             )}
             {mainTile && (
-              <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ flex: 1, minWidth: 0, position: 'relative' }}>
                 <TileCard
                   tile={mainTile} videoRefs={videoRefs} trackRefs={trackRefs} fill
                   capturingControl={mainTile.identity === controllingUsername}
                   onCapturedInput={publishControlEvent}
                 />
+                {pinnedTile && mainTile.identity === pinnedIdentity && (
+                  <button
+                    onClick={() => setPinnedIdentity(null)}
+                    title="Unpin — go back to automatic view"
+                    style={unpinBtnStyle}
+                  >
+                    <PinIcon /> Pinned · Unpin
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -1378,3 +1399,24 @@ function RemoteControlIcon() {
     </svg>
   );
 }
+
+function PinIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 17v5" />
+      <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
+    </svg>
+  );
+}
+
+const pinHintStyle: React.CSSProperties = {
+  position: 'absolute', top: 6, right: 6, width: 22, height: 22, borderRadius: 6,
+  background: 'rgba(0,0,0,0.5)', color: '#fff', display: 'flex', alignItems: 'center',
+  justifyContent: 'center', opacity: 0.85, pointerEvents: 'none',
+};
+
+const unpinBtnStyle: React.CSSProperties = {
+  position: 'absolute', top: 10, left: 10, zIndex: 5, display: 'flex', alignItems: 'center',
+  gap: 6, padding: '5px 10px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.2)',
+  background: 'rgba(0,0,0,0.55)', color: '#fff', fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer',
+};

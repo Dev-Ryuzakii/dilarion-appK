@@ -218,6 +218,9 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
   // Answer kept so a rejected master token can be retried without rebuilding it.
   const cachedAnswerRef = useRef<string | null>(null);
   const [showTokenPrompt, setShowTokenPrompt] = useState(false);
+  // Which feed fills the frame: false = the other party (default), true = your
+  // own camera. The small picture-in-picture always shows the other one.
+  const [videoSwapped, setVideoSwapped] = useState(false);
   const [tokenRejected, setTokenRejected] = useState(false);
 
   // ── WebRTC setup ─────────────────────────────────────────────────────────────
@@ -824,7 +827,8 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
     <div className="call-overlay" style={cs.overlay}>
       <div className="call-card" style={cs.modal}>
 
-        {/* Video area */}
+        {/* Video area. Tap the small frame (or the swap button) to switch which
+            feed fills the screen — the other party or your own camera. */}
         {isVideo && (
           <div style={cs.videoArea}>
             {/* Remote video — audio comes via remoteAudioRef to avoid WKWebView autoplay issues */}
@@ -833,7 +837,9 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
               autoPlay
               playsInline
               muted
-              style={{ width: '100%', height: '100%', objectFit: 'contain', background: '#000' }}
+              onClick={videoSwapped ? () => setVideoSwapped(false) : undefined}
+              title={videoSwapped ? `Switch back to ${partner}` : undefined}
+              style={videoSwapped ? { ...cs.localPip, cursor: 'pointer' } : cs.mainVideo}
             />
             {/* Local PiP */}
             <video
@@ -841,8 +847,18 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
               autoPlay
               playsInline
               muted
-              style={cs.localPip}
+              onClick={() => setVideoSwapped(s => !s)}
+              title={videoSwapped ? 'Switch to your camera view' : 'Switch to your own camera'}
+              style={videoSwapped ? cs.mainVideo : { ...cs.localPip, cursor: 'pointer' }}
             />
+            {/* Explicit swap control, in case the small frame is easy to miss */}
+            <button
+              onClick={() => setVideoSwapped(s => !s)}
+              title="Swap the main and small video"
+              style={cs.swapBtn}
+            >
+              <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M16 3h5v5M4 20 21 3M21 16v5h-5M15 15l6 6M4 4l5 5"/></svg>
+            </button>
             {/* Dedicated audio output for remote stream */}
             <audio ref={remoteAudioRef} autoPlay style={{ display: 'none' }} />
           </div>
@@ -1081,6 +1097,27 @@ const cs: Record<string, React.CSSProperties> = {
     flex: 1,
     minHeight: 0,
     background: '#000',
+  },
+  mainVideo: {
+    width: '100%',
+    height: '100%',
+    objectFit: 'contain',
+    background: '#000',
+  },
+  swapBtn: {
+    position: 'absolute',
+    bottom: 16,
+    left: 16,
+    width: 34,
+    height: 34,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 10,
+    border: '1px solid rgba(255,255,255,0.18)',
+    background: 'rgba(0,0,0,0.45)',
+    color: '#fff',
+    cursor: 'pointer',
   },
   localPip: {
     position: 'absolute',
