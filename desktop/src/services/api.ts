@@ -1325,6 +1325,28 @@ export async function endRemoteControl(token: string, conferenceId: number, othe
   }).catch(() => {});
 }
 
+// The controlled side brokers its RustDesk ID + one-time password to the
+// requester so their client can open a full RustDesk session (see
+// rustdesk/README.md). Ephemeral signalling only.
+export async function relayRustdeskSession(
+  token: string,
+  conferenceId: number,
+  requesterUsername: string,
+  rustdeskId: string,
+  otp: string,
+): Promise<void> {
+  await apiFetch(`${BASE}/calls/conference/${conferenceId}/control/rustdesk-session`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      conference_id: conferenceId,
+      requester_username: requesterUsername,
+      rustdesk_id: rustdeskId,
+      otp,
+    }),
+  }).catch(() => {});
+}
+
 // ── Disappearing message defaults ─────────────────────────────────────────────
 // Per-sender defaults applied automatically when you don't override per-send —
 // see _resolve_disappear_hours on the backend. Separate knobs for text, media

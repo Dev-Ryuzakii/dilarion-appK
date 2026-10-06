@@ -7,7 +7,7 @@ import {
   getWaitingRoom, admitFromWaitingRoom, denyFromWaitingRoom, WaitingParticipant,
   startConferenceRecording, stopConferenceRecording,
   sendWhiteboardOpen, sendWhiteboardClose,
-  requestRemoteControl, respondRemoteControl, endRemoteControl,
+  requestRemoteControl, respondRemoteControl, endRemoteControl, relayRustdeskSession,
   startBreakoutRooms, autoBreakoutRooms, endBreakoutRooms,
 } from '../services/api';
 import { presenceService, WsMessage } from '../services/presence';
@@ -353,6 +353,13 @@ export default function GalleryView({
         } else {
           setControlError(`${data.target_username} declined control`);
         }
+      } else if (msg.type === 'remote_control_rustdesk_session') {
+        // Controller side: the target brokered a full RustDesk session. Launch
+        // RustDesk against their ID and show the one-time password to enter.
+        const data = msg.data || {};
+        if (data.conference_id !== conferenceId) return;
+        invoke('rustdesk_connect', { id: data.rustdesk_id, otp: data.otp }).catch(() => {});
+        setControlError(`RustDesk opening for ${data.target_username}. One-time password: ${data.otp}`);
       } else if (msg.type === 'remote_control_ended') {
         const data = msg.data || {};
         if (data.conference_id !== conferenceId) return;
@@ -530,8 +537,20 @@ export default function GalleryView({
     const requester = pendingControlRequestFrom;
     setPendingControlRequestFrom(null);
     setControlledByUsername(requester);
+    // Keep the enigo path armed as a fallback.
     await invoke('set_control_session_active', { active: true }).catch(() => {});
     await respondRemoteControl(token, conferenceId, requester, true);
+    // Prefer a full RustDesk session when RustDesk is available on this machine:
+    // mint a one-time password + ID and broker them to the requester. If
+    // RustDesk isn't installed this throws and we silently stay on the enigo path.
+    try {
+      const session = await invoke<{ id: string; otp: string }>('rustdesk_prepare');
+      if (session?.id && session?.otp) {
+        await relayRustdeskSession(token, conferenceId, requester, session.id, session.otp);
+      }
+    } catch {
+      // No RustDesk — enigo fallback already active.
+    }
   }
 
   function declineControlRequest() {
@@ -553,6 +572,8 @@ export default function GalleryView({
     const controller = controlledByUsername;
     setControlledByUsername(null);
     await invoke('set_control_session_active', { active: false }).catch(() => {});
+    // Invalidate the one-time RustDesk password so the session can't be reused.
+    await invoke('rustdesk_reset_password').catch(() => {});
     await endRemoteControl(token, conferenceId, controller);
   }
 

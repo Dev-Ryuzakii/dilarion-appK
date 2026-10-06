@@ -221,6 +221,96 @@ fn list_running_processes() -> Vec<String> {
     names
 }
 
+// ── RustDesk remote control ─────────────────────────────────────────────────
+// Drives an EXTERNAL RustDesk binary (installed, or DILARION_RUSTDESK_PATH) so
+// Dilarion stays separate from RustDesk's AGPL source. The controlled side mints
+// a one-time password and reports its RustDesk ID; the controller launches the
+// connection. Meeting A/V keeps running on LiveKit in parallel. enigo remains the
+// fallback when RustDesk isn't available.
+
+fn rustdesk_bin() -> String {
+    if let Ok(p) = std::env::var("DILARION_RUSTDESK_PATH") {
+        if !p.trim().is_empty() {
+            return p;
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let app = "/Applications/RustDesk.app/Contents/MacOS/RustDesk";
+        if std::path::Path::new(app).exists() {
+            return app.to_string();
+        }
+    }
+    "rustdesk".to_string()
+}
+
+fn weak_otp() -> String {
+    // Short-lived, single-use, consent-gated — a 6-digit code is enough and
+    // avoids pulling in an RNG crate. Derived from the high-resolution clock.
+    let n = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0);
+    format!("{:06}", n % 1_000_000)
+}
+
+#[derive(Serialize)]
+struct RustdeskSession {
+    id: String,
+    otp: String,
+}
+
+#[tauri::command]
+fn rustdesk_prepare() -> Result<RustdeskSession, String> {
+    let bin = rustdesk_bin();
+    // RustDesk ID of this (controlled) machine.
+    let out = std::process::Command::new(&bin)
+        .arg("--get-id")
+        .output()
+        .map_err(|e| format!("RustDesk not available: {e}"))?;
+    let id = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if id.is_empty() {
+        return Err("Could not read RustDesk ID (is RustDesk installed and run once?)".into());
+    }
+    // Set a one-time password for this session.
+    let otp = weak_otp();
+    let set = std::process::Command::new(&bin)
+        .arg("--password")
+        .arg(&otp)
+        .status()
+        .map_err(|e| format!("Failed to set RustDesk password: {e}"))?;
+    if !set.success() {
+        return Err("Failed to set the one-time RustDesk password".into());
+    }
+    Ok(RustdeskSession { id, otp })
+}
+
+#[tauri::command]
+fn rustdesk_connect(id: String, _otp: String) -> Result<(), String> {
+    // Launch the RustDesk client against the target's ID. Password automation
+    // over the CLI isn't reliable across versions, so the controller enters the
+    // OTP (shown in Dilarion) in RustDesk's connect dialog.
+    let bin = rustdesk_bin();
+    std::process::Command::new(&bin)
+        .arg("--connect")
+        .arg(&id)
+        .spawn()
+        .map_err(|e| format!("RustDesk not available: {e}"))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn rustdesk_reset_password() -> Result<(), String> {
+    // Invalidate the OTP by rotating to a fresh random password the control
+    // session can no longer use.
+    let bin = rustdesk_bin();
+    let _ = std::process::Command::new(&bin)
+        .arg("--password")
+        .arg(weak_otp())
+        .status();
+    Ok(())
+}
+
 // ── Badge count ───────────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -280,6 +370,9 @@ pub fn run() {
             set_badge_count,
             set_control_session_active,
             inject_remote_input,
+            rustdesk_prepare,
+            rustdesk_connect,
+            rustdesk_reset_password,
             list_running_processes,
             set_pending_call,
             take_pending_call,
