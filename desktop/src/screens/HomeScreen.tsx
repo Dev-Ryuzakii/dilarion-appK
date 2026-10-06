@@ -1952,13 +1952,16 @@ const CALLS_UNAVAILABLE = 'Calling is not available on this version. Use the Dil
 
 export default function HomeScreen({ token, username, onLogout }: Props) {
   const callsSupported = isTauri();
-  // Real app version from Tauri (falls back gracefully on the web build), so
-  // the version shown in the UI tracks OTA updates automatically.
-  const [appVersion, setAppVersion] = useState('');
+  // Version shown in the UI. Baked in at build time (__APP_VERSION__ from
+  // tauri.conf.json) so it always shows, with the Tauri runtime value preferred
+  // when available. Tracks OTA updates automatically either way.
+  const [appVersion, setAppVersion] = useState<string>(
+    typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '',
+  );
   useEffect(() => {
     import('@tauri-apps/api/app')
       .then(m => m.getVersion())
-      .then(setAppVersion)
+      .then(v => { if (v) setAppVersion(v); })
       .catch(() => {});
   }, []);
   const [activeTab, setActiveTab] = useState<Tab>('chats');
