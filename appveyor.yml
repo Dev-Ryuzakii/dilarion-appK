@@ -6,6 +6,8 @@ image: Visual Studio 2022
 
 environment:
   nodejs_version: "20"
+  # AppVeyor sets CI=True (capitalized); Tauri's --ci flag only accepts lowercase.
+  CI: "true"
   TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
   # Put Cargo on PATH for every build phase (rustup installs here).
   PATH: 'C:\Users\appveyor\.cargo\bin;%PATH%'
