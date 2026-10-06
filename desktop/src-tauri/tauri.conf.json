@@ -46,7 +46,7 @@
   "plugins": {
     "updater": {
       "endpoints": [
-        "https://github.com/Dev-Ryuzakii/dilarion-appK/releases/latest/download/latest.json"
+        "https://github.com/Dev-Ryuzakii/dilarion-releases/releases/latest/download/latest.json"
       ],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDNCNEE1QkI3MkI3MzBCMApSV1N3TUxkeXU2VzBBMTQ5UjNuWFhrcnNzS1NVQ1BmVnExOER2bHZwc3cyS0FnT3ZaYUxTV3BDbgo="
     }
