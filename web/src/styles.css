@@ -14,3 +14,22 @@
 .invite-import p{margin:2px 0 0;font-size:.8rem;color:#857b7d}
 .invite-import-actions{display:flex;gap:8px;align-items:center}
 .invite-import .file-label{cursor:pointer}
+
+/* ─── Org admin: team privileges + broadcast ───────────────────────── */
+.loader-inline{display:flex;flex-direction:column;align-items:center;gap:12px;padding:48px 0;color:#857b7d}
+.field textarea{width:100%;border:1px solid #d8cfc9;border-radius:12px;padding:12px 14px;font:inherit;color:#24191b;background:#fff;resize:vertical;min-height:120px}
+.field textarea:focus{outline:none;border-color:#b07a56;box-shadow:0 0 0 3px rgba(176,122,86,.15)}
+.button.small{padding:7px 14px;font-size:.82rem}
+.priv-grid{display:flex;flex-wrap:wrap;gap:8px 14px;max-width:560px}
+.priv-check{display:inline-flex;align-items:center;gap:7px;font-size:.84rem;color:#4a3f41;cursor:pointer;border:1px solid #e7ded8;border-radius:999px;padding:5px 12px;background:#faf7f4}
+.priv-check input{accent-color:#b07a56;width:15px;height:15px}
+.priv-check:hover{border-color:#b07a56}
+.broadcast-wrap{display:grid;gap:18px}
+.broadcast-card .field{margin-bottom:12px}
+.broadcast-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:12px}
+.broadcast-list li{border:1px solid #ece4de;border-radius:14px;padding:14px 16px;background:#fff}
+.broadcast-item-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+.broadcast-item-head strong{color:#24191b;font-size:.95rem}
+.broadcast-item-head small{color:#9a8e90;font-size:.74rem;white-space:nowrap}
+.broadcast-list p{margin:6px 0 4px;color:#4a3f41;font-size:.9rem;white-space:pre-wrap}
+.broadcast-from{color:#857b7d;font-size:.78rem}

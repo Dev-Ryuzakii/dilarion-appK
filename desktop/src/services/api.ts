@@ -2235,3 +2235,73 @@ export async function deleteChatForMe(token: string, target: { peerUsername?: st
     throw new Error(body?.detail || 'Failed to delete chat');
   }
 }
+
+// ── Organization-wide admin (broadcast + call control) ─────────────────────
+
+/** Host or org "call_control" moderator mutes/unmutes a meeting participant. */
+export async function muteConferenceParticipant(
+  token: string, conferenceId: number, username: string, muted: boolean,
+): Promise<void> {
+  const res = await apiFetch(
+    `${BASE}/calls/conference/${conferenceId}/participants/${encodeURIComponent(username)}/mute`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ muted }),
+    },
+  );
+  if (!res.ok) {
+    let detail = 'Failed to mute participant';
+    try { const b = await res.json(); detail = b.detail || detail; } catch {}
+    throw new Error(detail);
+  }
+}
+
+/** Send an official org-wide broadcast (needs the "broadcast" privilege). */
+export async function sendOrgBroadcast(
+  token: string, message: string, title?: string,
+): Promise<{ recipients: number; delivered_live: number }> {
+  const res = await apiFetch(`${BASE}/organization/broadcast`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ message, title }),
+  });
+  if (!res.ok) {
+    let detail = 'Failed to send broadcast';
+    try { const b = await res.json(); detail = b.detail || detail; } catch {}
+    throw new Error(detail);
+  }
+  return res.json();
+}
+
+/** Org-wide privileges the current account effectively holds (for showing admin UI). */
+export async function getMyOrgPrivileges(token: string): Promise<string[]> {
+  try {
+    const res = await apiFetch(`${BASE}/organization/me/privileges`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return [];
+    const b = await res.json();
+    return Array.isArray(b.privileges) ? b.privileges : [];
+  } catch { return []; }
+}
+
+/**
+ * Organization-account login. The account the org created at registration now
+ * works inside the app with the same credentials it uses on the web portal.
+ * Username + password (not an invite token). Returns a session token usable
+ * for every app endpoint.
+ */
+export async function loginOrganization(username: string, password: string): Promise<{ token: string }> {
+  const res = await apiFetch(`${BASE}/organization/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+  });
+  if (!res.ok) {
+    let detail = 'Invalid organization username or password';
+    try { const b = await res.json(); detail = b.detail || detail; } catch {}
+    throw new Error(detail);
+  }
+  return res.json();
+}

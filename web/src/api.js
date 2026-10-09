@@ -23,3 +23,10 @@ export const getOrganizationUsers = (token) => request('/organization/users', { 
 export const inviteOrganizationStaff = (token, users) => request('/organization/users', { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify({ users }) })
 export const resetStaffLogin = (token, userId) => request(`/organization/users/${userId}/reset-login`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } })
 export const resendStaffInvite = (token, userId) => request(`/organization/users/${userId}/resend-invite`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } })
+
+// Org-wide admin: delegate company-wide privileges to chosen staff, and send
+// official broadcasts. The organization account holds every privilege.
+export const getOrgStaffPrivileges = (token) => request('/organization/staff', { headers: { Authorization: `Bearer ${token}` } })
+export const setStaffPrivileges = (token, username, privileges) => request(`/organization/staff/${encodeURIComponent(username)}/privileges`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify({ privileges }) })
+export const sendOrgBroadcast = (token, payload) => request('/organization/broadcast', { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify(payload) })
+export const getOrgBroadcasts = (token) => request('/organization/broadcasts', { headers: { Authorization: `Bearer ${token}` } })

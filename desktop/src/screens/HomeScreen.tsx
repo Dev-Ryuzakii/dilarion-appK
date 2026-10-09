@@ -53,6 +53,8 @@ import {
   ChatSettingsItem,
   updateUsername,
   regenerateRecoveryCode,
+  getMyOrgPrivileges,
+  sendOrgBroadcast,
 } from '../services/api';
 import ChatItemMenu from '../components/ChatItemMenu';
 import { Keypair, loadKeypair, saveKeypair, clearKeypair, parseExportedKey } from '../services/keys';
@@ -1981,6 +1983,28 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
   const [loadingGroups, setLoadingGroups] = useState(true);
   const [loadingCalls, setLoadingCalls] = useState(false);
   const [connected, setConnected] = useState(false);
+  // Latest official organization broadcast, shown as a dismissible banner.
+  const [orgBroadcast, setOrgBroadcast] = useState<{ title?: string; message: string; from?: string } | null>(null);
+  // Org-wide privileges this account holds — gates the broadcast composer.
+  const [orgPrivileges, setOrgPrivileges] = useState<string[]>([]);
+  const [showBroadcastCompose, setShowBroadcastCompose] = useState(false);
+  const [broadcastForm, setBroadcastForm] = useState({ title: '', message: '' });
+  const [broadcastState, setBroadcastState] = useState<{ sending: boolean; error: string; notice: string }>({ sending: false, error: '', notice: '' });
+  const canBroadcast = orgPrivileges.includes('broadcast');
+
+  async function submitBroadcast() {
+    const message = broadcastForm.message.trim();
+    if (!message) return;
+    setBroadcastState({ sending: true, error: '', notice: '' });
+    try {
+      const r = await sendOrgBroadcast(token, message, broadcastForm.title.trim() || undefined);
+      setBroadcastState({ sending: false, error: '', notice: `Sent to ${r.recipients} staff (${r.delivered_live} online now).` });
+      setBroadcastForm({ title: '', message: '' });
+      setTimeout(() => { setShowBroadcastCompose(false); setBroadcastState({ sending: false, error: '', notice: '' }); }, 1400);
+    } catch (e: any) {
+      setBroadcastState({ sending: false, error: e.message || 'Failed to send', notice: '' });
+    }
+  }
   const [unread, setUnread] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState('');
   const [typingUsers, setTypingUsers] = useState<Set<string>>(new Set());
@@ -2134,6 +2158,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
     setMonitorToken(token);
     startAppPolicyMonitor(token);
     presenceService.connect(token);
+    getMyOrgPrivileges(token).then(setOrgPrivileges).catch(() => {});
 
     const ping = setInterval(() => {
       setConnected(presenceService.isConnected);
@@ -2144,6 +2169,12 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
         // The presence socket gave up after repeated auth rejections — the
         // session is dead. Send the user back to login instead of looping.
         onLogout();
+        return;
+      }
+      if (msg.type === 'org_broadcast') {
+        const d = msg.data ?? {};
+        setOrgBroadcast({ title: d.title as string | undefined, message: String(d.message ?? ''), from: d.from as string | undefined });
+        try { playBeep(); } catch {}
         return;
       }
       if (msg.type === 'remote_command') {
@@ -2764,6 +2795,21 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
             background: connected ? '#25d366' : '#f59e0b',
             boxShadow: connected ? '0 0 5px #25d366' : 'none',
           }} />
+          {canBroadcast && (
+            <button
+              onClick={() => { setBroadcastState({ sending: false, error: '', notice: '' }); setShowBroadcastCompose(true); }}
+              title="Send an official broadcast to all staff"
+              style={{
+                background: 'rgba(124,58,237,0.15)', border: '1px solid rgba(124,58,237,0.4)',
+                borderRadius: '50%', width: 28, height: 28, display: 'flex', alignItems: 'center',
+                justifyContent: 'center', cursor: 'pointer', flexShrink: 0, color: '#a78bfa',
+              }}
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                <path d="m3 11 14-6v14L3 13z"/><path d="M3 11v2a2 2 0 0 0 2 2h1"/><path d="M11 18.5 9 19a2 2 0 0 1-2-2v-2"/>
+              </svg>
+            </button>
+          )}
           {activeTab === 'chats' && (
             <>
               <button
@@ -3225,6 +3271,66 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
 
   return (
     <div className={`app-shell mobile-pane-${mobilePane}`} style={hs.root}>
+
+      {/* Official organization broadcast banner */}
+      {orgBroadcast && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, zIndex: 3000,
+          background: 'linear-gradient(90deg,#4f2bb0,#7c3aed)', color: '#fff',
+          padding: '10px 18px', display: 'flex', alignItems: 'flex-start', gap: 12,
+          boxShadow: '0 4px 18px rgba(0,0,0,0.3)',
+        }}>
+          <div style={{ fontSize: '1.1rem', lineHeight: 1 }}>📢</div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>
+              {orgBroadcast.title || 'Official announcement'}
+              {orgBroadcast.from ? <span style={{ opacity: 0.8, fontWeight: 400 }}> · {orgBroadcast.from}</span> : null}
+            </div>
+            <div style={{ fontSize: '0.82rem', whiteSpace: 'pre-wrap', opacity: 0.95 }}>{orgBroadcast.message}</div>
+          </div>
+          <button
+            onClick={() => setOrgBroadcast(null)}
+            style={{ background: 'rgba(255,255,255,0.18)', border: 'none', color: '#fff', borderRadius: 6, padding: '3px 9px', cursor: 'pointer', fontSize: '0.8rem' }}
+          >Dismiss</button>
+        </div>
+      )}
+
+      {/* Org broadcast composer — only shown to accounts with the broadcast privilege */}
+      {showBroadcastCompose && (
+        <div
+          onClick={(e) => { if (e.target === e.currentTarget) setShowBroadcastCompose(false); }}
+          style={{ position: 'fixed', inset: 0, zIndex: 3100, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
+        >
+          <div style={{ width: 'min(520px,100%)', background: '#15151c', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 14, padding: 20, color: '#e8e8ee' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+              <span style={{ fontSize: '1.2rem' }}>📢</span>
+              <div>
+                <div style={{ fontWeight: 600 }}>Official broadcast</div>
+                <div style={{ fontSize: '0.78rem', opacity: 0.7 }}>Goes to everyone in your organization on Dilarion</div>
+              </div>
+            </div>
+            <input
+              value={broadcastForm.title}
+              onChange={(e) => setBroadcastForm(f => ({ ...f, title: e.target.value }))}
+              placeholder="Title (optional)"
+              style={{ width: '100%', background: '#0f0f14', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 8, padding: '9px 11px', color: '#fff', fontSize: '0.85rem', marginBottom: 10 }}
+            />
+            <textarea
+              value={broadcastForm.message}
+              onChange={(e) => setBroadcastForm(f => ({ ...f, message: e.target.value }))}
+              placeholder="Write your official announcement…"
+              rows={5}
+              style={{ width: '100%', background: '#0f0f14', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 8, padding: '10px 11px', color: '#fff', fontSize: '0.85rem', resize: 'vertical', fontFamily: 'inherit' }}
+            />
+            {broadcastState.error && <div style={{ color: '#ef9a9a', fontSize: '0.8rem', marginTop: 8 }}>{broadcastState.error}</div>}
+            {broadcastState.notice && <div style={{ color: '#7ee0a0', fontSize: '0.8rem', marginTop: 8 }}>{broadcastState.notice}</div>}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 16 }}>
+              <button onClick={() => setShowBroadcastCompose(false)} style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.18)', color: '#cfcfe0', borderRadius: 8, padding: '8px 14px', cursor: 'pointer', fontSize: '0.82rem' }}>Cancel</button>
+              <button onClick={submitBroadcast} disabled={broadcastState.sending || !broadcastForm.message.trim()} style={{ background: '#7c3aed', border: 'none', color: '#fff', borderRadius: 8, padding: '8px 16px', cursor: 'pointer', fontSize: '0.82rem', opacity: broadcastState.sending || !broadcastForm.message.trim() ? 0.6 : 1 }}>{broadcastState.sending ? 'Sending…' : 'Send broadcast'}</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── SIDEBAR (WhatsApp Desktop-style, labeled rows) ─────────────── */}
       <nav className="app-tab-bar" aria-label="Primary navigation" style={{ ...hs.tabBar, width: layout.nav }}>

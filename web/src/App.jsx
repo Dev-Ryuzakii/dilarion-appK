@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import logoUrl from '../logo.jpg'
 import { parseStaffSheet, downloadStaffTemplate } from './staffSheet'
-import { forgotOrganizationPassword, getOrganization, getOrganizationUsers, inviteOrganizationStaff, loginOrganization, resendStaffInvite, resetOrganizationPassword, resetStaffLogin, submitOrganization } from './api'
+import { forgotOrganizationPassword, getOrganization, getOrganizationUsers, inviteOrganizationStaff, loginOrganization, resendStaffInvite, resetOrganizationPassword, resetStaffLogin, submitOrganization, getOrgStaffPrivileges, setStaffPrivileges, sendOrgBroadcast, getOrgBroadcasts } from './api'
 // Installers are served from file storage (e.g. a public Afribase bucket) set
 // in VITE_DOWNLOAD_BASE.
 // Empty = same folder as the site, for local testing.
@@ -24,6 +24,8 @@ const Icon = ({ name, size = 20 }) => {
     close: <path d="M6 6l12 12M18 6 6 18"/>,
     plus: <path d="M12 5v14M5 12h14"/>,
     send: <><path d="M22 2 11 13"/><path d="m22 2-7 20-4-9-9-4 20-7Z"/></>,
+    megaphone: <><path d="m3 11 14-6v14L3 13z"/><path d="M3 11v2a2 2 0 0 0 2 2h1"/><path d="M11 18.5 9 19a2 2 0 0 1-2-2v-2"/></>,
+    sliders: <><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></>,
   }
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>
 }
@@ -141,9 +143,53 @@ function inviteLabel(user){
   return user.is_active?{text:'Active',cls:'active'}:{text:'Inactive',cls:'inactive'}
 }
 
+const PRIVILEGE_META = {
+  broadcast: { label: 'Broadcast', desc: 'Send official company-wide messages to all staff' },
+  assign_tasks: { label: 'Assign tasks', desc: 'Create and assign tasks to any staff member' },
+  call_control: { label: 'Call control', desc: 'Mute or unmute people in meetings' },
+  manage_staff: { label: 'Manage staff', desc: 'Grant privileges, invite and reset staff logins' },
+  manage_groups: { label: 'Manage groups', desc: 'Create and manage any group' },
+}
+
+function TeamAdminView({ token }){
+  const [data,setData]=useState({staff:[],available:[],loading:true,error:''})
+  const [draft,setDraft]=useState({}) // username -> Set-like object of privileges
+  const [query,setQuery]=useState(''); const [saving,setSaving]=useState(null); const [notice,setNotice]=useState('')
+  const load=()=>getOrgStaffPrivileges(token).then(d=>{setData({staff:d.staff,available:d.available_privileges,loading:false,error:''});const dr={};d.staff.forEach(s=>{dr[s.username]=new Set(s.org_privileges||[])});setDraft(dr)}).catch(e=>setData({staff:[],available:[],loading:false,error:e.message}))
+  useEffect(()=>{load()},[token])
+  const toggle=(username,priv)=>setDraft(d=>{const next={...d};const set=new Set(next[username]||[]);set.has(priv)?set.delete(priv):set.add(priv);next[username]=set;return next})
+  const save=async(username)=>{setSaving(username);setNotice('');try{await setStaffPrivileges(token,username,[...(draft[username]||[])]);setNotice(`Saved privileges for @${username}.`);load()}catch(e){setNotice(e.message)}finally{setSaving(null)}}
+  if(data.loading)return <div className="loader-inline"><div className="loader"/><p>Loading your team…</p></div>
+  if(data.error)return <div className="form-error">{data.error}</div>
+  const filtered=data.staff.filter(s=>`${s.full_name} ${s.username} ${s.department}`.toLowerCase().includes(query.toLowerCase()))
+  return <div className="roster-card"><div className="roster-tools"><div><h2>Team admins</h2><span>Grant company-wide powers to chosen staff</span></div><label className="search"><Icon name="search"/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search staff"/></label></div>
+    {notice&&<div className="notice-bar">{notice}<button className="icon-button" onClick={()=>setNotice('')} aria-label="Dismiss"><Icon name="close" size={14}/></button></div>}
+    <div className="table-wrap"><table><thead><tr><th>Staff member</th><th>Privileges</th><th/></tr></thead><tbody>{filtered.map(s=>{const set=draft[s.username]||new Set();const dirty=[...set].sort().join(',')!==(s.org_privileges||[]).slice().sort().join(',');return <tr key={s.id}><td><div className="person"><span>{(s.full_name||s.username).split(' ').map(x=>x[0]).join('').slice(0,2).toUpperCase()}</span><div><strong>{s.full_name||s.username}</strong><small>@{s.username}{s.department?` · ${s.department}`:''}</small></div></div></td>
+      <td><div className="priv-grid">{data.available.map(p=>{const meta=PRIVILEGE_META[p]||{label:p,desc:''};return <label key={p} className="priv-check" title={meta.desc}><input type="checkbox" checked={set.has(p)} onChange={()=>toggle(s.username,p)}/><span>{meta.label}</span></label>})}</div></td>
+      <td className="row-action"><button className="button primary small" disabled={!dirty||saving===s.username} onClick={()=>save(s.username)}>{saving===s.username?'Saving…':dirty?'Save':'Saved'}</button></td></tr>})}</tbody></table>
+      {filtered.length===0&&<div className="empty-state"><Icon name="sliders" size={34}/><h3>No staff yet</h3><p>Invite staff from the directory first, then grant them admin privileges here.</p></div>}</div>
+    <p className="readonly-note"><Icon name="lock" size={15}/> Your organization account always holds every privilege. Granting a staff member any privilege makes them an org admin.</p></div>
+}
+
+function BroadcastView({ token,orgName }){
+  const [form,setForm]=useState({title:'',message:''}); const [state,setState]=useState({loading:false,error:'',notice:''})
+  const [history,setHistory]=useState([])
+  const load=()=>getOrgBroadcasts(token).then(d=>setHistory(d.broadcasts||[])).catch(()=>{})
+  useEffect(()=>{load()},[token])
+  const send=async(e)=>{e.preventDefault();if(!form.message.trim())return;setState({loading:true,error:'',notice:''});try{const r=await sendOrgBroadcast(token,{title:form.title.trim()||undefined,message:form.message.trim()});setState({loading:false,error:'',notice:`Sent to ${r.recipients} staff (${r.delivered_live} online now).`});setForm({title:'',message:''});load()}catch(err){setState({loading:false,error:err.message,notice:''})}}
+  return <div className="broadcast-wrap"><form className="roster-card broadcast-card" onSubmit={send}><div className="roster-tools"><div><h2>Official broadcast</h2><span>Goes to everyone in {orgName||'your organization'} on Dilarion</span></div></div>
+    <Field label="Title (optional)" value={form.title} onChange={e=>setForm({...form,title:e.target.value})} placeholder="e.g. Office closed Friday"/>
+    <label className="field"><span>Message</span><textarea value={form.message} onChange={e=>setForm({...form,message:e.target.value})} placeholder="Write your official announcement…" rows={5} required/></label>
+    {state.error&&<div className="form-error">{state.error}</div>}{state.notice&&<div className="notice-bar">{state.notice}</div>}
+    <button className="button primary" disabled={state.loading}>{state.loading?'Sending…':'Send broadcast'} <Icon name="megaphone" size={16}/></button></form>
+    <div className="roster-card"><div className="roster-tools"><div><h2>Recent broadcasts</h2><span>{history.length} sent</span></div></div>
+      {history.length===0?<div className="empty-state"><Icon name="megaphone" size={34}/><h3>No broadcasts yet</h3><p>Your official announcements will appear here.</p></div>:<ul className="broadcast-list">{history.map(b=><li key={b.id}><div className="broadcast-item-head"><strong>{b.title||'Announcement'}</strong><small>{new Date(b.created_at).toLocaleString()}</small></div><p>{b.message}</p><small className="broadcast-from">— {b.from}</small></li>)}</ul>}</div></div>
+}
+
 function Dashboard({ token,logout }) {
   const [data,setData]=useState({organization:null,users:[],loading:true,error:''}); const [query,setQuery]=useState('')
   const [inviting,setInviting]=useState(false); const [notice,setNotice]=useState(''); const [resending,setResending]=useState(null)
+  const [section,setSection]=useState('staff')
   const load=()=>Promise.all([getOrganization(token),getOrganizationUsers(token)]).then(([organization,roster])=>setData({organization,users:roster.users,loading:false,error:''})).catch(error=>setData({organization:null,users:[],loading:false,error:error.message}))
   useEffect(()=>{load()},[token])
   const filtered=useMemo(()=>data.users.filter(u=>`${u.full_name} ${u.username} ${u.email} ${u.department}`.toLowerCase().includes(query.toLowerCase())),[data.users,query])
@@ -152,13 +198,17 @@ function Dashboard({ token,logout }) {
   if(data.loading)return <main className="loading-screen"><div className="loader"/><p>Opening your organization portal…</p></main>
   if(data.error)return <main className="loading-screen"><p>{data.error}</p><button className="button primary" onClick={logout}>Return to login</button></main>
   const canInvite=data.organization?.permissions?.invite_staff!==false; const canReset=data.organization?.permissions?.reset_staff_login===true
-  return <main className="dashboard"><aside className="sidebar"><div><div className="side-org"><div className="org-avatar">{data.organization?.name?.slice(0,2).toUpperCase()}</div><div><small>ORGANIZATION</small><strong>{data.organization?.name}</strong></div></div><nav><button className="active"><Icon name="users"/> Staff directory</button></nav></div><button className="logout" onClick={logout}><Icon name="logout"/> Sign out</button></aside><section className="dash-content">
+  return <main className="dashboard"><aside className="sidebar"><div><div className="side-org"><div className="org-avatar">{data.organization?.name?.slice(0,2).toUpperCase()}</div><div><small>ORGANIZATION</small><strong>{data.organization?.name}</strong></div></div><nav><button className={section==='staff'?'active':''} onClick={()=>setSection('staff')}><Icon name="users"/> Staff directory</button><button className={section==='team'?'active':''} onClick={()=>setSection('team')}><Icon name="sliders"/> Team admins</button><button className={section==='broadcast'?'active':''} onClick={()=>setSection('broadcast')}><Icon name="megaphone"/> Broadcast</button></nav></div><button className="logout" onClick={logout}><Icon name="logout"/> Sign out</button></aside><section className="dash-content">
+    {section==='team'&&<><div className="dash-top"><div><span className="kicker">ORGANIZATION PORTAL</span><h1>Team admins</h1><p>Delegate company-wide powers to staff in {data.organization?.name}.</p></div></div><TeamAdminView token={token}/></>}
+    {section==='broadcast'&&<><div className="dash-top"><div><span className="kicker">ORGANIZATION PORTAL</span><h1>Broadcast</h1><p>Send an official message to everyone in {data.organization?.name}.</p></div></div><BroadcastView token={token} orgName={data.organization?.name}/></>}
+    {section==='staff'&&<>
     <div className="dash-top"><div><span className="kicker">ORGANIZATION PORTAL</span><h1>Staff directory</h1><p>Everyone currently assigned to {data.organization?.name}.</p></div><div className="dash-actions"><span className="access-pill"><Icon name="users" size={15}/> View &amp; invite access</span>{canInvite&&<button className="button primary" onClick={()=>{setNotice('');setInviting(true)}}><Icon name="plus" size={16}/> Invite staff</button>}</div></div>
     {notice&&<div className="notice-bar">{notice}<button className="icon-button" onClick={()=>setNotice('')} aria-label="Dismiss"><Icon name="close" size={14}/></button></div>}
     <div className="summary-row"><div><Icon name="users"/><span><strong>{data.users.length}</strong><small>Total staff</small></span></div><div><span className="status-dot"/><span><strong>{data.users.filter(u=>u.invitation_status!=='pending'&&u.is_active).length}</strong><small>Active accounts</small></span></div><div><Icon name="send"/><span><strong>{data.users.filter(u=>u.invitation_status==='pending').length}</strong><small>Invitations pending</small></span></div></div>
     <div className="roster-card"><div className="roster-tools"><div><h2>People</h2><span>{filtered.length} {filtered.length===1?'person':'people'}</span></div><label className="search"><Icon name="search"/><input value={query} onChange={(e)=>setQuery(e.target.value)} placeholder="Search staff"/></label></div><div className="table-wrap"><table><thead><tr><th>Staff member</th><th>Department</th><th>Contact</th><th>Status</th><th/></tr></thead><tbody>{filtered.map(user=>{const label=inviteLabel(user);return <tr key={user.id}><td><div className="person"><span>{(user.full_name||user.username).split(' ').map(x=>x[0]).join('').slice(0,2).toUpperCase()}</span><div><strong>{user.full_name||user.username}</strong><small>@{user.username}</small></div></div></td><td>{user.department||'—'}</td><td><strong className="contact-email">{user.email||'—'}</strong><small>{user.phone_number}</small></td><td><span className={`status ${label.cls}`}>{label.text}</span></td><td className="row-action">{canInvite&&user.invitation_status==='pending'&&<button className="text-button inline" disabled={resending===user.id} onClick={()=>resend(user)}>{resending===user.id?'Sending…':'Resend invite'}</button>}{canReset&&user.invitation_status!=='pending'&&<button className="text-button inline" disabled={resending===user.id} onClick={()=>resetLogin(user)}>{resending===user.id?'Resetting…':'Reset login'}</button>}</td></tr>})}</tbody></table>{filtered.length===0&&<div className="empty-state"><Icon name="users" size={34}/><h3>{query?'No matching staff':'No staff added yet'}</h3><p>{query?'Try a different search term.':'Invite your first staff member to get started.'}</p>{!query&&canInvite&&<button className="button primary" onClick={()=>setInviting(true)}><Icon name="plus" size={16}/> Invite staff</button>}</div>}</div></div>
     <p className="readonly-note"><Icon name="lock" size={15}/> You can view and invite staff. To edit or suspend an account, contact a Dilarion administrator.</p>
     {inviting&&<InviteModal token={token} onClose={()=>setInviting(false)} onInvited={(count)=>{setInviting(false);setNotice(`${count} invitation${count===1?'':'s'} sent by email and SMS.`);load()}}/>}
+    </>}
   </section></main>
 }
 

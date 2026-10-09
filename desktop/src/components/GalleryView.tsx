@@ -5,6 +5,7 @@ import { CloseIcon as SharedCloseIcon } from './Icons';
 import {
   getLiveKitToken, getIceServers, getUsers, conferenceInvite as apiConferenceInvite, Contact,
   getWaitingRoom, admitFromWaitingRoom, denyFromWaitingRoom, WaitingParticipant,
+  muteConferenceParticipant, getMyOrgPrivileges,
   startConferenceRecording, stopConferenceRecording,
   sendWhiteboardOpen, sendWhiteboardClose,
   requestRemoteControl, respondRemoteControl, endRemoteControl, relayRustdeskSession,
@@ -120,6 +121,11 @@ export default function GalleryView({
   const [pinnedIdentity, setPinnedIdentity] = useState<string | null>(null);
 
   const [isHost, setIsHost] = useState(false);
+  // Org-granted "call_control" moderators can mute others even when not host.
+  const [hasCallControlPriv, setHasCallControlPriv] = useState(false);
+  const canModerate = isHost || hasCallControlPriv;
+  // Toast shown when a host/moderator mutes this client remotely.
+  const [forceMutedNote, setForceMutedNote] = useState<string | null>(null);
   const [recording, setRecording] = useState(false);
   const [recordingBusy, setRecordingBusy] = useState(false);
   const [recordingError, setRecordingError] = useState<string | null>(null);
@@ -310,11 +316,27 @@ export default function GalleryView({
   // every "someone wants to join" WS push instead of polling.
   useEffect(() => {
     getWaitingRoom(token, conferenceId).then(list => { setWaiting(list); setIsHost(true); }).catch(() => {});
+    getMyOrgPrivileges(token).then(privs => setHasCallControlPriv(privs.includes('call_control'))).catch(() => {});
     const onMsg = (msg: WsMessage) => {
       if (msg.type === 'conference_join_request') {
         const data = msg.data || {};
         if (data.conference_id !== conferenceId) return;
         setWaiting(prev => (prev.some(w => w.user_id === data.user_id) ? prev : [...prev, { user_id: data.user_id, username: data.username }]));
+      } else if (msg.type === 'conference_force_mute') {
+        const data = msg.data || {};
+        if (data.conference_id !== conferenceId && data.conference_id !== activeConferenceId) return;
+        const room = roomRef.current;
+        if (data.muted) {
+          room?.localParticipant.setMicrophoneEnabled(false).catch(() => {});
+          setMicOn(false);
+          setForceMutedNote(`You were muted by ${data.by || 'the host'}`);
+          setTimeout(() => setForceMutedNote(null), 4000);
+        } else {
+          room?.localParticipant.setMicrophoneEnabled(true).catch(() => {});
+          setMicOn(true);
+          setForceMutedNote(`${data.by || 'The host'} unmuted you`);
+          setTimeout(() => setForceMutedNote(null), 4000);
+        }
       } else if (msg.type === 'conference_recording_started') {
         if (msg.data?.conference_id === conferenceId) setRecording(true);
       } else if (msg.type === 'conference_recording_stopped') {
@@ -474,6 +496,17 @@ export default function GalleryView({
     const next = !camOn;
     await room.localParticipant.setCameraEnabled(next);
     setCamOn(next);
+  }
+
+  // Host / org call moderator: mute or unmute another participant's mic. The
+  // participant's LiveKit identity IS their username, which the backend needs.
+  async function moderateParticipantMic(identity: string, muted: boolean) {
+    const username = identity.replace(SCREEN_SHARE_SUFFIX, '');
+    try {
+      await muteConferenceParticipant(token, activeConferenceId, username, muted);
+    } catch (e) {
+      console.warn('[meeting] mute participant failed', e);
+    }
   }
 
   async function toggleScreenShare() {
@@ -925,6 +958,16 @@ export default function GalleryView({
         </div>
       )}
 
+      {/* Remote mute/unmute notice from a host or org call moderator */}
+      {forceMutedNote && (
+        <div style={{
+          position: 'fixed', top: 18, left: '50%', transform: 'translateX(-50%)', zIndex: 970,
+          background: '#1a1a22', color: '#fff', border: '1px solid rgba(255,255,255,0.14)',
+          borderRadius: 10, padding: '9px 16px', fontSize: '0.85rem',
+          boxShadow: '0 8px 24px rgba(0,0,0,0.45)',
+        }}>{forceMutedNote}</div>
+      )}
+
       {/* Floating reactions — rise and fade, purely decorative, no persistence */}
       <div style={{ position: 'fixed', right: 24, bottom: 100, zIndex: 960, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, pointerEvents: 'none' }}>
         {floatingReactions.map(r => (
@@ -1098,10 +1141,21 @@ export default function GalleryView({
               </div>
             )}
             <div style={{ padding: '10px 14px', maxHeight: '35%', overflowY: 'auto', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
-              {tileList.map(t => (
+              {tileList.filter(t => !t.isScreenShare).map(t => (
                 <div key={t.identity} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 2px', color: '#e8e8ee', fontSize: '0.82rem' }}>
                   <span style={{ flex: 1 }}>{t.displayName}{t.isLocal ? ' (you)' : ''}</span>
                   {!t.micOn && <span style={{ color: '#aaa', fontSize: '0.72rem' }}>muted</span>}
+                  {canModerate && !t.isLocal && (
+                    <button
+                      onClick={() => moderateParticipantMic(t.identity, t.micOn)}
+                      title={t.micOn ? `Mute ${t.displayName}` : `Ask ${t.displayName} to unmute`}
+                      style={{
+                        background: t.micOn ? 'rgba(239,68,68,0.15)' : 'rgba(255,255,255,0.08)',
+                        border: '1px solid rgba(255,255,255,0.14)', color: t.micOn ? '#ef9a9a' : '#cfcfe0',
+                        borderRadius: 6, padding: '3px 8px', fontSize: '0.72rem', cursor: 'pointer',
+                      }}
+                    >{t.micOn ? 'Mute' : 'Unmute'}</button>
+                  )}
                 </div>
               ))}
             </div>

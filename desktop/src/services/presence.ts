@@ -13,7 +13,7 @@ const WS_BASE = (import.meta.env.VITE_WS_BASE as string | undefined) || 'wss://a
 export const CALL_RELEVANT_WS_TYPES = new Set([
   'call_status_update', 'ice_candidate', 'call_media_state', 'call_end',
   'conference_invite', 'conference_peer_connect', 'conference_signal',
-  'conference_participant_left', 'auth_expired',
+  'conference_participant_left', 'conference_force_mute', 'auth_expired',
 ]);
 const WS_FORWARD_EVENT = 'dilarion://ws-forward';
 

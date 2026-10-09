@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { login, requestPasswordReset, signUp, resetWithRecoveryCode, activateAccount } from '../services/api';
+import { login, requestPasswordReset, signUp, resetWithRecoveryCode, activateAccount, loginOrganization } from '../services/api';
 import OnboardingScreen from './OnboardingScreen';
 
 interface Props {
@@ -89,6 +89,16 @@ export default function LoginScreen({ onLogin, onBack, initialView = 'login', no
       }
       onLogin(sessionToken, username);
     } catch (err: any) {
+      // Fall back to an organization-account login: the org account signs in
+      // with username + password (typed in the token field) and now runs its
+      // organization from inside the app.
+      try {
+        const org = await loginOrganization(username.trim().toLowerCase(), userToken);
+        if (org?.token) {
+          onLogin(org.token, username.trim().toLowerCase());
+          return;
+        }
+      } catch {}
       setError(err.message || 'Login failed');
     } finally {
       setLoading(false);
