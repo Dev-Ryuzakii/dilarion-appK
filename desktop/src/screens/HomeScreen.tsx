@@ -1953,7 +1953,13 @@ function stopRinging() {
 const CALLS_UNAVAILABLE = 'Calling is not available on this version. Use the Dilarion phone or desktop app to make and receive calls.';
 
 export default function HomeScreen({ token, username, onLogout }: Props) {
-  const callsSupported = isTauri();
+  // Calls work in the desktop app (own OS window) and now on the web build too
+  // (rendered in-page via InPageCallHost over WebRTC/LiveKit). Only block when
+  // the browser genuinely lacks WebRTC (very old browsers, non-secure context).
+  const callsSupported = isTauri() || (
+    typeof navigator !== 'undefined' && !!navigator.mediaDevices &&
+    typeof RTCPeerConnection !== 'undefined'
+  );
   // Version shown in the UI. Baked in at build time (__APP_VERSION__ from
   // tauri.conf.json) so it always shows, with the Tauri runtime value preferred
   // when available. Tracks OTA updates automatically either way.
