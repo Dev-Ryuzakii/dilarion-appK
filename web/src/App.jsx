@@ -195,10 +195,12 @@ function BroadcastView({ token,orgName }){
   useEffect(()=>{load()},[token])
   const send=async(e)=>{e.preventDefault();if(!form.message.trim())return;setState({loading:true,error:'',notice:''});try{const r=await sendOrgBroadcast(token,{title:form.title.trim()||undefined,message:form.message.trim()});setState({loading:false,error:'',notice:`Sent to ${r.recipients} staff (${r.delivered_live} online now).`});setForm({title:'',message:''});load()}catch(err){setState({loading:false,error:err.message,notice:''})}}
   return <div className="broadcast-wrap"><form className="roster-card broadcast-card" onSubmit={send}><div className="roster-tools"><div><h2>Official broadcast</h2><span>Goes to everyone in {orgName||'your organization'} on Dilarion</span></div></div>
-    <Field label="Title (optional)" value={form.title} onChange={e=>setForm({...form,title:e.target.value})} placeholder="e.g. Office closed Friday"/>
-    <label className="field"><span>Message</span><textarea value={form.message} onChange={e=>setForm({...form,message:e.target.value})} placeholder="Write your official announcement…" rows={5} required/></label>
-    {state.error&&<div className="form-error">{state.error}</div>}{state.notice&&<div className="notice-bar">{state.notice}</div>}
-    <button className="button primary" disabled={state.loading}>{state.loading?'Sending…':'Send broadcast'} <Icon name="megaphone" size={16}/></button></form>
+    <div className="broadcast-body">
+      <Field label="Title (optional)" value={form.title} onChange={e=>setForm({...form,title:e.target.value})} placeholder="e.g. Office closed Friday"/>
+      <label className="field"><span>Message</span><textarea value={form.message} onChange={e=>setForm({...form,message:e.target.value})} placeholder="Write your official announcement…" rows={5} required/></label>
+      {state.error&&<div className="form-error">{state.error}</div>}{state.notice&&<div className="notice-bar">{state.notice}</div>}
+      <button className="button primary" disabled={state.loading}>{state.loading?'Sending…':'Send broadcast'} <Icon name="megaphone" size={16}/></button>
+    </div></form>
     <div className="roster-card"><div className="roster-tools"><div><h2>Recent broadcasts</h2><span>{history.length} sent</span></div></div>
       {history.length===0?<div className="empty-state"><Icon name="megaphone" size={34}/><h3>No broadcasts yet</h3><p>Your official announcements will appear here.</p></div>:<ul className="broadcast-list">{history.map(b=><li key={b.id}><div className="broadcast-item-head"><strong>{b.title||'Announcement'}</strong><small>{new Date(b.created_at).toLocaleString()}</small></div><p>{b.message}</p><small className="broadcast-from">— {b.from}</small></li>)}</ul>}</div></div>
 }
