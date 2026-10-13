@@ -179,14 +179,17 @@ fun SettingsScreen(
             SettingsCard {
                 Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
                     val statuses = listOf("available" to "Available", "busy" to "Busy", "dnd" to "Do Not Disturb", "away" to "Away", "offline" to "Appear Offline")
-                    Row(modifier = Modifier.fillMaxWidth()) {
+                    @OptIn(ExperimentalLayoutApi::class)
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
                         statuses.forEach { (value, label) ->
                             val selected = uiState.availabilityStatus == value
                             FilterChip(
                                 selected = selected,
                                 onClick = { viewModel.setAvailability(value, statusTextInput) },
                                 label = { Text(label, fontSize = 11.sp) },
-                                modifier = Modifier.padding(end = 6.dp, bottom = 6.dp),
                             )
                         }
                     }
