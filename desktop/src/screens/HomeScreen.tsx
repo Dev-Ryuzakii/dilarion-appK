@@ -55,6 +55,11 @@ import {
   regenerateRecoveryCode,
   getMyOrgPrivileges,
   sendOrgBroadcast,
+  getNotificationSettings,
+  updateNotificationSettings,
+  NotificationSettings,
+  searchAll,
+  SearchResults,
 } from '../services/api';
 import ChatItemMenu from '../components/ChatItemMenu';
 import { Keypair, loadKeypair, saveKeypair, clearKeypair, parseExportedKey } from '../services/keys';
@@ -940,6 +945,101 @@ interface SettingsMainProps {
   page: 'account' | 'appearance';
 }
 
+const hourSelectStyle: React.CSSProperties = {
+  background: 'var(--input-bg)', border: '1px solid var(--border-color)', borderRadius: 8,
+  color: 'var(--text-primary)', fontSize: '0.82rem', padding: '6px 8px', cursor: 'pointer',
+};
+
+function fmtBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function SearchModal({ token, onClose, onPickPerson, onPickGroup }: {
+  token: string;
+  onClose: () => void;
+  onPickPerson: (username: string) => void;
+  onPickGroup: (id: number) => void;
+}) {
+  const [q, setQ] = useState('');
+  const [res, setRes] = useState<SearchResults | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const t = q.trim();
+    if (t.length < 2) { setRes(null); setLoading(false); return; }
+    setLoading(true);
+    const id = setTimeout(() => {
+      searchAll(token, t).then(setRes).catch(() => setRes(null)).finally(() => setLoading(false));
+    }, 250);
+    return () => clearTimeout(id);
+  }, [q, token]);
+
+  const empty = res && !res.people.length && !res.groups.length && !res.files.length;
+  const rowStyle: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 8, cursor: 'pointer', color: 'var(--text-primary)' };
+  const sectionLabel: React.CSSProperties = { fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '12px 4px 4px' };
+
+  return (
+    <div onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      style={{ position: 'fixed', inset: 0, zIndex: 3100, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', paddingTop: '8vh' }}>
+      <div style={{ width: 'min(560px,94%)', maxHeight: '78vh', display: 'flex', flexDirection: 'column', background: 'var(--bg-panel,#15151c)', border: '1px solid var(--border-color)', borderRadius: 14, overflow: 'hidden' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '14px 16px', borderBottom: '1px solid var(--border-color)' }}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>
+          <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="Search people, channels, files…"
+            style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', color: 'var(--text-primary)', fontSize: '0.95rem' }} />
+          {loading && <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>…</span>}
+          <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '0.8rem' }}>Esc</button>
+        </div>
+        <div style={{ overflowY: 'auto', padding: '6px 10px 14px' }}>
+          {q.trim().length < 2 && <div style={{ padding: 30, textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.82rem' }}>Type at least 2 characters.</div>}
+          {empty && <div style={{ padding: 30, textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.82rem' }}>No matches. Message text is searched inside each chat.</div>}
+          {res && res.people.length > 0 && <>
+            <div style={sectionLabel}>People</div>
+            {res.people.map(p => (
+              <div key={p.username} style={rowStyle} onClick={() => onPickPerson(p.username)}
+                onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-card)')} onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
+                <span style={{ width: 32, height: 32, borderRadius: '50%', background: 'var(--bg-card)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', fontWeight: 700 }}>
+                  {(p.full_name || p.username).slice(0, 2).toUpperCase()}
+                </span>
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ fontWeight: 600, fontSize: '0.86rem' }}>{p.full_name || p.username}</span>
+                  <span style={{ display: 'block', fontSize: '0.72rem', color: 'var(--text-muted)' }}>@{p.username}{p.department ? ` · ${p.department}` : ''}</span>
+                </span>
+              </div>
+            ))}
+          </>}
+          {res && res.groups.length > 0 && <>
+            <div style={sectionLabel}>Channels & groups</div>
+            {res.groups.map(g => (
+              <div key={g.id} style={rowStyle} onClick={() => onPickGroup(g.id)}
+                onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-card)')} onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
+                <span style={{ width: 32, height: 32, borderRadius: 8, background: 'var(--bg-card)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>#</span>
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ fontWeight: 600, fontSize: '0.86rem' }}>{g.name}</span>
+                  <span style={{ display: 'block', fontSize: '0.72rem', color: 'var(--text-muted)' }}>{g.member_count} members{g.description ? ` · ${g.description}` : ''}</span>
+                </span>
+              </div>
+            ))}
+          </>}
+          {res && res.files.length > 0 && <>
+            <div style={sectionLabel}>Files</div>
+            {res.files.map(f => (
+              <div key={f.media_id} style={{ ...rowStyle, cursor: 'default' }}>
+                <span style={{ width: 32, height: 32, borderRadius: 8, background: 'var(--bg-card)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1rem' }}>📎</span>
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ fontWeight: 600, fontSize: '0.86rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.filename}</span>
+                  <span style={{ display: 'block', fontSize: '0.72rem', color: 'var(--text-muted)' }}>{f.media_type} · {fmtBytes(f.file_size)}</span>
+                </span>
+              </div>
+            ))}
+          </>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onClearMasterToken, onLogout, page }: SettingsMainProps) {
   const [appearance, setAppearanceState] = useState<AppearancePrefs>(loadAppearance);
 
@@ -1001,6 +1101,22 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
   const [statusText, setStatusText] = useState('');
   const [statusSaving, setStatusSaving] = useState(false);
   const [statusError, setStatusError] = useState<string | null>(null);
+
+  const [notif, setNotif] = useState<NotificationSettings | null>(null);
+  useEffect(() => { getNotificationSettings(token).then(setNotif).catch(() => {}); }, [token]);
+  async function saveNotif(patch: Partial<NotificationSettings>) {
+    const prev = notif;
+    setNotif(n => (n ? { ...n, ...patch } : n));
+    try {
+      // Send the client's current UTC offset so the server evaluates quiet
+      // hours in the user's local time.
+      const offset = -new Date().getTimezoneOffset(); // minutes east of UTC
+      const saved = await updateNotificationSettings(token, { ...patch, quiet_hours_utc_offset: offset });
+      setNotif(saved);
+    } catch {
+      setNotif(prev);
+    }
+  }
 
   async function handlePfpSelected(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -1398,6 +1514,43 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
         />
         {statusError && <span style={{ fontSize: '0.72rem', color: '#ef4444' }}>{statusError}</span>}
       </div>
+
+      {/* Notifications */}
+      {notif && (
+        <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 12, padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Notifications</div>
+
+          <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, cursor: 'pointer' }}>
+            <span>
+              <span style={{ fontSize: '0.86rem', color: 'var(--text-primary)', fontWeight: 600 }}>Pause all notifications</span>
+              <span style={{ display: 'block', fontSize: '0.72rem', color: 'var(--text-muted)' }}>Silence messages, tasks and reminders. Calls still ring.</span>
+            </span>
+            <input type="checkbox" checked={notif.mute_all_notifications} onChange={e => saveNotif({ mute_all_notifications: e.target.checked })} style={{ width: 18, height: 18, accentColor: 'var(--accent)' }} />
+          </label>
+
+          <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, cursor: 'pointer' }}>
+            <span>
+              <span style={{ fontSize: '0.86rem', color: 'var(--text-primary)', fontWeight: 600 }}>Quiet hours</span>
+              <span style={{ display: 'block', fontSize: '0.72rem', color: 'var(--text-muted)' }}>Mute non-urgent notifications during a daily window.</span>
+            </span>
+            <input type="checkbox" checked={notif.quiet_hours_enabled} onChange={e => saveNotif({ quiet_hours_enabled: e.target.checked })} style={{ width: 18, height: 18, accentColor: 'var(--accent)' }} />
+          </label>
+
+          {notif.quiet_hours_enabled && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: '0.82rem', color: 'var(--text-primary)' }}>
+              <span>From</span>
+              <select value={notif.quiet_hours_start ?? 22} onChange={e => saveNotif({ quiet_hours_start: Number(e.target.value) })} style={hourSelectStyle}>
+                {Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{String(h).padStart(2, '0')}:00</option>)}
+              </select>
+              <span>to</span>
+              <select value={notif.quiet_hours_end ?? 7} onChange={e => saveNotif({ quiet_hours_end: Number(e.target.value) })} style={hourSelectStyle}>
+                {Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{String(h).padStart(2, '0')}:00</option>)}
+              </select>
+              <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>your local time</span>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Master token section */}
       <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 12, padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -1979,6 +2132,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
     try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout)); } catch { /* storage unavailable */ }
   }, [layout]);
   const [selectedChat, setSelectedChat] = useState<string | null>(null);
+  const [showSearch, setShowSearch] = useState(false);
   const [selectedGroup, setSelectedGroup] = useState<number | null>(null);
   const [selectedCallId, setSelectedCallId] = useState<number | null>(null);
   const [masterToken, setMasterToken] = useState<string | null>(null);
@@ -2801,6 +2955,17 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
             background: connected ? '#25d366' : '#f59e0b',
             boxShadow: connected ? '0 0 5px #25d366' : 'none',
           }} />
+          <button
+            onClick={() => setShowSearch(true)}
+            title="Search people, channels and files"
+            style={{
+              background: 'var(--bg-card)', border: '1px solid var(--border-color)',
+              borderRadius: '50%', width: 28, height: 28, display: 'flex', alignItems: 'center',
+              justifyContent: 'center', cursor: 'pointer', flexShrink: 0, color: 'var(--text-muted)',
+            }}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>
+          </button>
           {canBroadcast && (
             <button
               onClick={() => { setBroadcastState({ sending: false, error: '', notice: '' }); setShowBroadcastCompose(true); }}
@@ -3302,6 +3467,15 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
       )}
 
       {/* Org broadcast composer — only shown to accounts with the broadcast privilege */}
+      {showSearch && (
+        <SearchModal
+          token={token}
+          onClose={() => setShowSearch(false)}
+          onPickPerson={(u) => { setShowSearch(false); openContact(u); }}
+          onPickGroup={(id) => { setShowSearch(false); openGroup(id); }}
+        />
+      )}
+
       {showBroadcastCompose && (
         <div
           onClick={(e) => { if (e.target === e.currentTarget) setShowBroadcastCompose(false); }}

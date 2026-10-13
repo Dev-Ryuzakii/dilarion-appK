@@ -2318,3 +2318,46 @@ export async function loginOrganization(username: string, password: string): Pro
   }
   return res.json();
 }
+
+// ── Phase 2: unified search + notification settings ─────────────────────────
+
+export interface SearchResults {
+  query: string;
+  people: { username: string; full_name: string | null; department: string | null; availability_status: string | null }[];
+  groups: { id: number; name: string; description: string | null; member_count: number }[];
+  files: { media_id: string; filename: string; media_type: string; content_type: string; file_size: number; group_id: number | null; created_at: string | null }[];
+}
+
+export async function searchAll(token: string, q: string): Promise<SearchResults> {
+  const res = await apiFetch(`${BASE}/search?q=${encodeURIComponent(q)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error('Search failed');
+  return res.json();
+}
+
+export interface NotificationSettings {
+  mute_all_notifications: boolean;
+  quiet_hours_enabled: boolean;
+  quiet_hours_start: number | null;
+  quiet_hours_end: number | null;
+  quiet_hours_utc_offset: number;
+}
+
+export async function getNotificationSettings(token: string): Promise<NotificationSettings> {
+  const res = await apiFetch(`${BASE}/users/me/notification-settings`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error('Failed to load notification settings');
+  return res.json();
+}
+
+export async function updateNotificationSettings(token: string, patch: Partial<NotificationSettings>): Promise<NotificationSettings> {
+  const res = await apiFetch(`${BASE}/users/me/notification-settings`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) throw new Error('Failed to save notification settings');
+  return res.json();
+}
