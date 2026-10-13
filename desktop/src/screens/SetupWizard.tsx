@@ -70,8 +70,12 @@ export default function SetupWizard({ token, username, children }: {
 
   return (
     <div style={s.root}>
+      <div style={s.logoWrap}>
+        <img src="/logo.jpg" alt="Dilarion" style={s.logo} onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
+      </div>
+      <h1 style={s.heading}>Secure your account</h1>
+      <div style={s.progress}>Step {stepNo} of {total}</div>
       <div style={s.card}>
-        <div style={s.progress}>Step {stepNo} of {total}</div>
         {current === 'voice' && <VoiceStep token={token} onDone={next} onSkip={next} />}
         {current === 'master' && <MasterStep token={token} onDone={(t) => { masterRef.current = t; next(); }} onSkip={next} />}
         {current === 'twofa' && <TwoFaStep token={token} presetMaster={masterRef.current} onDone={next} onSkip={next} />}
@@ -253,8 +257,11 @@ function TwoFaStep({ token, presetMaster, onDone, onSkip }: { token: string; pre
 }
 
 const s: Record<string, React.CSSProperties> = {
-  root: { minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg, #0c0c0c)', padding: 16, boxSizing: 'border-box' },
-  card: { width: 420, maxWidth: '100%', background: 'var(--bg-panel, #141414)', border: '1px solid var(--border-color, #262626)', borderRadius: 14, padding: '26px 24px', display: 'flex', flexDirection: 'column', gap: 10 },
+  root: { minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, background: 'var(--bg, #0c0c0c)', padding: 24, boxSizing: 'border-box' },
+  logoWrap: { width: 72, height: 72, borderRadius: '50%', overflow: 'hidden', background: '#1e1e1e', display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  logo: { width: '100%', height: '100%', objectFit: 'cover' },
+  heading: { margin: '6px 0 0', fontSize: '1.35rem', fontWeight: 700, color: 'var(--text-primary, #f3f4f6)', textAlign: 'center' },
+  card: { width: 420, maxWidth: '100%', background: 'var(--bg-panel, #141414)', border: '1px solid var(--border-color, #262626)', borderRadius: 14, padding: '26px 24px', display: 'flex', flexDirection: 'column', gap: 10, marginTop: 6 },
   progress: { fontSize: '0.72rem', color: '#6b7280', textAlign: 'center', letterSpacing: '0.04em', textTransform: 'uppercase' },
   title: { margin: 0, fontSize: '1.2rem', color: 'var(--text-primary, #f3f4f6)', textAlign: 'center' },
   sub: { margin: '0 0 6px', fontSize: '0.8rem', color: '#9ca3af', textAlign: 'center', lineHeight: 1.5 },
