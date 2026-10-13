@@ -4,6 +4,7 @@ import { isTauri } from './services/platform';
 import LoginScreen, { View as LoginView } from './screens/LoginScreen';
 import LinkDeviceScreen from './screens/LinkDeviceScreen';
 import HomeScreen from './screens/HomeScreen';
+import SetupWizard from './screens/SetupWizard';
 import IdleLockScreen from './components/IdleLockScreen';
 import { ensureDeviceRegistered } from './services/keys';
 import { logoutSession } from './services/api';
@@ -153,7 +154,11 @@ export default function App() {
   }
 
   if (session) {
-    return <HomeScreen token={session.token} username={session.username} onLogout={handleLogout} />;
+    return (
+      <SetupWizard token={session.token} username={session.username}>
+        <HomeScreen token={session.token} username={session.username} onLogout={handleLogout} />
+      </SetupWizard>
+    );
   }
   if (lockedUser) {
     return (

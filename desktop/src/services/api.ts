@@ -1501,6 +1501,19 @@ export async function hasVoiceIdentity(token: string, username: string): Promise
   return res.ok;
 }
 
+export async function getMasterTokenStatus(token: string): Promise<{ exists: boolean; twofa_enabled: boolean }> {
+  try {
+    const res = await apiFetch(`${BASE}/mastertoken/status`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return { exists: false, twofa_enabled: false };
+    const b = await res.json();
+    return { exists: !!b.exists, twofa_enabled: !!b.twofa_enabled };
+  } catch {
+    return { exists: false, twofa_enabled: false };
+  }
+}
+
 export async function getMasterToken2FAStatus(token: string): Promise<boolean> {
   const res = await apiFetch(`${BASE}/mastertoken/2fa/status`, {
     headers: { Authorization: `Bearer ${token}` },
