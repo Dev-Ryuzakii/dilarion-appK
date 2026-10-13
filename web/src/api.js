@@ -30,3 +30,8 @@ export const getOrgStaffPrivileges = (token) => request('/organization/staff', {
 export const setStaffPrivileges = (token, username, privileges) => request(`/organization/staff/${encodeURIComponent(username)}/privileges`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify({ privileges }) })
 export const sendOrgBroadcast = (token, payload) => request('/organization/broadcast', { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify(payload) })
 export const getOrgBroadcasts = (token) => request('/organization/broadcasts', { headers: { Authorization: `Bearer ${token}` } })
+
+// Org-scoped account-deletion approvals (needs the "approve_deletions" privilege).
+export const getOrgDeletionRequests = (token) => request('/organization/account-deletion-requests', { headers: { Authorization: `Bearer ${token}` } })
+export const approveOrgDeletion = (token, id) => request(`/organization/account-deletion-requests/${id}/approve`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } })
+export const denyOrgDeletion = (token, id, reason) => request(`/organization/account-deletion-requests/${id}/deny`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify({ reason }) })

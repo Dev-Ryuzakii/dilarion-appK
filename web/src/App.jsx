@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import logoUrl from '../logo.jpg'
 import { parseStaffSheet, downloadStaffTemplate } from './staffSheet'
-import { forgotOrganizationPassword, getOrganization, getOrganizationUsers, inviteOrganizationStaff, loginOrganization, resendStaffInvite, resetOrganizationPassword, resetStaffLogin, submitOrganization, getOrgStaffPrivileges, setStaffPrivileges, sendOrgBroadcast, getOrgBroadcasts } from './api'
+import { forgotOrganizationPassword, getOrganization, getOrganizationUsers, inviteOrganizationStaff, loginOrganization, resendStaffInvite, resetOrganizationPassword, resetStaffLogin, submitOrganization, getOrgStaffPrivileges, setStaffPrivileges, sendOrgBroadcast, getOrgBroadcasts, getOrgDeletionRequests, approveOrgDeletion, denyOrgDeletion } from './api'
 // Installers are served from file storage (e.g. a public Afribase bucket) set
 // in VITE_DOWNLOAD_BASE.
 // Empty = same folder as the site, for local testing.
@@ -149,6 +149,23 @@ const PRIVILEGE_META = {
   call_control: { label: 'Call control', desc: 'Mute or unmute people in meetings' },
   manage_staff: { label: 'Manage staff', desc: 'Grant privileges, invite and reset staff logins' },
   manage_groups: { label: 'Manage groups', desc: 'Create and manage any group' },
+  approve_deletions: { label: 'Approve deletions', desc: 'Review and approve staff account-deletion requests' },
+}
+
+function DeletionRequestsView({ token }){
+  const [data,setData]=useState({requests:[],loading:true,error:''}); const [busy,setBusy]=useState(null); const [notice,setNotice]=useState('')
+  const load=()=>getOrgDeletionRequests(token).then(d=>setData({requests:d.requests||[],loading:false,error:''})).catch(e=>setData({requests:[],loading:false,error:e.message}))
+  useEffect(()=>{load()},[token])
+  const approve=async(r)=>{const name=r.full_name||r.username;if(!window.confirm(`Approve and permanently delete ${name}'s account? This cannot be undone.`))return;setBusy(r.id);setNotice('');try{await approveOrgDeletion(token,r.id);setNotice(`${name}'s account was deleted.`);load()}catch(e){setNotice(e.message)}finally{setBusy(null)}}
+  const deny=async(r)=>{const reason=window.prompt(`Deny ${r.full_name||r.username}'s deletion request? Optional reason:`,'');if(reason===null)return;setBusy(r.id);setNotice('');try{await denyOrgDeletion(token,r.id,reason||undefined);setNotice('Request denied.');load()}catch(e){setNotice(e.message)}finally{setBusy(null)}}
+  if(data.loading)return <div className="loader-inline"><div className="loader"/><p>Loading requests…</p></div>
+  if(data.error)return <div className="form-error">{data.error}</div>
+  const pending=data.requests.filter(r=>r.status==='pending')
+  return <div className="roster-card"><div className="roster-tools"><div><h2>Account deletion requests</h2><span>{pending.length} pending</span></div></div>
+    {notice&&<div className="notice-bar">{notice}<button className="icon-button" onClick={()=>setNotice('')} aria-label="Dismiss"><Icon name="close" size={14}/></button></div>}
+    <div className="table-wrap"><table><thead><tr><th>Staff member</th><th>Reason</th><th>Requested</th><th>Status</th><th/></tr></thead><tbody>{data.requests.map(r=><tr key={r.id}><td><div className="person"><span>{(r.full_name||r.username).split(' ').map(x=>x[0]).join('').slice(0,2).toUpperCase()}</span><div><strong>{r.full_name||r.username}</strong><small>@{r.username}</small></div></div></td><td>{r.reason||'—'}</td><td><small>{r.requested_at?new Date(r.requested_at).toLocaleString():'—'}</small></td><td><span className={`status ${r.status==='pending'?'pending':r.status==='approved'?'inactive':'active'}`}>{r.status}</span></td><td className="row-action">{r.status==='pending'&&<><button className="button primary small" disabled={busy===r.id} onClick={()=>approve(r)}>{busy===r.id?'…':'Approve'}</button> <button className="text-button inline" disabled={busy===r.id} onClick={()=>deny(r)}>Deny</button></>}</td></tr>)}</tbody></table>
+      {data.requests.length===0&&<div className="empty-state"><Icon name="lock" size={34}/><h3>No requests</h3><p>Staff account-deletion requests will appear here for your approval.</p></div>}</div>
+    <p className="readonly-note"><Icon name="lock" size={15}/> Approving permanently deletes the staff member's account and all their data. Admins and your organization account can never be deleted here.</p></div>
 }
 
 function TeamAdminView({ token }){
@@ -198,9 +215,10 @@ function Dashboard({ token,logout }) {
   if(data.loading)return <main className="loading-screen"><div className="loader"/><p>Opening your organization portal…</p></main>
   if(data.error)return <main className="loading-screen"><p>{data.error}</p><button className="button primary" onClick={logout}>Return to login</button></main>
   const canInvite=data.organization?.permissions?.invite_staff!==false; const canReset=data.organization?.permissions?.reset_staff_login===true
-  return <main className="dashboard"><aside className="sidebar"><div><div className="side-org"><div className="org-avatar">{data.organization?.name?.slice(0,2).toUpperCase()}</div><div><small>ORGANIZATION</small><strong>{data.organization?.name}</strong></div></div><nav><button className={section==='staff'?'active':''} onClick={()=>setSection('staff')}><Icon name="users"/> Staff directory</button><button className={section==='team'?'active':''} onClick={()=>setSection('team')}><Icon name="sliders"/> Team admins</button><button className={section==='broadcast'?'active':''} onClick={()=>setSection('broadcast')}><Icon name="megaphone"/> Broadcast</button></nav></div><button className="logout" onClick={logout}><Icon name="logout"/> Sign out</button></aside><section className="dash-content">
+  return <main className="dashboard"><aside className="sidebar"><div><div className="side-org"><div className="org-avatar">{data.organization?.name?.slice(0,2).toUpperCase()}</div><div><small>ORGANIZATION</small><strong>{data.organization?.name}</strong></div></div><nav><button className={section==='staff'?'active':''} onClick={()=>setSection('staff')}><Icon name="users"/> Staff directory</button><button className={section==='team'?'active':''} onClick={()=>setSection('team')}><Icon name="sliders"/> Team admins</button><button className={section==='broadcast'?'active':''} onClick={()=>setSection('broadcast')}><Icon name="megaphone"/> Broadcast</button><button className={section==='deletions'?'active':''} onClick={()=>setSection('deletions')}><Icon name="lock"/> Deletion requests</button></nav></div><button className="logout" onClick={logout}><Icon name="logout"/> Sign out</button></aside><section className="dash-content">
     {section==='team'&&<><div className="dash-top"><div><span className="kicker">ORGANIZATION PORTAL</span><h1>Team admins</h1><p>Delegate company-wide powers to staff in {data.organization?.name}.</p></div></div><TeamAdminView token={token}/></>}
     {section==='broadcast'&&<><div className="dash-top"><div><span className="kicker">ORGANIZATION PORTAL</span><h1>Broadcast</h1><p>Send an official message to everyone in {data.organization?.name}.</p></div></div><BroadcastView token={token} orgName={data.organization?.name}/></>}
+    {section==='deletions'&&<><div className="dash-top"><div><span className="kicker">ORGANIZATION PORTAL</span><h1>Deletion requests</h1><p>Review staff account-deletion requests for {data.organization?.name}.</p></div></div><DeletionRequestsView token={token}/></>}
     {section==='staff'&&<>
     <div className="dash-top"><div><span className="kicker">ORGANIZATION PORTAL</span><h1>Staff directory</h1><p>Everyone currently assigned to {data.organization?.name}.</p></div><div className="dash-actions"><span className="access-pill"><Icon name="users" size={15}/> View &amp; invite access</span>{canInvite&&<button className="button primary" onClick={()=>{setNotice('');setInviting(true)}}><Icon name="plus" size={16}/> Invite staff</button>}</div></div>
     {notice&&<div className="notice-bar">{notice}<button className="icon-button" onClick={()=>setNotice('')} aria-label="Dismiss"><Icon name="close" size={14}/></button></div>}
