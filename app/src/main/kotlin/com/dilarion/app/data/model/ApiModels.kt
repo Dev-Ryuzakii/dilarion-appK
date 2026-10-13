@@ -484,6 +484,11 @@ data class MasterToken2FAStatusResponse(
     val enabled: Boolean = false,
 )
 
+data class MasterTokenStatusResponse(
+    val exists: Boolean = false,
+    @SerializedName("twofa_enabled") val twofaEnabled: Boolean = false,
+)
+
 data class MasterToken2FAEnableRequest(
     val mastertoken: String,
     @SerializedName("two_fa_password") val twoFaPassword: String,

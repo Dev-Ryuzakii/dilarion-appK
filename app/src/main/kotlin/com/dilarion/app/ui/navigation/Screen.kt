@@ -36,6 +36,7 @@ sealed class Screen(val route: String) {
             "waiting/$conferenceId?micOn=$micOn&camOn=$camOn&displayName=${(displayName ?: "").encodeToUrl()}"
     }
     object Onboarding    : Screen("onboarding")
+    object SecuritySetup : Screen("security_setup")
     object CreateGroup   : Screen("create_group")
     object GroupInfo     : Screen("group_info/{groupId}") {
         fun route(groupId: Int) = "group_info/$groupId"

@@ -160,7 +160,7 @@ fun AppNavigation(pendingIncomingCall: IncomingCallData? = null) {
                     }
                 },
                 onAuthenticated = {
-                    navController.navigate(Screen.Home.route) {
+                    navController.navigate(Screen.SecuritySetup.route) {
                         popUpTo(Screen.Splash.route) { inclusive = true }
                     }
                 },
@@ -175,8 +175,18 @@ fun AppNavigation(pendingIncomingCall: IncomingCallData? = null) {
         composable(Screen.Onboarding.route) {
             com.dilarion.app.ui.screens.onboarding.OnboardingScreen(
                 onComplete = {
-                    navController.navigate(Screen.Home.route) {
+                    navController.navigate(Screen.SecuritySetup.route) {
                         popUpTo(Screen.Onboarding.route) { inclusive = true }
+                    }
+                },
+            )
+        }
+
+        composable(Screen.SecuritySetup.route) {
+            com.dilarion.app.ui.screens.security.SecuritySetupScreen(
+                onComplete = {
+                    navController.navigate(Screen.Home.route) {
+                        popUpTo(Screen.SecuritySetup.route) { inclusive = true }
                     }
                 },
             )
@@ -187,7 +197,7 @@ fun AppNavigation(pendingIncomingCall: IncomingCallData? = null) {
             AuthScreen(
                 viewModel = vm,
                 onAuthSuccess = { onboardingRequired ->
-                    navController.navigate(if (onboardingRequired) Screen.Onboarding.route else Screen.Home.route) {
+                    navController.navigate(if (onboardingRequired) Screen.Onboarding.route else Screen.SecuritySetup.route) {
                         popUpTo(Screen.Auth.route) { inclusive = true }
                     }
                 },

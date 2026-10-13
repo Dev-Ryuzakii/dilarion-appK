@@ -280,6 +280,11 @@ interface ApiService {
         @Body request: MasterTokenRequest,
     ): Response<Unit>
 
+    @GET("mastertoken/status")
+    suspend fun getMasterTokenStatus(
+        @Header("Authorization") bearer: String,
+    ): Response<com.dilarion.app.data.model.MasterTokenStatusResponse>
+
     @GET("mastertoken/2fa/status")
     suspend fun getMasterToken2FAStatus(
         @Header("Authorization") bearer: String,
