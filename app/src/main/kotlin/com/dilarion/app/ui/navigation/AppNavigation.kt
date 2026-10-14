@@ -241,10 +241,25 @@ fun AppNavigation(pendingIncomingCall: IncomingCallData? = null) {
                 onSettings = {
                     navController.navigate(Screen.Settings.route)
                 },
+                onSearch = {
+                    navController.navigate(Screen.Search.route)
+                },
                 onLogout = {
                     navController.navigate(Screen.Auth.route) {
                         popUpTo(Screen.Home.route) { inclusive = true }
                     }
+                },
+            )
+        }
+
+        composable(Screen.Search.route) {
+            com.dilarion.app.ui.screens.search.SearchScreen(
+                onBack = { navController.popBackStack() },
+                onOpenChat = { username ->
+                    navController.navigate(Screen.Chat.route(username))
+                },
+                onOpenGroupChat = { groupId, groupName ->
+                    navController.navigate(Screen.GroupChat.route(groupId, groupName))
                 },
             )
         }

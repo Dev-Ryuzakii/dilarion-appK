@@ -285,6 +285,24 @@ interface ApiService {
         @Header("Authorization") bearer: String,
     ): Response<com.dilarion.app.data.model.MasterTokenStatusResponse>
 
+    // ─── Phase 2: search + notification settings ────────────────────────────
+    @GET("search")
+    suspend fun search(
+        @Header("Authorization") bearer: String,
+        @Query("q") q: String,
+    ): Response<com.dilarion.app.data.model.SearchResponse>
+
+    @GET("users/me/notification-settings")
+    suspend fun getNotificationSettings(
+        @Header("Authorization") bearer: String,
+    ): Response<com.dilarion.app.data.model.NotificationSettings>
+
+    @PUT("users/me/notification-settings")
+    suspend fun updateNotificationSettings(
+        @Header("Authorization") bearer: String,
+        @Body request: com.dilarion.app.data.model.NotificationSettingsUpdate,
+    ): Response<com.dilarion.app.data.model.NotificationSettings>
+
     @GET("mastertoken/2fa/status")
     suspend fun getMasterToken2FAStatus(
         @Header("Authorization") bearer: String,

@@ -214,6 +214,43 @@ fun SettingsScreen(
 
             Spacer(Modifier.height(12.dp))
 
+            // ── Notifications ─────────────────────────────────────────────────
+            SettingsSectionHeader("Notifications")
+            SettingsCard {
+                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 8.dp)) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Pause all notifications", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                            Text("Silence messages, tasks and reminders. Calls still ring.", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+                        }
+                        Switch(checked = uiState.notifMuteAll, onCheckedChange = { viewModel.setNotifMuteAll(it) })
+                    }
+                    HorizontalDivider(color = BackgroundGrey)
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 8.dp)) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Quiet hours", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                            Text("Mute non-urgent notifications during a daily window.", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+                        }
+                        Switch(checked = uiState.notifQuietEnabled, onCheckedChange = { viewModel.setNotifQuietEnabled(it) })
+                    }
+                    if (uiState.notifQuietEnabled) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.padding(vertical = 8.dp),
+                        ) {
+                            Text("From", style = MaterialTheme.typography.bodySmall)
+                            HourStepper(uiState.notifQuietStart) { viewModel.setNotifQuietWindow(it, uiState.notifQuietEnd) }
+                            Text("to", style = MaterialTheme.typography.bodySmall)
+                            HourStepper(uiState.notifQuietEnd) { viewModel.setNotifQuietWindow(uiState.notifQuietStart, it) }
+                            Text("local time", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+
             // ── Master token section ──────────────────────────────────────────
             SettingsSectionHeader("Master Token")
 
@@ -667,6 +704,15 @@ private fun SettingsSectionHeader(title: String) {
         fontSize = 11.sp,
         modifier = Modifier.padding(start = 16.dp, bottom = 6.dp, top = 4.dp),
     )
+}
+
+@Composable
+private fun HourStepper(hour: Int, onChange: (Int) -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        TextButton(onClick = { onChange((hour + 23) % 24) }, contentPadding = PaddingValues(4.dp)) { Text("–", style = MaterialTheme.typography.titleMedium) }
+        Text(String.format("%02d:00", hour), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+        TextButton(onClick = { onChange((hour + 1) % 24) }, contentPadding = PaddingValues(4.dp)) { Text("+", style = MaterialTheme.typography.titleMedium) }
+    }
 }
 
 @Composable

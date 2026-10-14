@@ -489,6 +489,57 @@ data class MasterTokenStatusResponse(
     @SerializedName("twofa_enabled") val twofaEnabled: Boolean = false,
 )
 
+// ─── Phase 2: unified search ────────────────────────────────────────────────
+
+data class SearchResponse(
+    val query: String = "",
+    val people: List<SearchPerson> = emptyList(),
+    val groups: List<SearchGroup> = emptyList(),
+    val files: List<SearchFile> = emptyList(),
+)
+
+data class SearchPerson(
+    val username: String,
+    @SerializedName("full_name") val fullName: String? = null,
+    val department: String? = null,
+    @SerializedName("availability_status") val availabilityStatus: String? = null,
+)
+
+data class SearchGroup(
+    val id: Int,
+    val name: String,
+    val description: String? = null,
+    @SerializedName("member_count") val memberCount: Int = 0,
+)
+
+data class SearchFile(
+    @SerializedName("media_id") val mediaId: String,
+    val filename: String,
+    @SerializedName("media_type") val mediaType: String = "",
+    @SerializedName("content_type") val contentType: String = "",
+    @SerializedName("file_size") val fileSize: Long = 0,
+    @SerializedName("group_id") val groupId: Int? = null,
+)
+
+// ─── Phase 2: notification settings ─────────────────────────────────────────
+
+data class NotificationSettings(
+    @SerializedName("mute_all_notifications") val muteAll: Boolean = false,
+    @SerializedName("quiet_hours_enabled") val quietHoursEnabled: Boolean = false,
+    @SerializedName("quiet_hours_start") val quietHoursStart: Int? = null,
+    @SerializedName("quiet_hours_end") val quietHoursEnd: Int? = null,
+    @SerializedName("quiet_hours_utc_offset") val quietHoursUtcOffset: Int = 0,
+)
+
+/** PUT body — only non-null fields are applied server-side. */
+data class NotificationSettingsUpdate(
+    @SerializedName("mute_all_notifications") val muteAll: Boolean? = null,
+    @SerializedName("quiet_hours_enabled") val quietHoursEnabled: Boolean? = null,
+    @SerializedName("quiet_hours_start") val quietHoursStart: Int? = null,
+    @SerializedName("quiet_hours_end") val quietHoursEnd: Int? = null,
+    @SerializedName("quiet_hours_utc_offset") val quietHoursUtcOffset: Int? = null,
+)
+
 data class MasterToken2FAEnableRequest(
     val mastertoken: String,
     @SerializedName("two_fa_password") val twoFaPassword: String,

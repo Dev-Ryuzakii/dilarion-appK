@@ -65,6 +65,11 @@ data class SettingsUiState(
     val statusText: String = "",
     val availabilityBusy: Boolean = false,
     val availabilityError: String? = null,
+
+    val notifMuteAll: Boolean = false,
+    val notifQuietEnabled: Boolean = false,
+    val notifQuietStart: Int = 22,
+    val notifQuietEnd: Int = 7,
 )
 
 @HiltViewModel
@@ -91,6 +96,51 @@ class SettingsViewModel @Inject constructor(
         refreshTwoFaStatus()
         refreshDeletionStatus()
         refreshVoiceIdentityStatus()
+        refreshNotificationSettings()
+    }
+
+    private fun refreshNotificationSettings() {
+        viewModelScope.launch {
+            val bearer = bearer() ?: return@launch
+            runCatching { apiService.getNotificationSettings(bearer) }.getOrNull()?.body()?.let { s ->
+                _uiState.value = _uiState.value.copy(
+                    notifMuteAll = s.muteAll,
+                    notifQuietEnabled = s.quietHoursEnabled,
+                    notifQuietStart = s.quietHoursStart ?: 22,
+                    notifQuietEnd = s.quietHoursEnd ?: 7,
+                )
+            }
+        }
+    }
+
+    private fun saveNotificationSettings(update: com.dilarion.app.data.model.NotificationSettingsUpdate) {
+        viewModelScope.launch {
+            val bearer = bearer() ?: return@launch
+            // Offset in minutes east of UTC, matching the server's local-time math.
+            val offset = java.util.TimeZone.getDefault().getOffset(System.currentTimeMillis()) / 60000
+            runCatching { apiService.updateNotificationSettings(bearer, update.copy(quietHoursUtcOffset = offset)) }
+        }
+    }
+
+    fun setNotifMuteAll(on: Boolean) {
+        _uiState.value = _uiState.value.copy(notifMuteAll = on)
+        saveNotificationSettings(com.dilarion.app.data.model.NotificationSettingsUpdate(muteAll = on))
+    }
+
+    fun setNotifQuietEnabled(on: Boolean) {
+        _uiState.value = _uiState.value.copy(notifQuietEnabled = on)
+        saveNotificationSettings(com.dilarion.app.data.model.NotificationSettingsUpdate(
+            quietHoursEnabled = on,
+            quietHoursStart = _uiState.value.notifQuietStart,
+            quietHoursEnd = _uiState.value.notifQuietEnd,
+        ))
+    }
+
+    fun setNotifQuietWindow(start: Int, end: Int) {
+        _uiState.value = _uiState.value.copy(notifQuietStart = start, notifQuietEnd = end)
+        saveNotificationSettings(com.dilarion.app.data.model.NotificationSettingsUpdate(
+            quietHoursStart = start, quietHoursEnd = end,
+        ))
     }
 
     private var voiceIdentityRecorder: MediaRecorder? = null

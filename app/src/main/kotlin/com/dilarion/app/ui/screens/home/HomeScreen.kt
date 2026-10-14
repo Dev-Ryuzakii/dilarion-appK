@@ -46,6 +46,7 @@ fun HomeScreen(
     onMeetings: () -> Unit,
     onJoinMeeting: (joinCode: String, title: String?) -> Unit,
     onSettings: () -> Unit,
+    onSearch: () -> Unit = {},
     onLogout: () -> Unit,
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -86,6 +87,7 @@ fun HomeScreen(
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = DilarionRed),
                 actions = {
+                    IconButton(onClick = onSearch) { Icon(Icons.Default.Search, "Search", tint = SurfaceWhite) }
                     IconButton(onClick = onSettings) { Icon(Icons.Default.Settings, "Settings", tint = SurfaceWhite) }
                     IconButton(onClick = { showLogoutDialog = true }) { Icon(Icons.Default.ExitToApp, "Logout", tint = SurfaceWhite) }
                 },
