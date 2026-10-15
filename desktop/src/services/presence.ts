@@ -16,6 +16,14 @@ export const CALL_RELEVANT_WS_TYPES = new Set([
   'conference_participant_left', 'conference_force_mute', 'auth_expired',
 ]);
 const WS_FORWARD_EVENT = 'dilarion://ws-forward';
+// Emitted by the call window to the main window once its forward bridge is
+// listening, so the main window can replay call events (ICE etc.) that arrived
+// while the call window was still opening.
+const CALL_WINDOW_READY = 'dilarion://call-window-ready';
+// Recent call-relevant WS events, kept in the main window to replay to a call
+// window that opens mid-call (incoming calls, where the window appears only
+// after the user accepts).
+let callEventBuffer: WsMessage[] = [];
 
 export type WsMessage = {
   type: string;
@@ -70,6 +78,9 @@ class PresenceService {
     this.stopped = false;
     this.failures = 0;
     this.authFailures = 0;
+    // Main window only: replay buffered call events to a call window that opens
+    // mid-call (answered incoming calls). The call window never calls connect().
+    if (isTauri() && !isCallWindow()) startCallEventReplayBridge();
     getDeviceName().then(name => {
       this.deviceName = name;
       this._open();
@@ -111,8 +122,19 @@ class PresenceService {
         const msg: WsMessage = JSON.parse(e.data);
         this.listeners.forEach(l => l(msg));
         if (isTauri() && CALL_RELEVANT_WS_TYPES.has(msg.type)) {
-          // Best-effort — if no call window is open this just fails silently
-          // (emitTo throws when the target label doesn't exist).
+          // Buffer call events as well as forwarding them. For an INCOMING call
+          // the call window doesn't exist yet while it's still ringing, so the
+          // caller's early ICE candidates (sent right after they dialed) would
+          // otherwise be emitted to a nonexistent window and lost — leaving the
+          // answerer's ICE incomplete and the call stuck "connecting". When the
+          // call window opens it asks for a replay (see the ready handler) and
+          // we flush this buffer to it. CallModal filters by call_id, so any
+          // stale entries from a previous call are harmless.
+          callEventBuffer.push(msg);
+          if (callEventBuffer.length > 150) callEventBuffer.shift();
+          if (msg.type === 'call_end') callEventBuffer = [];
+          // Best-effort live forward — if no call window is open this just
+          // fails silently (emitTo throws when the target label doesn't exist).
           emitTo('call', WS_FORWARD_EVENT, msg).catch(() => {});
         }
       } catch {}
@@ -182,8 +204,25 @@ export function startCallWindowForwardBridge(): () => void {
   let unlisten: (() => void) | null = null;
   listen<WsMessage>(WS_FORWARD_EVENT, (event) => {
     presenceService.injectMessage(event.payload);
-  }).then(fn => { unlisten = fn; });
+  }).then(fn => {
+    unlisten = fn;
+    // Now that we're listening, ask the main window to replay any call events
+    // (the caller's early ICE candidates) that arrived while this window was
+    // still opening — otherwise an answered incoming call never gets them.
+    emitTo('main', CALL_WINDOW_READY, {}).catch(() => {});
+  });
   return () => { unlisten?.(); };
+}
+
+/** Main-window side: when a call window signals it's ready, replay the buffered
+ *  call events to it. Registered once from the main window (see connect()). */
+let callReadyBridgeStarted = false;
+function startCallEventReplayBridge(): void {
+  if (callReadyBridgeStarted) return;
+  callReadyBridgeStarted = true;
+  listen(CALL_WINDOW_READY, () => {
+    for (const m of callEventBuffer) emitTo('call', WS_FORWARD_EVENT, m).catch(() => {});
+  }).catch(() => {});
 }
 
 /** True when running as the standalone call window, not the main app window. */
