@@ -145,6 +145,39 @@ fun CreateTaskDialog(
 
 data class BreakoutDraft(val name: String, val usernames: Set<String>)
 
+/** Task -> breakout team -> staff (★ = submitted the report) -> compiled sections it fed. */
+@Composable
+private fun ReportTree(task: TaskItem) {
+    val attributed = task.compiledSections.isNotEmpty()
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(task.title, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+        task.reportTree.forEach { team ->
+            Column(Modifier.padding(start = 10.dp)) {
+                Text(
+                    "├ ${team.teamName}" + if (team.hasReport) "" else " · no report",
+                    fontWeight = FontWeight.SemiBold, fontSize = 12.sp,
+                )
+                Column(Modifier.padding(start = 14.dp)) {
+                    Text(
+                        "Staff: " + team.staff.joinToString(", ") { (if (it.isSubmitter) "★ " else "") + it.username },
+                        fontSize = 11.sp, color = TextSecondary,
+                    )
+                    if (team.sections.isNotEmpty()) {
+                        team.sections.forEach { sec ->
+                            Text("→ §${sec.index + 1} ${sec.heading}", fontSize = 11.sp, color = DilarionRed)
+                        }
+                    } else {
+                        Text(
+                            if (attributed) "No section attributed to this team" else "Recompile to see which sections came from this team",
+                            fontSize = 11.sp, color = TextSecondary,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 fun TaskDetailDialog(
     task: TaskItem,
@@ -154,9 +187,11 @@ fun TaskDetailDialog(
     onMyStatusChange: (String) -> Unit,
     onSubmitReport: (groupId: Int, text: String) -> Unit,
     onCompile: () -> Unit,
+    onExport: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     val myAssignee = task.assignees.find { it.username == currentUsername }
+    var showTree by remember(task.taskId) { mutableStateOf(false) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(task.title) },
@@ -204,9 +239,30 @@ fun TaskDetailDialog(
                     }
                     item {
                         if (task.compiledReport != null) {
-                            Column {
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Text("Compiled report", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                Text(task.compiledReport, fontSize = 12.sp)
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    FilterChip(selected = !showTree, onClick = { showTree = false }, label = { Text("Report", fontSize = 10.sp) })
+                                    FilterChip(selected = showTree, onClick = { showTree = true }, label = { Text("Tree", fontSize = 10.sp) })
+                                }
+                                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    TextButton(onClick = onExport, enabled = !busy) { Text("Download .docx", fontSize = 12.sp) }
+                                    TextButton(onClick = onCompile, enabled = !busy) { Text(if (busy) "Working…" else "Recompile", fontSize = 12.sp) }
+                                }
+                                when {
+                                    showTree -> ReportTree(task)
+                                    task.compiledSections.isNotEmpty() -> task.compiledSections.forEachIndexed { i, sec ->
+                                        Column(Modifier.padding(bottom = 6.dp)) {
+                                            Text("${i + 1}. ${sec.heading}", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                                            Text(
+                                                "From: " + sec.sources.ifEmpty { listOf("unattributed") }.joinToString(", "),
+                                                fontSize = 10.sp, color = DilarionRed, fontWeight = FontWeight.SemiBold,
+                                            )
+                                            Text(sec.body, fontSize = 12.sp)
+                                        }
+                                    }
+                                    else -> Text(task.compiledReport, fontSize = 12.sp)
+                                }
                             }
                         } else {
                             Button(

@@ -1,5 +1,6 @@
 package com.dilarion.app.ui.screens.tasks
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.dilarion.app.data.api.ApiService
@@ -13,10 +14,14 @@ import com.dilarion.app.data.model.TaskStatusUpdateRequest
 import com.dilarion.app.data.model.UserInfo
 import com.dilarion.app.security.SessionManager
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
 import javax.inject.Inject
 
 enum class TaskStatusFilter { ALL, OPEN, IN_PROGRESS, COMPLETED, CANCELLED }
@@ -33,12 +38,16 @@ data class TasksUiState(
     val currentUsername: String = "",
     val busy: Boolean = false,
     val createError: String? = null,
+    // Set once a report .docx is downloaded into cacheDir; the screen hands
+    // it to the share sheet and calls consumeExportedReport().
+    val exportedReport: File? = null,
 )
 
 @HiltViewModel
 class TasksViewModel @Inject constructor(
     private val apiService: ApiService,
     private val sessionManager: SessionManager,
+    @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(TasksUiState())
@@ -165,6 +174,27 @@ class TasksViewModel @Inject constructor(
             _uiState.value = _uiState.value.copy(busy = false)
         }
     }
+
+    fun exportReport(task: TaskItem) {
+        viewModelScope.launch {
+            val bearer = bearer() ?: return@launch
+            _uiState.value = _uiState.value.copy(busy = true, error = null)
+            runCatching {
+                val resp = apiService.downloadTaskReportDocx(bearer, task.taskId)
+                if (!resp.isSuccessful) error(resp.errorBody().parseErrorDetail("Failed to export report"))
+                val bytes = resp.body()?.bytes() ?: error("Empty report")
+                val safeTitle = task.title.replace(Regex("[^A-Za-z0-9._-]+"), "_").trim('_').take(60).ifBlank { "report" }
+                withContext(Dispatchers.IO) {
+                    File(context.cacheDir, "${safeTitle}_report.docx").apply { writeBytes(bytes) }
+                }
+            }
+                .onSuccess { f -> _uiState.value = _uiState.value.copy(exportedReport = f) }
+                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
+            _uiState.value = _uiState.value.copy(busy = false)
+        }
+    }
+
+    fun consumeExportedReport() { _uiState.value = _uiState.value.copy(exportedReport = null) }
 
     fun clearError() { _uiState.value = _uiState.value.copy(error = null) }
 }

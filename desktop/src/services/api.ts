@@ -2011,6 +2011,24 @@ export interface TaskBreakoutGroupItem {
   report_submitted_at: string | null;
 }
 
+/** One part of the AI-compiled report, tagged with the team(s) it came from. */
+export interface TaskCompiledSection {
+  heading: string;
+  body: string;
+  sources: string[];
+}
+
+/** Report tree node: a breakout team, its staff, and the sections it fed. */
+export interface TaskReportTreeTeam {
+  group_id: number;
+  team_name: string;
+  staff: { username: string; is_submitter: boolean }[];
+  has_report: boolean;
+  report_submitted_by: string | null;
+  report_submitted_at: string | null;
+  sections: { index: number; heading: string }[];
+}
+
 export interface TaskItem {
   task_id: number;
   title: string;
@@ -2025,6 +2043,8 @@ export interface TaskItem {
   breakout_groups: TaskBreakoutGroupItem[];
   compiled_report: string | null;
   compiled_report_at: string | null;
+  compiled_sections: TaskCompiledSection[];
+  report_tree: TaskReportTreeTeam[];
   recurrence: string | null;
   next_occurrence?: TaskItem;
 }
@@ -2102,6 +2122,17 @@ export async function compileTask(token: string, taskId: number): Promise<TaskIt
     headers: { Authorization: `Bearer ${token}` },
   });
   return taskRequest(res);
+}
+
+/** The compiled breakout report + report tree as a .docx. */
+export async function downloadTaskReportDocx(token: string, taskId: number): Promise<{ blob: Blob; filename: string }> {
+  const res = await apiFetch(`${BASE}/tasks/${taskId}/report.docx`, { headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || 'Failed to export report');
+  }
+  const match = /filename="?([^";]+)"?/.exec(res.headers.get('Content-Disposition') || '');
+  return { blob: await res.blob(), filename: match?.[1] || `task_${taskId}_report.docx` };
 }
 
 // ── Meeting breakout rooms ────────────────────────────────────────────────────

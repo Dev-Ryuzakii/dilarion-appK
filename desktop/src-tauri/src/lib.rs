@@ -350,6 +350,36 @@ fn set_badge_count(count: i64, app_handle: tauri::AppHandle) {
     }
 }
 
+// ── File export ───────────────────────────────────────────────────────────────
+
+// The webview can't save a Blob itself (an <a download> does nothing in
+// Tauri), so exports like the breakout-report .docx are handed here and
+// written into the user's Downloads folder. Never overwrites: "x.docx" that
+// already exists becomes "x (1).docx". Returns the path actually written.
+#[tauri::command]
+fn save_download(filename: String, data_b64: String, app_handle: tauri::AppHandle) -> Result<String, String> {
+    let bytes = general_purpose::STANDARD.decode(data_b64).map_err(|e| e.to_string())?;
+    let dir = app_handle.path().download_dir().map_err(|e| e.to_string())?;
+    // Only the final path component — a filename can't climb out of Downloads.
+    let name = std::path::Path::new(&filename)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .filter(|n| !n.is_empty())
+        .unwrap_or("download")
+        .to_string();
+    let path = std::path::Path::new(&name);
+    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("download").to_string();
+    let ext = path.extension().and_then(|s| s.to_str()).map(|e| format!(".{}", e)).unwrap_or_default();
+    let mut target = dir.join(&name);
+    let mut n = 1;
+    while target.exists() {
+        target = dir.join(format!("{} ({}){}", stem, n, ext));
+        n += 1;
+    }
+    std::fs::write(&target, bytes).map_err(|e| e.to_string())?;
+    Ok(target.to_string_lossy().into_owned())
+}
+
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -376,6 +406,7 @@ pub fn run() {
             list_running_processes,
             set_pending_call,
             take_pending_call,
+            save_download,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

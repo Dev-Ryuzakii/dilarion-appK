@@ -14,6 +14,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.FileProvider
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -34,6 +36,19 @@ private val STATUS_COLORS = mapOf(
 @Composable
 fun TasksScreen(viewModel: TasksViewModel = hiltViewModel()) {
     val uiState by viewModel.uiState.collectAsState()
+    val context = LocalContext.current
+
+    LaunchedEffect(uiState.exportedReport) {
+        val file = uiState.exportedReport ?: return@LaunchedEffect
+        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+        val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+            type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            putExtra(android.content.Intent.EXTRA_STREAM, uri)
+            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(android.content.Intent.createChooser(send, "Save or share report"))
+        viewModel.consumeExportedReport()
+    }
 
     val filtered = when (uiState.filter) {
         TaskStatusFilter.ALL -> uiState.tasks
@@ -117,6 +132,7 @@ fun TasksScreen(viewModel: TasksViewModel = hiltViewModel()) {
                 onMyStatusChange = { status -> viewModel.updateMyStatus(task.taskId, status) },
                 onSubmitReport = { groupId, text -> viewModel.submitBreakoutReport(task.taskId, groupId, text) },
                 onCompile = { viewModel.compileTask(task.taskId) },
+                onExport = { viewModel.exportReport(task) },
                 onDismiss = { viewModel.selectTask(null) },
             )
         }

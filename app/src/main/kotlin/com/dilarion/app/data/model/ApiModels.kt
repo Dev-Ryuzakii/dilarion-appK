@@ -284,8 +284,34 @@ data class TaskItem(
     @SerializedName("breakout_groups") val breakoutGroups: List<TaskBreakoutGroupItem> = emptyList(),
     @SerializedName("compiled_report") val compiledReport: String? = null,
     @SerializedName("compiled_report_at") val compiledReportAt: String? = null,
+    @SerializedName("compiled_sections") val compiledSections: List<TaskCompiledSection> = emptyList(),
+    @SerializedName("report_tree") val reportTree: List<TaskReportTreeTeam> = emptyList(),
     val recurrence: String? = null,
 )
+
+/** One part of the AI-compiled report, tagged with the team(s) it came from. */
+data class TaskCompiledSection(
+    val heading: String = "",
+    val body: String = "",
+    val sources: List<String> = emptyList(),
+)
+
+/** Report tree node: a breakout team, its staff, and the compiled sections it fed. */
+data class TaskReportTreeTeam(
+    @SerializedName("group_id") val groupId: Int,
+    @SerializedName("team_name") val teamName: String,
+    val staff: List<TaskReportTreeStaff> = emptyList(),
+    @SerializedName("has_report") val hasReport: Boolean = false,
+    @SerializedName("report_submitted_by") val reportSubmittedBy: String? = null,
+    val sections: List<TaskReportTreeSection> = emptyList(),
+)
+
+data class TaskReportTreeStaff(
+    val username: String,
+    @SerializedName("is_submitter") val isSubmitter: Boolean = false,
+)
+
+data class TaskReportTreeSection(val index: Int, val heading: String)
 
 data class TaskListResponse(
     val tasks: List<TaskItem> = emptyList(),

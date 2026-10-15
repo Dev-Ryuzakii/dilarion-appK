@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react';
 import {
   TaskItem, TaskCreatePayload, Group, Contact,
   createTask, listTasks, updateTaskStatus, updateMyTaskStatus, submitBreakoutReport, compileTask, getUsers,
+  downloadTaskReportDocx,
 } from '../services/api';
+import { saveBlob } from '../services/platform';
 
 type StatusFilter = 'all' | 'open' | 'in_progress' | 'completed' | 'cancelled';
 
@@ -107,10 +109,61 @@ export default function TasksPanel({ token, myUsername, groups }: { token: strin
   );
 }
 
+/** Task -> breakout team -> staff + the compiled sections that team's report fed. */
+function ReportTree({ task, onSectionClick }: { task: TaskItem; onSectionClick: (index: number) => void }) {
+  const line = '2px solid var(--border-color)';
+  const attributed = task.compiled_sections.length > 0;
+  return (
+    <div style={{ fontSize: '0.8rem', color: 'var(--text-primary)' }}>
+      <div style={{ fontWeight: 700, marginBottom: 6 }}>📄 {task.title}</div>
+      <div style={{ borderLeft: line, marginLeft: 6, paddingLeft: 14 }}>
+        {task.report_tree.map(team => (
+          <div key={team.group_id} style={{ position: 'relative', padding: '6px 0' }}>
+            <span style={{ position: 'absolute', left: -14, top: 16, width: 12, borderTop: line }} />
+            <div style={{ fontWeight: 700 }}>
+              {team.team_name}
+              {!team.has_report && <span style={{ fontWeight: 400, fontStyle: 'italic', color: 'var(--text-muted)' }}> · no report</span>}
+            </div>
+            <div style={{ borderLeft: line, marginLeft: 6, paddingLeft: 14, marginTop: 4 }}>
+              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 6 }}>
+                {team.staff.map(st => (
+                  <span
+                    key={st.username}
+                    title={st.is_submitter ? 'Submitted this team\'s report' : undefined}
+                    style={{ fontSize: '0.7rem', background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 10, padding: '1px 8px', fontWeight: st.is_submitter ? 700 : 400 }}
+                  >
+                    {st.is_submitter ? '★ ' : ''}{st.username}
+                  </span>
+                ))}
+              </div>
+              {team.sections.length > 0 ? team.sections.map(sec => (
+                <button
+                  key={sec.index}
+                  onClick={() => onSectionClick(sec.index)}
+                  style={{ display: 'block', background: 'transparent', border: 'none', color: 'var(--accent)', padding: '2px 0', fontSize: '0.75rem', cursor: 'pointer', textAlign: 'left' }}
+                >
+                  → §{sec.index + 1} {sec.heading}
+                </button>
+              )) : (
+                <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                  {attributed ? 'No section attributed to this team' : 'Recompile to see which sections came from this team'}
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function TaskDetail({ task, myUsername, token, onChanged }: { task: TaskItem; myUsername: string; token: string; onChanged: () => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reportDrafts, setReportDrafts] = useState<Record<number, string>>({});
+  const [reportView, setReportView] = useState<'report' | 'tree'>('report');
+  const [highlightSection, setHighlightSection] = useState<number | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const myAssignee = task.assignees.find(a => a.username === myUsername);
 
@@ -166,6 +219,27 @@ function TaskDetail({ task, myUsername, token, onChanged }: { task: TaskItem; my
     } finally {
       setBusy(false);
     }
+  }
+
+  async function handleExport() {
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const { blob, filename } = await downloadTaskReportDocx(token, task.task_id);
+      const path = await saveBlob(blob, filename);
+      if (path) setNotice(`Saved to ${path}`);
+    } catch (err: any) {
+      setError(err?.message || 'Failed to export report');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function jumpToSection(index: number) {
+    setReportView('report');
+    setHighlightSection(index);
+    setTimeout(() => document.getElementById(`task-${task.task_id}-section-${index}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 0);
   }
 
   return (
@@ -250,8 +324,48 @@ function TaskDetail({ task, myUsername, token, onChanged }: { task: TaskItem; my
 
           {task.compiled_report ? (
             <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--accent)', borderRadius: 10, padding: 14, marginTop: 6 }}>
-              <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--accent)', marginBottom: 6 }}>AI-compiled report</div>
-              <div style={{ fontSize: '0.85rem', color: 'var(--text-primary)', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>{task.compiled_report}</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+                <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--accent)', flex: 1 }}>AI-compiled report</div>
+                <div style={{ display: 'flex', border: '1px solid var(--border-color)', borderRadius: 8, overflow: 'hidden' }}>
+                  {(['report', 'tree'] as const).map(v => (
+                    <button
+                      key={v}
+                      onClick={() => setReportView(v)}
+                      style={{ background: reportView === v ? 'var(--accent)' : 'transparent', color: reportView === v ? '#fff' : 'var(--text-primary)', border: 'none', padding: '4px 10px', fontSize: '0.72rem', fontWeight: 600, cursor: 'pointer' }}
+                    >
+                      {v === 'report' ? 'Report' : 'Tree'}
+                    </button>
+                  ))}
+                </div>
+                <button onClick={handleExport} disabled={busy} style={{ background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border-color)', borderRadius: 8, padding: '4px 10px', fontSize: '0.72rem', fontWeight: 600, cursor: busy ? 'wait' : 'pointer' }}>
+                  Download .docx
+                </button>
+                <button onClick={handleCompile} disabled={busy} title="Re-run the AI over the latest team reports" style={{ background: 'transparent', color: 'var(--accent)', border: 'none', padding: '4px 4px', fontSize: '0.72rem', fontWeight: 600, cursor: busy ? 'wait' : 'pointer' }}>
+                  Recompile
+                </button>
+              </div>
+              {notice && <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginBottom: 8 }}>{notice}</div>}
+              {reportView === 'tree' ? (
+                <ReportTree task={task} onSectionClick={jumpToSection} />
+              ) : task.compiled_sections.length > 0 ? (
+                task.compiled_sections.map((sec, i) => (
+                  <div
+                    key={i}
+                    id={`task-${task.task_id}-section-${i}`}
+                    style={{ marginBottom: 12, borderRadius: 8, padding: highlightSection === i ? 8 : 0, background: highlightSection === i ? 'var(--bg-card)' : 'transparent', transition: 'background 0.3s' }}
+                  >
+                    <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-primary)' }}>{i + 1}. {sec.heading}</div>
+                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', margin: '4px 0' }}>
+                      {(sec.sources.length ? sec.sources : ['unattributed']).map(src => (
+                        <span key={src} style={{ fontSize: '0.62rem', background: '#7c3aed22', color: '#7c3aed', borderRadius: 4, padding: '1px 6px', fontWeight: 600 }}>{src}</span>
+                      ))}
+                    </div>
+                    <div style={{ fontSize: '0.85rem', color: 'var(--text-primary)', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>{sec.body}</div>
+                  </div>
+                ))
+              ) : (
+                <div style={{ fontSize: '0.85rem', color: 'var(--text-primary)', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>{task.compiled_report}</div>
+              )}
             </div>
           ) : (
             <button

@@ -468,6 +468,13 @@ interface ApiService {
         @Path("taskId") taskId: Int,
     ): Response<com.dilarion.app.data.model.TaskItem>
 
+    // Compiled breakout report + report tree page, as a .docx.
+    @GET("tasks/{taskId}/report.docx")
+    suspend fun downloadTaskReportDocx(
+        @Header("Authorization") bearer: String,
+        @Path("taskId") taskId: Int,
+    ): Response<ResponseBody>
+
     // ─── Calls ─────────────────────────────────────────────────────────────────
 
     /** Short-lived TURN credentials; falls back to built-in servers if this fails. */
