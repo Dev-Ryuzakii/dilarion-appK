@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { parseScheduleCopilot } from '../services/api';
+import { chatCopilot } from '../services/api';
 import { CloseIcon, SparkleIcon, CheckIcon } from './Icons';
 
 export interface CopilotScheduleDraft {
@@ -18,12 +18,12 @@ interface ChatMsg {
 }
 
 /**
- * Floating, always-reachable copilot — a chat bubble, not a form buried in a
- * menu. Right now it only does one thing (turn a scheduling sentence into a
- * prefilled New Meeting draft), so it says so up front rather than pretending
- * to be a general assistant. Never creates a meeting itself: "Use this" hands
- * the draft to the caller, which opens the real form — attendees and final
- * confirmation always go through that, same as typing it in by hand.
+ * Floating, always-reachable copilot — a chat bubble. Answers normal messages
+ * normally, and only when the user actually asks to schedule something does it
+ * hand back a prefilled New Meeting draft. Never creates a meeting itself:
+ * "Use this" hands the draft to the caller, which opens the real form —
+ * attendees and final confirmation always go through that, same as typing it
+ * in by hand.
  */
 const BTN = 56;
 const PANEL_W = 340;
@@ -60,7 +60,7 @@ export default function CopilotWidget({ token, onScheduleDraft }: {
 }) {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMsg[]>([
-    { role: 'assistant', text: "Hi! Tell me about a meeting and I'll draft it — e.g. \"call with the team tomorrow at 3 for 30 min\"." },
+    { role: 'assistant', text: "Hi! Ask me anything, or tell me about a meeting and I'll draft it — e.g. \"call with the team tomorrow at 3 for 30 min\"." },
   ]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -124,27 +124,33 @@ export default function CopilotWidget({ token, onScheduleDraft }: {
     setInput('');
     setLoading(true);
     try {
-      const result = await parseScheduleCopilot(token, trimmed);
-      const start = new Date(result.scheduled_at);
-      if (Number.isNaN(start.getTime())) throw new Error("I got a time back but couldn't parse it — try rephrasing.");
-      const end = new Date(start.getTime() + result.duration_minutes * 60000);
-      const pad = (n: number) => String(n).padStart(2, '0');
-      const toLocalInput = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-      const draft: CopilotScheduleDraft = {
-        title: result.title,
-        scheduleWhen: toLocalInput(start),
-        scheduleEndWhen: toLocalInput(end),
-        note: result.confidence === 'low' ? (result.note || "Wasn't fully sure about this one.") : null,
-        rawText: trimmed,
-      };
-      const summary = `${result.title} — ${start.toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })} (${result.duration_minutes}m)`;
-      setMessages(prev => [...prev, {
-        role: 'assistant',
-        text: result.confidence === 'low'
-          ? `Here's my best guess: ${summary}. ${draft.note}`
-          : `Got it: ${summary}.`,
-        draft,
-      }]);
+      const chat = await chatCopilot(token, trimmed);
+      if (chat.kind === 'schedule' && chat.schedule) {
+        const result = chat.schedule;
+        const start = new Date(result.scheduled_at);
+        if (Number.isNaN(start.getTime())) throw new Error("I got a time back but couldn't parse it — try rephrasing.");
+        const end = new Date(start.getTime() + result.duration_minutes * 60000);
+        const pad = (n: number) => String(n).padStart(2, '0');
+        const toLocalInput = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+        const draft: CopilotScheduleDraft = {
+          title: result.title,
+          scheduleWhen: toLocalInput(start),
+          scheduleEndWhen: toLocalInput(end),
+          note: result.confidence === 'low' ? (result.note || "Wasn't fully sure about this one.") : null,
+          rawText: trimmed,
+        };
+        const summary = `${result.title} — ${start.toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })} (${result.duration_minutes}m)`;
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          text: result.confidence === 'low'
+            ? `Here's my best guess: ${summary}. ${draft.note}`
+            : `Got it: ${summary}.`,
+          draft,
+        }]);
+      } else {
+        // Normal conversational reply — no meeting draft.
+        setMessages(prev => [...prev, { role: 'assistant', text: chat.text || "I'm here to help." }]);
+      }
     } catch (err: any) {
       setMessages(prev => [...prev, { role: 'assistant', text: err?.message || "Something went wrong — try again." }]);
     } finally {
@@ -218,7 +224,7 @@ export default function CopilotWidget({ token, onScheduleDraft }: {
           <div style={{ padding: 10, borderTop: '1px solid var(--border-color)', display: 'flex', gap: 8 }}>
             <input
               autoFocus
-              placeholder="Ask copilot to schedule something…"
+              placeholder="Ask copilot anything…"
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') send(); }}

@@ -183,15 +183,22 @@ fun TaskDetailDialog(
     task: TaskItem,
     currentUsername: String,
     busy: Boolean,
+    users: List<com.dilarion.app.data.model.UserInfo> = emptyList(),
     onStatusChange: (String) -> Unit,
     onMyStatusChange: (String) -> Unit,
     onSubmitReport: (groupId: Int, text: String) -> Unit,
+    onAddPeople: (usernames: List<String>, groupName: String?) -> Unit = { _, _ -> },
     onCompile: () -> Unit,
     onExport: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     val myAssignee = task.assignees.find { it.username == currentUsername }
     var showTree by remember(task.taskId) { mutableStateOf(false) }
+    // Usernames already on the task — hidden from the add-people picker.
+    val existing = remember(task) {
+        if (task.isBreakout) task.breakoutGroups.flatMap { it.memberUsernames }.toSet()
+        else task.assignees.map { it.username }.toSet()
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(task.title) },
@@ -209,6 +216,14 @@ fun TaskDetailDialog(
                             FilterChip(selected = task.status == s, onClick = { onStatusChange(s) }, label = { Text(s.replace("_", " "), fontSize = 10.sp) })
                         }
                     }
+                }
+                item {
+                    AddPeopleSection(
+                        task = task,
+                        candidates = users.filter { it.username != null && it.username !in existing },
+                        busy = busy,
+                        onAdd = onAddPeople,
+                    )
                 }
                 if (task.isBreakout) {
                     item { Text("Breakout groups", fontWeight = FontWeight.Bold, fontSize = 13.sp) }
@@ -296,4 +311,61 @@ fun TaskDetailDialog(
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
     )
+}
+
+/** Add more people to an existing task. Collapsed to a button until tapped;
+ *  then a chip picker of users not already on the task, plus (for a breakout
+ *  task) which sub-team they join. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun AddPeopleSection(
+    task: TaskItem,
+    candidates: List<UserInfo>,
+    busy: Boolean,
+    onAdd: (usernames: List<String>, groupName: String?) -> Unit,
+) {
+    var expanded by remember(task.taskId) { mutableStateOf(false) }
+    val selected = remember(task.taskId) { mutableStateListOf<String>() }
+    var groupName by remember(task.taskId) {
+        mutableStateOf(task.breakoutGroups.firstOrNull()?.name ?: if (task.isBreakout) "Team A" else null)
+    }
+    if (!expanded) {
+        TextButton(onClick = { expanded = true }) { Text("+ Add people", fontSize = 12.sp) }
+        return
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("Add people", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+        if (task.isBreakout && task.breakoutGroups.isNotEmpty()) {
+            Text("To team:", fontSize = 11.sp, color = TextSecondary)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                task.breakoutGroups.forEach { g ->
+                    val n = g.name ?: "Group ${g.groupId}"
+                    FilterChip(selected = groupName == n, onClick = { groupName = n }, label = { Text(n, fontSize = 10.sp) })
+                }
+            }
+        }
+        if (candidates.isEmpty()) {
+            Text("Everyone's already on this task.", fontSize = 11.sp, color = TextSecondary)
+        } else {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                candidates.forEach { u ->
+                    val uname = u.username ?: return@forEach
+                    val isSel = selected.contains(uname)
+                    FilterChip(
+                        selected = isSel,
+                        onClick = { if (isSel) selected.remove(uname) else selected.add(uname) },
+                        label = { Text(uname, fontSize = 10.sp) },
+                    )
+                }
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(
+                onClick = { onAdd(selected.toList(), if (task.isBreakout) groupName else null); selected.clear(); expanded = false },
+                enabled = !busy && selected.isNotEmpty(),
+                colors = ButtonDefaults.buttonColors(containerColor = DilarionRed),
+            ) { Text(if (selected.isEmpty()) "Add" else "Add (${selected.size})") }
+            TextButton(onClick = { expanded = false; selected.clear() }) { Text("Cancel") }
+        }
+    }
 }

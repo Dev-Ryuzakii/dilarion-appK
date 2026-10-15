@@ -429,6 +429,13 @@ interface ApiService {
         @Body request: com.dilarion.app.data.model.TaskCreateRequest,
     ): Response<com.dilarion.app.data.model.TaskItem>
 
+    @POST("tasks/{taskId}/assignees")
+    suspend fun addTaskAssignees(
+        @Header("Authorization") bearer: String,
+        @Path("taskId") taskId: Int,
+        @Body request: com.dilarion.app.data.model.TaskAssigneesAddRequest,
+    ): Response<com.dilarion.app.data.model.TaskItem>
+
     @GET("tasks")
     suspend fun listTasks(
         @Header("Authorization") bearer: String,

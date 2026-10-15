@@ -943,6 +943,31 @@ export async function parseScheduleCopilot(token: string, text: string): Promise
   return res.json();
 }
 
+export interface CopilotChatResult {
+  kind: 'reply' | 'schedule';
+  text: string;
+  schedule?: CopilotScheduleResult;
+}
+
+/** General copilot chat. Answers normal messages normally; only returns a
+ *  schedule draft when the user is actually asking to book a meeting. */
+export async function chatCopilot(token: string, text: string): Promise<CopilotChatResult> {
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const currentTime = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  const res = await apiFetch(`${BASE}/copilot/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ text, current_time: currentTime }),
+  });
+  if (!res.ok) {
+    let detail = `Copilot request failed (${res.status})`;
+    try { const b = await res.json(); detail = b.detail || detail; } catch {}
+    throw new Error(detail);
+  }
+  return res.json();
+}
+
 async function copilotPost<T>(token: string, path: string, body: Record<string, unknown>): Promise<T> {
   const res = await apiFetch(`${BASE}${path}`, {
     method: 'POST',
@@ -2047,6 +2072,8 @@ export interface TaskItem {
   report_tree: TaskReportTreeTeam[];
   recurrence: string | null;
   next_occurrence?: TaskItem;
+  /** Present on create / add-assignee responses: people the server couldn't assign, with why. */
+  skipped_assignees?: { username: string; reason: string }[];
 }
 
 export interface TaskCreatePayload {
@@ -2073,6 +2100,18 @@ export async function createTask(token: string, payload: TaskCreatePayload): Pro
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify(payload),
+  });
+  return taskRequest(res);
+}
+
+/** Add more people to an existing task. For a breakout task pass groupName to
+ *  pick the sub-team (defaults to the first). Returns the updated task, with
+ *  skipped_assignees for anyone the server couldn't add. */
+export async function addTaskAssignees(token: string, taskId: number, usernames: string[], groupName?: string): Promise<TaskItem> {
+  const res = await apiFetch(`${BASE}/tasks/${taskId}/assignees`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ usernames, group_name: groupName ?? null }),
   });
   return taskRequest(res);
 }

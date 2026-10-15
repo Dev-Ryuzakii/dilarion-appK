@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import {
   TaskItem, TaskCreatePayload, Group, Contact,
   createTask, listTasks, updateTaskStatus, updateMyTaskStatus, submitBreakoutReport, compileTask, getUsers,
-  downloadTaskReportDocx,
+  addTaskAssignees, downloadTaskReportDocx,
 } from '../services/api';
 import { saveBlob } from '../services/platform';
 
@@ -165,7 +165,52 @@ function TaskDetail({ task, myUsername, token, onChanged }: { task: TaskItem; my
   const [highlightSection, setHighlightSection] = useState<number | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
+  // Add-people control
+  const [showAdd, setShowAdd] = useState(false);
+  const [allUsers, setAllUsers] = useState<Contact[]>([]);
+  const [toAdd, setToAdd] = useState<string[]>([]);
+  const [addGroupName, setAddGroupName] = useState<string>('');
+
   const myAssignee = task.assignees.find(a => a.username === myUsername);
+
+  useEffect(() => {
+    if (showAdd && allUsers.length === 0) {
+      getUsers(token).then(setAllUsers).catch(() => {});
+    }
+    if (showAdd && task.is_breakout && !addGroupName && task.breakout_groups.length > 0) {
+      setAddGroupName(task.breakout_groups[0].name || `Group ${task.breakout_groups[0].group_id}`);
+    }
+  }, [showAdd]);
+
+  // Usernames already on the task (direct assignees or any breakout team).
+  const existing = new Set<string>(
+    task.is_breakout
+      ? task.breakout_groups.flatMap(g => g.member_usernames)
+      : task.assignees.map(a => a.username)
+  );
+
+  async function handleAddPeople() {
+    if (toAdd.length === 0) return;
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const updated = await addTaskAssignees(token, task.task_id, toAdd, task.is_breakout ? addGroupName : undefined);
+      const skipped = updated.skipped_assignees || [];
+      if (skipped.length > 0) {
+        setError(`Couldn't add: ${skipped.map(s => `${s.username} (${s.reason})`).join('; ')}`);
+      } else {
+        setNotice('Added.');
+      }
+      setToAdd([]);
+      setShowAdd(false);
+      onChanged();
+    } catch (err: any) {
+      setError(err?.message || 'Failed to add people');
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function handleStatus(status: TaskItem['status']) {
     setBusy(true);
@@ -278,7 +323,71 @@ function TaskDetail({ task, myUsername, token, onChanged }: { task: TaskItem; my
         ))}
       </div>
 
+      {/* Add people to this existing task (creator/admin/org — server enforces) */}
+      <div style={{ marginBottom: 16 }}>
+        {!showAdd ? (
+          <button
+            onClick={() => setShowAdd(true)}
+            style={{ background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px dashed var(--border-color)', borderRadius: 8, padding: '6px 12px', fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer' }}
+          >
+            + Add people
+          </button>
+        ) : (
+          <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 10, padding: 12 }}>
+            {task.is_breakout && (
+              <label style={{ display: 'block', fontSize: '0.74rem', color: 'var(--text-muted)', marginBottom: 6 }}>
+                Add to team:
+                <select
+                  value={addGroupName}
+                  onChange={e => setAddGroupName(e.target.value)}
+                  style={{ marginLeft: 8, background: 'var(--input-bg)', border: '1px solid var(--border-color)', borderRadius: 6, color: 'var(--text-primary)', fontSize: '0.78rem', padding: '3px 6px' }}
+                >
+                  {task.breakout_groups.map(g => {
+                    const n = g.name || `Group ${g.group_id}`;
+                    return <option key={g.group_id} value={n}>{n}</option>;
+                  })}
+                </select>
+              </label>
+            )}
+            <div style={{ maxHeight: 160, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2, marginBottom: 8 }}>
+              {allUsers.filter(u => !existing.has(u.username)).map(u => {
+                const checked = toAdd.includes(u.username);
+                return (
+                  <label key={u.username} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.8rem', color: 'var(--text-primary)', padding: '3px 2px', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => setToAdd(prev => checked ? prev.filter(x => x !== u.username) : [...prev, u.username])}
+                    />
+                    {u.username}
+                  </label>
+                );
+              })}
+              {allUsers.filter(u => !existing.has(u.username)).length === 0 && (
+                <span style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>Everyone's already on this task.</span>
+              )}
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                onClick={handleAddPeople}
+                disabled={busy || toAdd.length === 0}
+                style={{ background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 8, padding: '6px 14px', fontSize: '0.78rem', fontWeight: 700, cursor: busy || toAdd.length === 0 ? 'default' : 'pointer', opacity: toAdd.length === 0 ? 0.5 : 1 }}
+              >
+                Add {toAdd.length > 0 ? `(${toAdd.length})` : ''}
+              </button>
+              <button
+                onClick={() => { setShowAdd(false); setToAdd([]); }}
+                style={{ background: 'transparent', color: 'var(--text-muted)', border: '1px solid var(--border-color)', borderRadius: 8, padding: '6px 12px', fontSize: '0.78rem', cursor: 'pointer' }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
       {error && <p style={{ color: '#ef4444', fontSize: '0.78rem', marginBottom: 12 }}>{error}</p>}
+      {notice && !task.is_breakout && <p style={{ color: 'var(--text-muted)', fontSize: '0.78rem', marginBottom: 12 }}>{notice}</p>}
 
       {task.is_breakout ? (
         <>
@@ -461,7 +570,15 @@ function CreateTaskModal({ token, myUsername, groups, onClose, onCreated }: { to
       } else {
         payload.assignee_usernames = assignees;
       }
-      await createTask(token, payload);
+      const created = await createTask(token, payload);
+      const skipped = created.skipped_assignees || [];
+      if (skipped.length > 0) {
+        // Task was created but some people couldn't be assigned — show why and
+        // keep the modal open so it isn't missed.
+        setError(`Task created, but couldn't assign: ${skipped.map(s => `${s.username} (${s.reason})`).join('; ')}`);
+        setSaving(false);
+        return;
+      }
       onCreated();
     } catch (err: any) {
       setError(err?.message || 'Failed to create task');

@@ -287,6 +287,13 @@ data class TaskItem(
     @SerializedName("compiled_sections") val compiledSections: List<TaskCompiledSection> = emptyList(),
     @SerializedName("report_tree") val reportTree: List<TaskReportTreeTeam> = emptyList(),
     val recurrence: String? = null,
+    @SerializedName("skipped_assignees") val skippedAssignees: List<SkippedAssignee> = emptyList(),
+)
+
+/** Someone the server couldn't assign on create/add, with the reason why. */
+data class SkippedAssignee(
+    val username: String = "",
+    val reason: String = "",
 )
 
 /** One part of the AI-compiled report, tagged with the team(s) it came from. */
@@ -335,6 +342,11 @@ data class TaskCreateRequest(
 )
 
 data class TaskStatusUpdateRequest(val status: String)
+
+data class TaskAssigneesAddRequest(
+    val usernames: List<String>,
+    @SerializedName("group_name") val groupName: String? = null,
+)
 
 data class TaskGroupReportSubmitRequest(@SerializedName("report_text") val reportText: String)
 

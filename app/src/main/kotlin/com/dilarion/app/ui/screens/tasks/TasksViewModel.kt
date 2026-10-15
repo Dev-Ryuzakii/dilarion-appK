@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.dilarion.app.data.api.ApiService
 import com.dilarion.app.data.api.parseErrorDetail
 import com.dilarion.app.data.model.Group
+import com.dilarion.app.data.model.TaskAssigneesAddRequest
 import com.dilarion.app.data.model.TaskBreakoutGroupCreate
 import com.dilarion.app.data.model.TaskCreateRequest
 import com.dilarion.app.data.model.TaskGroupReportSubmitRequest
@@ -124,13 +125,62 @@ class TasksViewModel @Inject constructor(
             runCatching { apiService.createTask(bearer, req) }
                 .onSuccess { resp ->
                     if (resp.isSuccessful) {
-                        _uiState.value = _uiState.value.copy(busy = false, showCreate = false)
-                        loadTasks()
+                        val skipped = resp.body()?.skippedAssignees ?: emptyList()
+                        if (skipped.isNotEmpty()) {
+                            // Created, but some people couldn't be assigned — keep the
+                            // dialog open and say why, so it isn't missed.
+                            _uiState.value = _uiState.value.copy(
+                                busy = false,
+                                createError = "Task created, but couldn't assign: " +
+                                    skipped.joinToString("; ") { "${it.username} (${it.reason})" },
+                            )
+                            loadTasks()
+                        } else {
+                            _uiState.value = _uiState.value.copy(busy = false, showCreate = false)
+                            loadTasks()
+                        }
                     } else {
                         _uiState.value = _uiState.value.copy(busy = false, createError = resp.errorBody().parseErrorDetail("Failed to create task"))
                     }
                 }
                 .onFailure { e -> _uiState.value = _uiState.value.copy(busy = false, createError = e.message) }
+        }
+    }
+
+    /** Add more people to an existing task. For a breakout task, groupName picks
+     *  the sub-team (null = first). Surfaces any skipped usernames in `error`. */
+    fun addAssignees(taskId: Int, usernames: List<String>, groupName: String?) {
+        if (usernames.isEmpty()) return
+        viewModelScope.launch {
+            val bearer = bearer() ?: return@launch
+            _uiState.value = _uiState.value.copy(busy = true, error = null)
+            runCatching { apiService.addTaskAssignees(bearer, taskId, TaskAssigneesAddRequest(usernames, groupName)) }
+                .onSuccess { resp ->
+                    if (resp.isSuccessful) {
+                        val skipped = resp.body()?.skippedAssignees ?: emptyList()
+                        if (skipped.isNotEmpty()) {
+                            _uiState.value = _uiState.value.copy(error = "Couldn't add: " +
+                                skipped.joinToString("; ") { "${it.username} (${it.reason})" })
+                        }
+                        loadTasks()
+                    } else {
+                        _uiState.value = _uiState.value.copy(error = resp.errorBody().parseErrorDetail("Failed to add people"))
+                    }
+                }
+                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
+            _uiState.value = _uiState.value.copy(busy = false)
+        }
+    }
+
+    /** Ensure the user/group lists are loaded (for the add-people picker when the
+     *  create dialog hasn't populated them this session). */
+    fun ensureDirectoryLoaded() {
+        if (_uiState.value.users.isNotEmpty()) return
+        viewModelScope.launch {
+            val bearer = bearer() ?: return@launch
+            val me = _uiState.value.currentUsername
+            runCatching { apiService.getUsers(bearer) }
+                .onSuccess { resp -> if (resp.isSuccessful) _uiState.value = _uiState.value.copy(users = resp.body()?.filter { it.username != me } ?: emptyList()) }
         }
     }
 

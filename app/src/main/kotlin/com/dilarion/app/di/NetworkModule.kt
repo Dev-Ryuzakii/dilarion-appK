@@ -7,6 +7,7 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import okhttp3.OkHttpClient
+import okhttp3.Protocol
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
@@ -27,6 +28,14 @@ object NetworkModule {
             .readTimeout(30, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)
             .pingInterval(25, TimeUnit.SECONDS)
+            // Force HTTP/1.1. Against Cloudflare, OkHttp's pooled HTTP/2 connections
+            // get half-closed by the edge and a reused stream fails mid-request with
+            // "connection closed" / "stream was reset". OkHttp will not retry a
+            // non-idempotent POST (e.g. calls/initiate), so the call died before it
+            // ever reached the backend. HTTP/1.1 uses one request per connection and
+            // retries cleanly on a stale pooled socket.
+            .protocols(listOf(Protocol.HTTP_1_1))
+            .retryOnConnectionFailure(true)
             .addInterceptor(
                 HttpLoggingInterceptor().apply {
                     level = HttpLoggingInterceptor.Level.BODY

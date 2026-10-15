@@ -124,13 +124,16 @@ fun TasksScreen(viewModel: TasksViewModel = hiltViewModel()) {
     uiState.selectedTaskId?.let { id ->
         val task = uiState.tasks.find { it.taskId == id }
         if (task != null) {
+            LaunchedEffect(task.taskId) { viewModel.ensureDirectoryLoaded() }
             TaskDetailDialog(
                 task = task,
                 currentUsername = uiState.currentUsername,
                 busy = uiState.busy,
+                users = uiState.users,
                 onStatusChange = { status -> viewModel.updateTaskStatus(task.taskId, status) },
                 onMyStatusChange = { status -> viewModel.updateMyStatus(task.taskId, status) },
                 onSubmitReport = { groupId, text -> viewModel.submitBreakoutReport(task.taskId, groupId, text) },
+                onAddPeople = { usernames, groupName -> viewModel.addAssignees(task.taskId, usernames, groupName) },
                 onCompile = { viewModel.compileTask(task.taskId) },
                 onExport = { viewModel.exportReport(task) },
                 onDismiss = { viewModel.selectTask(null) },
