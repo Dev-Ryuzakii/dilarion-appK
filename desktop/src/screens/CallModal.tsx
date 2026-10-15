@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { presenceService } from '../services/presence';
-import { initiateCall, performCallAction, sendCallIceCandidate, setCallMediaState, getCallStatus, createConference, conferenceInvite, conferenceSignal, conferenceLeave, getUsers, getIceServers, Contact, CALL_TERMINAL_STATUSES } from '../services/api';
+import { initiateCall, performCallAction, sendCallIceCandidate, setCallMediaState, getCallStatus, createConference, conferenceInvite, conferenceSignal, conferenceLeave, getUsers, getIceServers, Contact, CALL_TERMINAL_STATUSES, profilePictureUrl } from '../services/api';
 import { CloseIcon, MuteIcon } from '../components/Icons';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -221,6 +221,12 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
   // Which feed fills the frame: false = the other party (default), true = your
   // own camera. The small picture-in-picture always shows the other one.
   const [videoSwapped, setVideoSwapped] = useState(false);
+  const [avatarFailed, setAvatarFailed] = useState(false);
+  const [deviceMenu, setDeviceMenu] = useState<'audioinput' | 'videoinput' | null>(null);
+  const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
+  // onEnd closes the call window — guard so a hangup's own close and the
+  // ended-state auto-close don't both fire it.
+  const closedRef = useRef(false);
   const [tokenRejected, setTokenRejected] = useState(false);
 
   // ── WebRTC setup ─────────────────────────────────────────────────────────────
@@ -746,7 +752,66 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
     }
     finishCall();
     // We chose to hang up, so there is nothing to offer a call back for — close.
-    setTimeout(onEnd, 400);
+    setTimeout(closeOnce, 400);
+  }
+
+  function closeOnce() {
+    if (closedRef.current) return;
+    closedRef.current = true;
+    onEnd();
+  }
+
+  // Ended by the other side (hung up / declined / no answer): show "Call
+  // ended" with the call-back options for a few seconds, then close the call
+  // window on its own instead of leaving it sitting there. Redialling
+  // unmounts this component, which clears the timer.
+  useEffect(() => {
+    if (state !== 'ended') return;
+    const t = setTimeout(closeOnce, error ? 6000 : 4000);
+    return () => clearTimeout(t);
+  }, [state]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function openDeviceMenu(kind: 'audioinput' | 'videoinput') {
+    if (deviceMenu === kind) { setDeviceMenu(null); return; }
+    setDeviceMenu(kind);
+    try { setDevices(await navigator.mediaDevices.enumerateDevices()); } catch {}
+  }
+
+  function currentDeviceId(kind: 'audioinput' | 'videoinput'): string | undefined {
+    const stream = localStreamRef.current;
+    const track = kind === 'audioinput' ? stream?.getAudioTracks()[0] : stream?.getVideoTracks()[0];
+    return track?.getSettings().deviceId;
+  }
+
+  /** Swap the live mic/camera for another device without renegotiating —
+   *  replaceTrack on every sender (1:1 and conference peers). */
+  async function switchDevice(kind: 'audioinput' | 'videoinput', deviceId: string) {
+    setDeviceMenu(null);
+    if (deviceId === currentDeviceId(kind)) return;
+    try {
+      const fresh = await navigator.mediaDevices.getUserMedia(
+        kind === 'audioinput' ? { audio: { deviceId: { exact: deviceId } } } : { video: { deviceId: { exact: deviceId } } },
+      );
+      const newTrack = fresh.getTracks()[0];
+      const trackKind = kind === 'audioinput' ? 'audio' : 'video';
+      newTrack.enabled = trackKind === 'audio' ? !muted : !cameraOff;
+      const peers = [pcRef.current, ...confPeersRef.current.values()].filter(Boolean) as RTCPeerConnection[];
+      // While screen sharing, the video sender carries the screen — leave it.
+      if (!(trackKind === 'video' && sharing)) {
+        await Promise.all(peers.flatMap(pc => pc.getSenders()
+          .filter(sn => sn.track?.kind === trackKind)
+          .map(sn => sn.replaceTrack(newTrack))));
+      }
+      const local = localStreamRef.current;
+      if (local) {
+        const old = trackKind === 'audio' ? local.getAudioTracks() : local.getVideoTracks();
+        old.forEach(t => { local.removeTrack(t); t.stop(); });
+        local.addTrack(newTrack);
+        if (trackKind === 'video' && !sharing && localVideoRef.current) localVideoRef.current.srcObject = local;
+      }
+    } catch (err: any) {
+      setError(err?.message || 'Could not switch device');
+    }
   }
 
   function toggleMute() {
@@ -823,12 +888,21 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
     );
   }
 
-  return (
-    <div className="call-overlay" style={cs.overlay}>
-      <div className="call-card" style={cs.modal}>
+  const showCenterInfo = !isVideo || state !== 'connected';
+  const statusText =
+    state === 'calling' ? 'Calling…'
+    : state === 'ringing' ? (isIncoming ? `Incoming ${isVideo ? 'video' : 'voice'} call…` : 'Ringing…')
+    : state === 'connecting' ? 'Connecting…'
+    : state === 'connected' ? (reconnecting ? 'Reconnecting…' : peerMuted ? `${partner} is muted · ${fmtDur(duration)}` : fmtDur(duration))
+    : 'Call ended';
+  const inCall = state === 'calling' || (state === 'ringing' && !isIncoming) || state === 'connecting' || state === 'connected';
 
-        {/* Video area. Tap the small frame (or the swap button) to switch which
-            feed fills the screen — the other party or your own camera. */}
+  return (
+    <div className="call-overlay" style={cs.overlay} onClick={() => setDeviceMenu(null)}>
+      {/* Stage: wallpaper, video, and the centred avatar/name/status */}
+      <div style={cs.stage}>
+        <div style={cs.wallpaper} />
+
         {isVideo && (
           <div style={cs.videoArea}>
             {/* Remote video — audio comes via remoteAudioRef to avoid WKWebView autoplay issues */}
@@ -839,9 +913,9 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
               muted
               onClick={videoSwapped ? () => setVideoSwapped(false) : undefined}
               title={videoSwapped ? `Switch back to ${partner}` : undefined}
-              style={videoSwapped ? { ...cs.localPip, cursor: 'pointer' } : cs.mainVideo}
+              style={videoSwapped ? { ...cs.localPip, cursor: 'pointer' } : { ...cs.mainVideo, opacity: state === 'connected' ? 1 : 0 }}
             />
-            {/* Local PiP */}
+            {/* Local PiP — tap to swap which feed fills the stage */}
             <video
               ref={localVideoRef}
               autoPlay
@@ -849,188 +923,225 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
               muted
               onClick={() => setVideoSwapped(s => !s)}
               title={videoSwapped ? 'Switch to your camera view' : 'Switch to your own camera'}
-              style={videoSwapped ? cs.mainVideo : { ...cs.localPip, cursor: 'pointer' }}
+              style={videoSwapped ? cs.mainVideo : { ...cs.localPip, cursor: 'pointer', visibility: cameraOff || state === 'ended' ? 'hidden' : 'visible' }}
             />
-            {/* Explicit swap control, in case the small frame is easy to miss */}
-            <button
-              onClick={() => setVideoSwapped(s => !s)}
-              title="Swap the main and small video"
-              style={cs.swapBtn}
-            >
-              <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M16 3h5v5M4 20 21 3M21 16v5h-5M15 15l6 6M4 4l5 5"/></svg>
-            </button>
-            {/* Dedicated audio output for remote stream */}
+            {state === 'connected' && (
+              <button onClick={() => setVideoSwapped(s => !s)} title="Swap the main and small video" style={cs.swapBtn}>
+                <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M16 3h5v5M4 20 21 3M21 16v5h-5M15 15l6 6M4 4l5 5"/></svg>
+              </button>
+            )}
             <audio ref={remoteAudioRef} autoPlay style={{ display: 'none' }} />
           </div>
         )}
-
-        {/* Audio-only avatar area */}
         {!isVideo && (
-          <div style={cs.avatarArea}>
-            <div style={cs.bigAvatar}>
-              {partner.slice(0, 2).toUpperCase()}
-            </div>
+          <>
             <video ref={localVideoRef} autoPlay playsInline muted style={{ display: 'none' }} />
             <video ref={remoteVideoRef} autoPlay playsInline style={{ display: 'none' }} />
             <audio ref={remoteAudioRef} autoPlay style={{ display: 'none' }} />
-          </div>
+          </>
         )}
 
-        {/* Info bar */}
-        <div style={{ ...cs.infoBar, position: 'relative' }}>
-          {onMinimize && state !== 'ringing' && (
-            <button
-              onClick={onMinimize}
-              title="Minimize"
-              style={{ position: 'absolute', top: 12, right: 12, background: 'transparent', border: 'none', cursor: 'pointer', padding: 4, borderRadius: 6, color: '#9ca3af' }}
-            >
-              <svg viewBox="0 0 24 24" width={18} height={18} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round"><path d="M8 3v3a2 2 0 0 1-2 2H3M21 8h-3a2 2 0 0 1-2-2V3M3 16h3a2 2 0 0 1 2 2v3M16 21v-3a2 2 0 0 1 2-2h3"/></svg>
-            </button>
-          )}
-          <span style={cs.partnerName}>{partner}</span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={cs.callStatus}>
-              {state === 'calling'    && 'Calling…'}
-              {state === 'ringing'    && (isIncoming ? 'Incoming call…' : 'Ringing…')}
-              {state === 'connecting' && 'Connecting…'}
-              {state === 'connected'  && (
-                reconnecting ? 'Reconnecting…'
-                : peerMuted ? `${partner} is muted · ${fmtDur(duration)}`
-                : fmtDur(duration)
-              )}
-              {state === 'ended'      && 'Call ended'}
+        {showCenterInfo ? (
+          <div style={cs.centerInfo}>
+            <div style={cs.bigAvatar}>
+              {!avatarFailed ? (
+                <img src={profilePictureUrl(partner)} alt="" onError={() => setAvatarFailed(true)} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              ) : partner.slice(0, 2).toUpperCase()}
+            </div>
+            <div style={cs.partnerName}>{partner}</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={cs.callStatus}>{statusText}</span>
+              {state === 'connected' && !reconnecting && <SignalBars quality={netQuality} />}
+            </div>
+            {state === 'ended' && <span style={{ fontSize: '0.8rem', color: '#8696a0' }}>This window will close shortly</span>}
+            {error && <span style={{ fontSize: '0.8rem', color: '#f15c6d' }}>{error}</span>}
+          </div>
+        ) : (
+          // Connected video: name + timer tucked into the top-left corner
+          <div style={cs.cornerInfo}>
+            <span style={{ fontWeight: 700, fontSize: '0.95rem' }}>{partner}</span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.78rem', color: '#d1d7db' }}>
+              {statusText}{!reconnecting && <SignalBars quality={netQuality} />}
             </span>
-            {state === 'connected' && !reconnecting && <SignalBars quality={netQuality} />}
-          </div>
-          {error && <span style={{ fontSize: '0.75rem', color: '#ef4444' }}>{error}</span>}
-        </div>
-
-        {/* Incoming ringing buttons */}
-        {state === 'ringing' && isIncoming && (
-          <div style={cs.controls}>
-            <ControlBtn icon="decline" color="#ef4444" label="Decline" onClick={handleEnd} />
-            <ControlBtn icon="accept" color="#25d366" label="Accept" onClick={() => { if (masterToken) acceptCall(masterToken); else setShowTokenPrompt(true); }} />
-            {showTokenPrompt && (
-              <MasterTokenPrompt
-                rejected={tokenRejected}
-                onCancel={() => { setShowTokenPrompt(false); setTokenRejected(false); }}
-                onConfirm={(t) => { setShowTokenPrompt(false); acceptCall(t); }}
-              />
-            )}
           </div>
         )}
 
-        {/* Outgoing: calling/ringing — just show cancel */}
-        {(state === 'calling' || (state === 'ringing' && !isIncoming)) && (
-          <div style={cs.controls}>
-            <ControlBtn icon="end" color="#ef4444" label="Cancel" onClick={handleEnd} />
-          </div>
+        {onMinimize && state !== 'ringing' && state !== 'ended' && (
+          <button onClick={onMinimize} title="Minimize" style={cs.minimizeBtn}>
+            <svg viewBox="0 0 24 24" width={18} height={18} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round"><path d="M8 3v3a2 2 0 0 1-2 2H3M21 8h-3a2 2 0 0 1-2-2V3M3 16h3a2 2 0 0 1 2 2v3M16 21v-3a2 2 0 0 1 2-2h3"/></svg>
+          </button>
         )}
 
-        {/* Ended by the other side (declined / no answer / hung up) — offer a
-            redial rather than dropping the user back into the list, which is
-            where they would otherwise have to go hunting for the contact. */}
-        {state === 'ended' && onCallBack && !conferenceId && (
-          <div style={cs.controls}>
-            <ControlBtn icon="end" color="#4b5563" label="Close" onClick={onEnd} />
-            <ControlBtn
-              icon="accept"
-              color="#25d366"
-              label="Call back"
-              onClick={() => onCallBack(callType)}
-            />
-            {callType === 'video' ? (
-              <ControlBtn icon="accept" color="#2563eb" label="Voice" onClick={() => onCallBack('audio')} />
-            ) : (
-              <ControlBtn icon="cam" color="#2563eb" label="Video" onClick={() => onCallBack('video')} />
-            )}
-          </div>
-        )}
-
-        {/* Conference participants list */}
+        {/* Conference participants */}
         {confParticipants.length > 0 && (
-          <div style={{ display: 'flex', gap: 6, padding: '8px 16px', flexWrap: 'wrap' }}>
+          <div style={cs.confChips}>
             {confParticipants.map(p => {
               const isMuted = mutedPeers.has(p);
               return (
-                <div key={p} style={{ background: '#1f2937', borderRadius: 20, padding: '4px 10px', fontSize: '0.75rem', color: isMuted ? '#9ca3af' : '#d1d5db', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <div key={p} style={{ background: 'rgba(32,44,51,0.85)', borderRadius: 20, padding: '4px 10px', fontSize: '0.75rem', color: isMuted ? '#8696a0' : '#e9edef', display: 'flex', alignItems: 'center', gap: 6 }}>
                   <span style={{ width: 8, height: 8, borderRadius: '50%', background: isMuted ? '#6b7280' : '#22c55e', display: 'inline-block' }} />
                   {p}
-                  {isMuted && <span title="muted" style={{ display: 'inline-flex' }}><MuteIcon size={11} color="#9ca3af" /></span>}
+                  {isMuted && <span title="muted" style={{ display: 'inline-flex' }}><MuteIcon size={11} color="#8696a0" /></span>}
                 </div>
               );
             })}
           </div>
         )}
+      </div>
 
-        {/* WhatsApp-style user picker modal */}
-        {userPickerOpen && (
-          <div style={cs.pickerOverlay}>
-            <div style={cs.pickerModal}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px', borderBottom: '1px solid #1f2937' }}>
-                <span style={{ color: '#f1f5f9', fontWeight: 700, fontSize: '1rem' }}>Add to Call</span>
-                <button onClick={() => { setUserPickerOpen(false); setUserSearch(''); }} style={{ ...cs.pickerClose, display: 'flex' }}><CloseIcon size={16} color="#9ca3af" /></button>
-              </div>
-              <div style={{ padding: '12px 16px' }}>
-                <input
-                  autoFocus
-                  value={userSearch}
-                  onChange={e => setUserSearch(e.target.value)}
-                  placeholder="Search users…"
-                  style={cs.searchInput}
+      {/* Bottom control bar — devices left, actions centre, call button right */}
+      <div style={cs.bar}>
+        <div style={cs.barSide}>
+          {inCall && isVideo && (
+            <DevicePill
+              icon={cameraOff ? 'cam-off' : 'cam'}
+              off={cameraOff}
+              title={cameraOff ? 'Turn camera on' : 'Turn camera off'}
+              onToggle={toggleCamera}
+              menuOpen={deviceMenu === 'videoinput'}
+              onMenu={() => openDeviceMenu('videoinput')}
+              devices={devices}
+              currentId={currentDeviceId('videoinput')}
+              onPick={id => switchDevice('videoinput', id)}
+            />
+          )}
+          {inCall && (
+            <DevicePill
+              icon={muted ? 'mic-off' : 'mic'}
+              off={muted}
+              title={muted ? 'Unmute' : 'Mute'}
+              onToggle={toggleMute}
+              menuOpen={deviceMenu === 'audioinput'}
+              onMenu={() => openDeviceMenu('audioinput')}
+              devices={devices}
+              currentId={currentDeviceId('audioinput')}
+              onPick={id => switchDevice('audioinput', id)}
+            />
+          )}
+        </div>
+
+        <div style={cs.barCenter}>
+          {inCall && isVideo && state === 'connected' && (
+            <IconBtn icon="screen" active={sharing} title={sharing ? 'Stop sharing' : 'Share screen'} onClick={toggleScreenShare} />
+          )}
+          {state === 'connected' && (
+            <IconBtn icon="add-user" active={userPickerOpen} title="Add people" onClick={openUserPicker} />
+          )}
+          {state === 'ended' && onCallBack && !conferenceId && (
+            <>
+              <PillBtn icon="accept" color="#25d366" label="Voice call" onClick={() => onCallBack('audio')} />
+              <PillBtn icon="cam" color="#2a3942" label="Video call" onClick={() => onCallBack('video')} />
+            </>
+          )}
+        </div>
+
+        <div style={{ ...cs.barSide, justifyContent: 'flex-end' }}>
+          {state === 'ringing' && isIncoming && (
+            <>
+              <PillBtn icon="end" color="#ea0038" label="Decline" onClick={handleEnd} />
+              <PillBtn icon="accept" color="#25d366" label="Accept" onClick={() => { if (masterToken) acceptCall(masterToken); else setShowTokenPrompt(true); }} />
+              {showTokenPrompt && (
+                <MasterTokenPrompt
+                  rejected={tokenRejected}
+                  onCancel={() => { setShowTokenPrompt(false); setTokenRejected(false); }}
+                  onConfirm={(t) => { setShowTokenPrompt(false); acceptCall(t); }}
                 />
-              </div>
-              <div style={{ overflowY: 'auto', flex: 1 }}>
-                {allUsers.filter(u => u.username.toLowerCase().includes(userSearch.toLowerCase())).map(u => (
-                  <div key={u.username} onClick={() => handleAddParticipant(u.username)} style={cs.userRow}>
-                    <div style={cs.userAvatar}>{u.username.slice(0, 2).toUpperCase()}</div>
-                    <span style={{ color: '#f1f5f9', fontSize: '0.9rem', fontWeight: 600, flex: 1 }}>{u.username}</span>
-                    <span style={{ color: '#22c55e', fontSize: '0.8rem', fontWeight: 600 }}>+ Add</span>
-                  </div>
-                ))}
-                {allUsers.filter(u => u.username.toLowerCase().includes(userSearch.toLowerCase())).length === 0 && (
-                  <div style={{ padding: '24px', textAlign: 'center', color: '#6b7280', fontSize: '0.85rem' }}>
-                    {allUsers.length === 0 ? 'Loading…' : 'No users found'}
-                  </div>
-                )}
-              </div>
+              )}
+            </>
+          )}
+          {inCall && <PillBtn icon="end" color="#ea0038" title="End call" onClick={handleEnd} />}
+          {state === 'ended' && <PillBtn icon="close" color="#2a3942" label="Close" onClick={closeOnce} />}
+        </div>
+      </div>
+
+      {/* WhatsApp-style user picker modal */}
+      {userPickerOpen && (
+        <div style={cs.pickerOverlay}>
+          <div style={cs.pickerModal}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px', borderBottom: '1px solid #1f2937' }}>
+              <span style={{ color: '#f1f5f9', fontWeight: 700, fontSize: '1rem' }}>Add to Call</span>
+              <button onClick={() => { setUserPickerOpen(false); setUserSearch(''); }} style={{ ...cs.pickerClose, display: 'flex' }}><CloseIcon size={16} color="#9ca3af" /></button>
+            </div>
+            <div style={{ padding: '12px 16px' }}>
+              <input
+                autoFocus
+                value={userSearch}
+                onChange={e => setUserSearch(e.target.value)}
+                placeholder="Search users…"
+                style={cs.searchInput}
+              />
+            </div>
+            <div style={{ overflowY: 'auto', flex: 1 }}>
+              {allUsers.filter(u => u.username.toLowerCase().includes(userSearch.toLowerCase())).map(u => (
+                <div key={u.username} onClick={() => handleAddParticipant(u.username)} style={cs.userRow}>
+                  <div style={cs.userAvatar}>{u.username.slice(0, 2).toUpperCase()}</div>
+                  <span style={{ color: '#f1f5f9', fontSize: '0.9rem', fontWeight: 600, flex: 1 }}>{u.username}</span>
+                  <span style={{ color: '#22c55e', fontSize: '0.8rem', fontWeight: 600 }}>+ Add</span>
+                </div>
+              ))}
+              {allUsers.filter(u => u.username.toLowerCase().includes(userSearch.toLowerCase())).length === 0 && (
+                <div style={{ padding: '24px', textAlign: 'center', color: '#6b7280', fontSize: '0.85rem' }}>
+                  {allUsers.length === 0 ? 'Loading…' : 'No users found'}
+                </div>
+              )}
             </div>
           </div>
-        )}
-
-        {/* Active call controls */}
-        {(state === 'connecting' || state === 'connected') && (
-          <div style={cs.controls}>
-            <ControlBtn icon={muted ? 'mic-off' : 'mic'} color={muted ? '#ef4444' : '#374151'} label={muted ? 'Unmute' : 'Mute'} onClick={toggleMute} />
-            {isVideo && (
-              <ControlBtn icon={cameraOff ? 'cam-off' : 'cam'} color={cameraOff ? '#ef4444' : '#374151'} label={cameraOff ? 'Cam On' : 'Cam Off'} onClick={toggleCamera} />
-            )}
-            {isVideo && (
-              <ControlBtn icon="screen" color={sharing ? '#3b82f6' : '#374151'} label={sharing ? 'Stop Share' : 'Share Screen'} onClick={toggleScreenShare} />
-            )}
-            {state === 'connected' && (
-              <ControlBtn icon="add-user" color={userPickerOpen ? '#3b82f6' : '#374151'} label="Add" onClick={openUserPicker} />
-            )}
-            <ControlBtn icon="end" color="#ef4444" label="End" onClick={handleEnd} />
-          </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
 
-// ── Control button ────────────────────────────────────────────────────────────
+// ── Control bar buttons ───────────────────────────────────────────────────────
 
-type IconName = 'mic' | 'mic-off' | 'cam' | 'cam-off' | 'screen' | 'end' | 'accept' | 'decline' | 'add-user';
+type IconName = 'mic' | 'mic-off' | 'cam' | 'cam-off' | 'screen' | 'end' | 'accept' | 'add-user' | 'close' | 'chevron';
 
-function ControlBtn({ icon, color, label, onClick }: { icon: IconName; color: string; label: string; onClick: () => void }) {
+/** Rounded pill: tap the icon to toggle, the chevron to pick a device. */
+function DevicePill({ icon, off, title, onToggle, menuOpen, onMenu, devices, currentId, onPick }: {
+  icon: IconName; off: boolean; title: string; onToggle: () => void;
+  menuOpen: boolean; onMenu: () => void;
+  devices: MediaDeviceInfo[]; currentId: string | undefined; onPick: (deviceId: string) => void;
+}) {
+  const kind = icon.startsWith('cam') ? 'videoinput' : 'audioinput';
+  const list = devices.filter(d => d.kind === kind);
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
-      <button onClick={onClick} style={{ ...cs.ctrlBtn, background: color }}>
-        <CtrlIcon name={icon} />
-      </button>
-      <span style={{ fontSize: '0.65rem', color: '#9ca3af' }}>{label}</span>
+    <div style={{ position: 'relative' }} onClick={e => e.stopPropagation()}>
+      <div style={{ ...cs.devicePill, background: off ? '#8696a0' : '#2a3942' }}>
+        <button onClick={onToggle} title={title} style={cs.devicePillMain}><CtrlIcon name={icon} /></button>
+        <button onClick={onMenu} title="Choose device" style={cs.devicePillChevron}><CtrlIcon name="chevron" /></button>
+      </div>
+      {menuOpen && (
+        <div style={cs.deviceMenu}>
+          <div style={{ padding: '6px 12px', fontSize: '0.7rem', color: '#8696a0', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            {kind === 'videoinput' ? 'Camera' : 'Microphone'}
+          </div>
+          {list.length === 0 && <div style={{ padding: '8px 12px', fontSize: '0.8rem', color: '#8696a0' }}>No devices found</div>}
+          {list.map((d, i) => (
+            <button key={d.deviceId || i} onClick={() => onPick(d.deviceId)} style={cs.deviceMenuItem}>
+              <span style={{ width: 14, color: '#25d366' }}>{d.deviceId === currentId ? '✓' : ''}</span>
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.label || `${kind === 'videoinput' ? 'Camera' : 'Microphone'} ${i + 1}`}</span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
+  );
+}
+
+function IconBtn({ icon, active, title, onClick }: { icon: IconName; active?: boolean; title: string; onClick: () => void }) {
+  return (
+    <button onClick={onClick} title={title} style={{ ...cs.iconBtn, background: active ? '#2a3942' : 'transparent' }}>
+      <CtrlIcon name={icon} />
+    </button>
+  );
+}
+
+function PillBtn({ icon, color, label, title, onClick }: { icon: IconName; color: string; label?: string; title?: string; onClick: () => void }) {
+  return (
+    <button onClick={onClick} title={title || label} style={{ ...cs.pillBtn, background: color, padding: label ? '0 20px' : 0, width: label ? undefined : 128 }}>
+      <CtrlIcon name={icon} />
+      {label && <span>{label}</span>}
+    </button>
   );
 }
 
@@ -1042,10 +1153,12 @@ function CtrlIcon({ name }: { name: IconName }) {
     case 'cam': return <svg viewBox="0 0 24 24" {...S}><path d="M15 10l4.553-2.553A1 1 0 0 1 21 8.382v7.236a1 1 0 0 1-1.447.894L15 14M3 8a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>;
     case 'cam-off': return <svg viewBox="0 0 24 24" {...S}><line x1="2" y1="2" x2="22" y2="22"/><path d="M16 10l4.553-2.553A1 1 0 0 1 22 8.382v7.236a1 1 0 0 1-1.447.894L16 14M3 7a2 2 0 0 0-1 1.73v6.54A2 2 0 0 0 4 17h10l-10-9z"/></svg>;
     case 'screen': return <svg viewBox="0 0 24 24" {...S}><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/><path d="M8 7l4-4 4 4M12 3v10"/></svg>;
-    case 'end': return <svg viewBox="0 0 24 24" {...S}><path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-3.5-3.5m-1.4-4A19.79 19.79 0 0 1 3 3.83 2 2 0 0 1 4.11 1.9"/><line x1="2" y1="2" x2="22" y2="22" stroke="#ef4444" strokeWidth="2.5"/></svg>;
+    // Handset rotated "down" — the universal hang-up glyph
+    case 'end': return <svg viewBox="0 0 24 24" width={26} height={26} fill="#fff"><path d="M12 9c-1.6 0-3.15.25-4.6.72v3.1c0 .39-.23.74-.56.9-.98.49-1.87 1.12-2.66 1.85-.18.18-.43.28-.7.28-.28 0-.53-.11-.71-.29L.29 13.08a.956.956 0 0 1 0-1.36C3.34 8.78 7.46 7 12 7s8.66 1.78 11.71 4.72c.18.18.29.43.29.71 0 .28-.11.53-.29.71l-2.48 2.48c-.18.18-.43.29-.71.29-.27 0-.52-.1-.7-.28a11.27 11.27 0 0 0-2.67-1.85.996.996 0 0 1-.56-.9v-3.1C15.15 9.25 13.6 9 12 9z"/></svg>;
     case 'accept': return <svg viewBox="0 0 24 24" {...S}><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 1h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.64a16 16 0 0 0 6 6l.95-.95a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>;
-    case 'decline': return <svg viewBox="0 0 24 24" {...S}><line x1="2" y1="2" x2="22" y2="22"/><path d="M16.5 9.4l-6.9-6.9M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07"/></svg>;
     case 'add-user': return <svg viewBox="0 0 24 24" {...S}><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>;
+    case 'close': return <svg viewBox="0 0 24 24" {...S}><path d="M18 6 6 18M6 6l12 12"/></svg>;
+    case 'chevron': return <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="#fff" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"/></svg>;
   }
 }
 
@@ -1073,36 +1186,46 @@ function SignalBars({ quality }: { quality: 0 | 1 | 2 | 3 | 4 }) {
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 const cs: Record<string, React.CSSProperties> = {
-  // The call lives in its own OS window (CallWindowApp), so the "modal" fills
-  // that whole window edge to edge, WhatsApp Desktop-style: video (or the
-  // avatar) takes all the space, info + controls sit underneath.
+  // The call lives in its own OS window (CallWindowApp), so this fills that
+  // whole window, WhatsApp Desktop-style: a dark doodle-wallpaper stage with
+  // the avatar/name centred, and one control bar along the bottom.
   overlay: {
     position: 'fixed',
     inset: 0,
-    background: '#0b0b0b',
+    background: '#000',
     zIndex: 1000,
     display: 'flex',
-  },
-  modal: {
-    background: '#111827',
-    width: '100%',
-    height: '100%',
-    display: 'flex',
     flexDirection: 'column',
-    overflow: 'hidden',
+    color: '#fff',
+    fontFamily: 'inherit',
   },
-  videoArea: {
+  stage: {
     position: 'relative',
-    width: '100%',
     flex: 1,
     minHeight: 0,
-    background: '#000',
+    overflow: 'hidden',
+    background: '#0b0b0b',
+  },
+  wallpaper: {
+    position: 'absolute',
+    inset: 0,
+    backgroundImage: 'url(/call_bg.svg)',
+    backgroundRepeat: 'repeat',
+    backgroundSize: '360px',
+    pointerEvents: 'none',
+  },
+  videoArea: {
+    position: 'absolute',
+    inset: 0,
   },
   mainVideo: {
+    position: 'absolute',
+    inset: 0,
     width: '100%',
     height: '100%',
     objectFit: 'contain',
-    background: '#000',
+    background: 'transparent',
+    transition: 'opacity 0.3s',
   },
   swapBtn: {
     position: 'absolute',
@@ -1127,62 +1250,183 @@ const cs: Record<string, React.CSSProperties> = {
     aspectRatio: '4 / 3',
     objectFit: 'cover',
     borderRadius: 12,
-    border: '2px solid #1f2937',
+    border: '2px solid rgba(255,255,255,0.12)',
     background: '#000',
     boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+    zIndex: 2,
   },
-  avatarArea: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    flex: 1,
-    minHeight: 0,
-    background: 'radial-gradient(circle at 50% 40%, #1e293b 0%, #0f172a 70%)',
-  },
-  bigAvatar: {
-    width: 'clamp(96px, 18vh, 160px)',
-    height: 'clamp(96px, 18vh, 160px)',
-    borderRadius: '50%',
-    background: '#c0392b',
-    color: '#fff',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    fontWeight: 800,
-    fontSize: 'clamp(2rem, 5vh, 3.2rem)',
-  },
-  infoBar: {
+  centerInfo: {
+    position: 'absolute',
+    inset: 0,
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
-    gap: 4,
-    padding: '18px 24px 12px',
-  },
-  partnerName: {
-    fontSize: '1.1rem',
-    fontWeight: 700,
-    color: '#f1f5f9',
-  },
-  callStatus: {
-    fontSize: '0.8rem',
-    color: '#6b7280',
-  },
-  controls: {
-    display: 'flex',
     justifyContent: 'center',
-    gap: 20,
-    padding: '12px 24px 24px',
+    gap: 10,
+    padding: '0 24px',
+    textAlign: 'center',
+    pointerEvents: 'none',
+    zIndex: 1,
   },
-  ctrlBtn: {
-    width: 56,
-    height: 56,
+  cornerInfo: {
+    position: 'absolute',
+    top: 16,
+    left: 16,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 2,
+    padding: '8px 12px',
+    borderRadius: 10,
+    background: 'rgba(0,0,0,0.45)',
+    zIndex: 2,
+  },
+  bigAvatar: {
+    width: 'clamp(96px, 20vh, 168px)',
+    height: 'clamp(96px, 20vh, 168px)',
     borderRadius: '50%',
+    overflow: 'hidden',
+    background: '#2a2f32',
+    color: '#d1d7db',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
+    fontWeight: 700,
+    fontSize: 'clamp(2rem, 5vh, 3.2rem)',
+    marginBottom: 'clamp(16px, 6vh, 48px)',
+  },
+  partnerName: {
+    fontSize: 'clamp(1.5rem, 4.5vh, 2.4rem)',
+    fontWeight: 700,
+    color: '#fff',
+    maxWidth: '100%',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  callStatus: {
+    fontSize: '1.05rem',
+    color: '#e9edef',
+  },
+  minimizeBtn: {
+    position: 'absolute',
+    top: 14,
+    right: 14,
+    background: 'rgba(0,0,0,0.35)',
     border: 'none',
     cursor: 'pointer',
-    transition: 'opacity 0.15s',
+    padding: 6,
+    borderRadius: 8,
+    color: '#d1d7db',
+    display: 'flex',
+    zIndex: 3,
+  },
+  confChips: {
+    position: 'absolute',
+    top: 16,
+    left: 0,
+    right: 0,
+    display: 'flex',
+    gap: 6,
+    justifyContent: 'center',
+    flexWrap: 'wrap',
+    padding: '0 60px',
+    zIndex: 2,
+  },
+  bar: {
+    display: 'grid',
+    gridTemplateColumns: '1fr auto 1fr',
+    alignItems: 'center',
+    gap: 12,
+    padding: '12px 16px',
+    background: '#000',
+    flexShrink: 0,
+  },
+  barSide: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 10,
+    minWidth: 0,
+  },
+  barCenter: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 14,
+  },
+  devicePill: {
+    display: 'flex',
+    alignItems: 'center',
+    height: 48,
+    borderRadius: 16,
+    overflow: 'hidden',
+    transition: 'background 0.15s',
+  },
+  devicePillMain: {
+    height: '100%',
+    padding: '0 12px 0 18px',
+    background: 'transparent',
+    border: 'none',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+  },
+  devicePillChevron: {
+    height: '100%',
+    padding: '0 14px 0 8px',
+    background: 'transparent',
+    border: 'none',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+  },
+  deviceMenu: {
+    position: 'absolute',
+    bottom: 56,
+    left: 0,
+    minWidth: 240,
+    maxWidth: 320,
+    background: '#233138',
+    borderRadius: 12,
+    padding: '6px 0',
+    boxShadow: '0 10px 30px rgba(0,0,0,0.6)',
+    zIndex: 10,
+  },
+  deviceMenuItem: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    width: '100%',
+    padding: '8px 12px',
+    background: 'transparent',
+    border: 'none',
+    color: '#e9edef',
+    fontSize: '0.82rem',
+    cursor: 'pointer',
+    textAlign: 'left',
+  },
+  iconBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    border: 'none',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    transition: 'background 0.15s',
+  },
+  pillBtn: {
+    height: 48,
+    borderRadius: 16,
+    border: 'none',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    color: '#fff',
+    fontSize: '0.9rem',
+    fontWeight: 600,
+    whiteSpace: 'nowrap',
   },
   miniPill: {
     position: 'fixed' as const,
