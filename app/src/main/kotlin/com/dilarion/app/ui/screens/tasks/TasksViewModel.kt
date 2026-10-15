@@ -211,6 +211,41 @@ class TasksViewModel @Inject constructor(
         }
     }
 
+    /** The current user submits their OWN report for the breakout team they're on. */
+    fun submitMyReport(taskId: Int, text: String) {
+        if (text.isBlank()) return
+        viewModelScope.launch {
+            val bearer = bearer() ?: return@launch
+            _uiState.value = _uiState.value.copy(busy = true, error = null)
+            runCatching { apiService.submitMyReport(bearer, taskId, TaskGroupReportSubmitRequest(text.trim())) }
+                .onSuccess { resp ->
+                    if (resp.isSuccessful) loadTasks()
+                    else _uiState.value = _uiState.value.copy(error = resp.errorBody().parseErrorDetail("Failed to submit report"))
+                }
+                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
+            _uiState.value = _uiState.value.copy(busy = false)
+        }
+    }
+
+    /** Delete a task (creator/admin/group-admin). Closes the detail on success. */
+    fun deleteTask(taskId: Int) {
+        viewModelScope.launch {
+            val bearer = bearer() ?: return@launch
+            _uiState.value = _uiState.value.copy(busy = true, error = null)
+            runCatching { apiService.deleteTask(bearer, taskId) }
+                .onSuccess { resp ->
+                    if (resp.isSuccessful) {
+                        _uiState.value = _uiState.value.copy(selectedTaskId = null)
+                        loadTasks()
+                    } else {
+                        _uiState.value = _uiState.value.copy(error = resp.errorBody().parseErrorDetail("Failed to delete task"))
+                    }
+                }
+                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
+            _uiState.value = _uiState.value.copy(busy = false)
+        }
+    }
+
     fun compileTask(taskId: Int) {
         viewModelScope.launch {
             val bearer = bearer() ?: return@launch

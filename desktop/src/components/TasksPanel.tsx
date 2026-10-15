@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import {
   TaskItem, TaskCreatePayload, Group, Contact,
-  createTask, listTasks, updateTaskStatus, updateMyTaskStatus, submitBreakoutReport, compileTask, getUsers,
-  addTaskAssignees, downloadTaskReportDocx,
+  createTask, listTasks, updateTaskStatus, updateMyTaskStatus, submitMyReport, compileTask, getUsers,
+  addTaskAssignees, deleteTask, downloadTaskReportDocx,
 } from '../services/api';
 import { saveBlob } from '../services/platform';
 
@@ -109,45 +109,66 @@ export default function TasksPanel({ token, myUsername, groups }: { token: strin
   );
 }
 
-/** Task -> breakout team -> staff + the compiled sections that team's report fed. */
-function ReportTree({ task, onSectionClick }: { task: TaskItem; onSectionClick: (index: number) => void }) {
-  const line = '2px solid var(--border-color)';
+/** Task → team → staff → the compiled sections that cite that person's own
+ *  report. A clearer, indented tree: rails connect each level, each staffer
+ *  shows a submit dot and the sections they contributed to (clickable). */
+function ReportTree({ task, onSectionClick, onPreview }: {
+  task: TaskItem;
+  onSectionClick: (index: number) => void;
+  onPreview: (username: string, text: string) => void;
+}) {
+  const rail = '1.5px solid var(--border-color)';
   const attributed = task.compiled_sections.length > 0;
+  const memberReport = (groupId: number, username: string) =>
+    task.breakout_groups.find(g => g.group_id === groupId)?.members
+      ?.find(m => m.username === username)?.report_text || null;
+
   return (
     <div style={{ fontSize: '0.8rem', color: 'var(--text-primary)' }}>
-      <div style={{ fontWeight: 700, marginBottom: 6 }}>📄 {task.title}</div>
-      <div style={{ borderLeft: line, marginLeft: 6, paddingLeft: 14 }}>
+      <div style={{ fontWeight: 800, marginBottom: 8, fontSize: '0.9rem' }}>🗂 {task.title}</div>
+      <div style={{ borderLeft: rail, marginLeft: 8, paddingLeft: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
         {task.report_tree.map(team => (
-          <div key={team.group_id} style={{ position: 'relative', padding: '6px 0' }}>
-            <span style={{ position: 'absolute', left: -14, top: 16, width: 12, borderTop: line }} />
-            <div style={{ fontWeight: 700 }}>
-              {team.team_name}
-              {!team.has_report && <span style={{ fontWeight: 400, fontStyle: 'italic', color: 'var(--text-muted)' }}> · no report</span>}
+          <div key={team.group_id} style={{ position: 'relative' }}>
+            <span style={{ position: 'absolute', left: -16, top: 10, width: 12, borderTop: rail }} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontWeight: 700, background: '#7c3aed14', color: '#7c3aed', borderRadius: 6, padding: '2px 8px' }}>👥 {team.team_name}</span>
+              {!team.has_report && <span style={{ fontSize: '0.72rem', fontStyle: 'italic', color: 'var(--text-muted)' }}>no reports yet</span>}
             </div>
-            <div style={{ borderLeft: line, marginLeft: 6, paddingLeft: 14, marginTop: 4 }}>
-              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 6 }}>
-                {team.staff.map(st => (
-                  <span
-                    key={st.username}
-                    title={st.is_submitter ? 'Submitted this team\'s report' : undefined}
-                    style={{ fontSize: '0.7rem', background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 10, padding: '1px 8px', fontWeight: st.is_submitter ? 700 : 400 }}
-                  >
-                    {st.is_submitter ? '★ ' : ''}{st.username}
-                  </span>
-                ))}
-              </div>
-              {team.sections.length > 0 ? team.sections.map(sec => (
-                <button
-                  key={sec.index}
-                  onClick={() => onSectionClick(sec.index)}
-                  style={{ display: 'block', background: 'transparent', border: 'none', color: 'var(--accent)', padding: '2px 0', fontSize: '0.75rem', cursor: 'pointer', textAlign: 'left' }}
-                >
-                  → §{sec.index + 1} {sec.heading}
-                </button>
-              )) : (
-                <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
-                  {attributed ? 'No section attributed to this team' : 'Recompile to see which sections came from this team'}
-                </div>
+            <div style={{ borderLeft: rail, marginLeft: 8, paddingLeft: 16, marginTop: 6, display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {team.staff.map(st => {
+                const text = memberReport(team.group_id, st.username);
+                return (
+                  <div key={st.username} style={{ position: 'relative' }}>
+                    <span style={{ position: 'absolute', left: -16, top: 9, width: 12, borderTop: rail }} />
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                      <span style={{ width: 7, height: 7, borderRadius: '50%', background: st.submitted ? '#25d366' : '#9ca3af', flexShrink: 0 }} />
+                      <span style={{ fontWeight: 600 }}>{st.username}</span>
+                      {text && (
+                        <button onClick={() => onPreview(st.username, text)} style={{ background: 'transparent', border: 'none', color: 'var(--accent)', fontSize: '0.72rem', cursor: 'pointer', padding: 0 }}>
+                          preview
+                        </button>
+                      )}
+                      {!st.submitted && <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>no report</span>}
+                    </div>
+                    {st.sections.length > 0 && (
+                      <div style={{ marginLeft: 13, display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 2 }}>
+                        {st.sections.map(sec => (
+                          <button
+                            key={sec.index}
+                            onClick={() => onSectionClick(sec.index)}
+                            title={`Cited in section ${sec.index + 1}`}
+                            style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 8, color: 'var(--accent)', padding: '1px 7px', fontSize: '0.68rem', cursor: 'pointer' }}
+                          >
+                            §{sec.index + 1} {sec.heading}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+              {!attributed && team.has_report && (
+                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>Compile to see who each section cites.</div>
               )}
             </div>
           </div>
@@ -160,7 +181,6 @@ function ReportTree({ task, onSectionClick }: { task: TaskItem; onSectionClick: 
 function TaskDetail({ task, myUsername, token, onChanged }: { task: TaskItem; myUsername: string; token: string; onChanged: () => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [reportDrafts, setReportDrafts] = useState<Record<number, string>>({});
   const [reportView, setReportView] = useState<'report' | 'tree'>('report');
   const [highlightSection, setHighlightSection] = useState<number | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -170,8 +190,15 @@ function TaskDetail({ task, myUsername, token, onChanged }: { task: TaskItem; my
   const [allUsers, setAllUsers] = useState<Contact[]>([]);
   const [toAdd, setToAdd] = useState<string[]>([]);
   const [addGroupName, setAddGroupName] = useState<string>('');
+  const [newTeamName, setNewTeamName] = useState<string>(''); // non-empty = create a new team
+  // My own breakout report draft, and the staff-report preview popup.
+  const [myReportDraft, setMyReportDraft] = useState<string>('');
+  const [preview, setPreview] = useState<{ username: string; text: string } | null>(null);
 
   const myAssignee = task.assignees.find(a => a.username === myUsername);
+  // Which breakout team (if any) the current user is on, and their own report.
+  const myGroup = task.breakout_groups.find(g => g.member_usernames.includes(myUsername)) || null;
+  const myMember = myGroup?.members.find(m => m.username === myUsername) || null;
 
   useEffect(() => {
     if (showAdd && allUsers.length === 0) {
@@ -181,6 +208,9 @@ function TaskDetail({ task, myUsername, token, onChanged }: { task: TaskItem; my
       setAddGroupName(task.breakout_groups[0].name || `Group ${task.breakout_groups[0].group_id}`);
     }
   }, [showAdd]);
+
+  // Seed my-report draft from whatever I last submitted.
+  useEffect(() => { setMyReportDraft(myMember?.report_text || ''); }, [task.task_id, myMember?.report_text]);
 
   // Usernames already on the task (direct assignees or any breakout team).
   const existing = new Set<string>(
@@ -194,8 +224,12 @@ function TaskDetail({ task, myUsername, token, onChanged }: { task: TaskItem; my
     setBusy(true);
     setError(null);
     setNotice(null);
+    // For a breakout task, target either an existing team or a newly-named one.
+    const targetTeam = task.is_breakout
+      ? (newTeamName.trim() || addGroupName)
+      : undefined;
     try {
-      const updated = await addTaskAssignees(token, task.task_id, toAdd, task.is_breakout ? addGroupName : undefined);
+      const updated = await addTaskAssignees(token, task.task_id, toAdd, targetTeam);
       const skipped = updated.skipped_assignees || [];
       if (skipped.length > 0) {
         setError(`Couldn't add: ${skipped.map(s => `${s.username} (${s.reason})`).join('; ')}`);
@@ -203,11 +237,39 @@ function TaskDetail({ task, myUsername, token, onChanged }: { task: TaskItem; my
         setNotice('Added.');
       }
       setToAdd([]);
+      setNewTeamName('');
       setShowAdd(false);
       onChanged();
     } catch (err: any) {
       setError(err?.message || 'Failed to add people');
     } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleMyReport() {
+    if (!myReportDraft.trim()) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await submitMyReport(token, task.task_id, myReportDraft.trim());
+      onChanged();
+    } catch (err: any) {
+      setError(err?.message || 'Failed to submit report');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleDelete() {
+    if (!confirm(`Delete task "${task.title}"? This removes all its teams and reports and cannot be undone.`)) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await deleteTask(token, task.task_id);
+      onChanged();
+    } catch (err: any) {
+      setError(err?.message || 'Failed to delete task');
       setBusy(false);
     }
   }
@@ -233,21 +295,6 @@ function TaskDetail({ task, myUsername, token, onChanged }: { task: TaskItem; my
       onChanged();
     } catch (err: any) {
       setError(err?.message || 'Failed to update status');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function handleSubmitReport(groupId: number) {
-    const text = (reportDrafts[groupId] || '').trim();
-    if (!text) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await submitBreakoutReport(token, task.task_id, groupId, text);
-      onChanged();
-    } catch (err: any) {
-      setError(err?.message || 'Failed to submit report');
     } finally {
       setBusy(false);
     }
@@ -290,10 +337,18 @@ function TaskDetail({ task, myUsername, token, onChanged }: { task: TaskItem; my
   return (
     <div style={{ maxWidth: 600 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
-        <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700, color: 'var(--text-primary)' }}>{task.title}</h3>
+        <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700, color: 'var(--text-primary)', flex: 1 }}>{task.title}</h3>
         <span style={{ fontSize: '0.7rem', background: STATUS_COLORS[task.status], color: '#fff', borderRadius: 6, padding: '2px 8px', fontWeight: 700 }}>
           {task.status.replace('_', ' ')}
         </span>
+        <button
+          onClick={handleDelete}
+          disabled={busy}
+          title="Delete task"
+          style={{ background: 'transparent', color: '#ef4444', border: '1px solid #ef4444', borderRadius: 8, padding: '3px 10px', fontSize: '0.72rem', fontWeight: 700, cursor: busy ? 'wait' : 'pointer' }}
+        >
+          Delete
+        </button>
       </div>
       <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: 12 }}>
         Created by {task.created_by}
@@ -335,19 +390,34 @@ function TaskDetail({ task, myUsername, token, onChanged }: { task: TaskItem; my
         ) : (
           <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 10, padding: 12 }}>
             {task.is_breakout && (
-              <label style={{ display: 'block', fontSize: '0.74rem', color: 'var(--text-muted)', marginBottom: 6 }}>
-                Add to team:
-                <select
-                  value={addGroupName}
-                  onChange={e => setAddGroupName(e.target.value)}
-                  style={{ marginLeft: 8, background: 'var(--input-bg)', border: '1px solid var(--border-color)', borderRadius: 6, color: 'var(--text-primary)', fontSize: '0.78rem', padding: '3px 6px' }}
-                >
-                  {task.breakout_groups.map(g => {
-                    const n = g.name || `Group ${g.group_id}`;
-                    return <option key={g.group_id} value={n}>{n}</option>;
-                  })}
-                </select>
-              </label>
+              <div style={{ marginBottom: 8 }}>
+                <label style={{ display: 'block', fontSize: '0.74rem', color: 'var(--text-muted)', marginBottom: 4 }}>
+                  Add to team:
+                  <select
+                    value={newTeamName ? '__new__' : addGroupName}
+                    onChange={e => {
+                      if (e.target.value === '__new__') { setNewTeamName('New team'); }
+                      else { setNewTeamName(''); setAddGroupName(e.target.value); }
+                    }}
+                    style={{ marginLeft: 8, background: 'var(--input-bg)', border: '1px solid var(--border-color)', borderRadius: 6, color: 'var(--text-primary)', fontSize: '0.78rem', padding: '3px 6px' }}
+                  >
+                    {task.breakout_groups.map(g => {
+                      const n = g.name || `Group ${g.group_id}`;
+                      return <option key={g.group_id} value={n}>{n}</option>;
+                    })}
+                    <option value="__new__">➕ New team…</option>
+                  </select>
+                </label>
+                {newTeamName !== '' && (
+                  <input
+                    value={newTeamName}
+                    onChange={e => setNewTeamName(e.target.value)}
+                    placeholder="New team name"
+                    autoFocus
+                    style={{ marginTop: 6, width: '100%', boxSizing: 'border-box', background: 'var(--input-bg)', border: '1px solid var(--border-color)', borderRadius: 6, color: 'var(--text-primary)', fontSize: '0.8rem', padding: '5px 8px' }}
+                  />
+                )}
+              </div>
             )}
             <div style={{ maxHeight: 160, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2, marginBottom: 8 }}>
               {allUsers.filter(u => !existing.has(u.username)).map(u => {
@@ -395,37 +465,66 @@ function TaskDetail({ task, myUsername, token, onChanged }: { task: TaskItem; my
             Breakout groups
           </div>
           {task.breakout_groups.map(g => {
-            const isMember = g.member_usernames.includes(myUsername);
+            const iAmHere = g.member_usernames.includes(myUsername);
+            const submittedCount = g.members.filter(m => m.submitted).length;
             return (
               <div key={g.group_id} style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 10, padding: 12, marginBottom: 10 }}>
-                <div style={{ fontWeight: 600, fontSize: '0.85rem', color: 'var(--text-primary)' }}>{g.name || `Group ${g.group_id}`}</div>
-                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 2 }}>{g.member_usernames.join(', ')}</div>
-                {g.report_text ? (
-                  <div style={{ marginTop: 8, fontSize: '0.8rem', color: 'var(--text-primary)', background: 'var(--bg-panel)', borderRadius: 8, padding: 10 }}>
-                    <div style={{ whiteSpace: 'pre-wrap' }}>{g.report_text}</div>
-                    <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 6 }}>
-                      Submitted by {g.report_submitted_by} {g.report_submitted_at && new Date(g.report_submitted_at).toLocaleString()}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontWeight: 700, fontSize: '0.85rem', color: 'var(--text-primary)' }}>👥 {g.name || `Group ${g.group_id}`}</span>
+                  <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>{submittedCount}/{g.members.length} reported</span>
+                </div>
+
+                {/* Each staff member and their own report */}
+                <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {g.members.map(m => (
+                    <div key={m.user_id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.8rem' }}>
+                      <span style={{ width: 7, height: 7, borderRadius: '50%', background: m.submitted ? '#25d366' : '#9ca3af', flexShrink: 0 }} />
+                      <span style={{ color: 'var(--text-primary)', fontWeight: m.username === myUsername ? 700 : 400 }}>
+                        {m.username}{m.username === myUsername ? ' (you)' : ''}
+                      </span>
+                      {m.submitted ? (
+                        <button
+                          onClick={() => setPreview({ username: m.username, text: m.report_text || '' })}
+                          style={{ background: 'transparent', border: 'none', color: 'var(--accent)', fontSize: '0.72rem', cursor: 'pointer', padding: 0 }}
+                        >
+                          preview report
+                        </button>
+                      ) : (
+                        <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>no report yet</span>
+                      )}
                     </div>
+                  ))}
+                </div>
+
+                {/* Legacy shared team report, if any */}
+                {g.report_text && (
+                  <div style={{ marginTop: 8, fontSize: '0.78rem', color: 'var(--text-primary)', background: 'var(--bg-panel)', borderRadius: 8, padding: 10 }}>
+                    <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginBottom: 4 }}>Team report (legacy) · {g.report_submitted_by}</div>
+                    <div style={{ whiteSpace: 'pre-wrap' }}>{g.report_text}</div>
                   </div>
-                ) : isMember ? (
-                  <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                )}
+
+                {/* My own report box — only in the team I'm on */}
+                {iAmHere && (
+                  <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6, borderTop: '1px solid var(--border-color)', paddingTop: 10 }}>
+                    <div style={{ fontSize: '0.74rem', fontWeight: 700, color: 'var(--text-muted)' }}>
+                      {myMember?.submitted ? 'Your report (edit & resubmit)' : 'Your report'}
+                    </div>
                     <textarea
-                      value={reportDrafts[g.group_id] || ''}
-                      onChange={e => setReportDrafts(prev => ({ ...prev, [g.group_id]: e.target.value }))}
-                      placeholder="Write your group's report…"
+                      value={myReportDraft}
+                      onChange={e => setMyReportDraft(e.target.value)}
+                      placeholder="Write your own report for this task…"
                       rows={3}
                       style={{ background: 'var(--input-bg)', border: '1px solid var(--border-color)', borderRadius: 8, color: 'var(--text-primary)', fontSize: '0.82rem', padding: 8, resize: 'vertical', fontFamily: 'inherit' }}
                     />
                     <button
-                      onClick={() => handleSubmitReport(g.group_id)}
-                      disabled={busy || !(reportDrafts[g.group_id] || '').trim()}
-                      style={{ alignSelf: 'flex-start', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 8, padding: '6px 12px', fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer' }}
+                      onClick={handleMyReport}
+                      disabled={busy || !myReportDraft.trim()}
+                      style={{ alignSelf: 'flex-start', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 8, padding: '6px 12px', fontSize: '0.78rem', fontWeight: 600, cursor: busy || !myReportDraft.trim() ? 'default' : 'pointer', opacity: myReportDraft.trim() ? 1 : 0.5 }}
                     >
-                      Submit report
+                      {myMember?.submitted ? 'Update my report' : 'Submit my report'}
                     </button>
                   </div>
-                ) : (
-                  <div style={{ marginTop: 8, fontSize: '0.75rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>No report submitted yet.</div>
                 )}
               </div>
             );
@@ -455,7 +554,7 @@ function TaskDetail({ task, myUsername, token, onChanged }: { task: TaskItem; my
               </div>
               {notice && <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginBottom: 8 }}>{notice}</div>}
               {reportView === 'tree' ? (
-                <ReportTree task={task} onSectionClick={jumpToSection} />
+                <ReportTree task={task} onSectionClick={jumpToSection} onPreview={(username, text) => setPreview({ username, text })} />
               ) : task.compiled_sections.length > 0 ? (
                 task.compiled_sections.map((sec, i) => (
                   <div
@@ -479,8 +578,8 @@ function TaskDetail({ task, myUsername, token, onChanged }: { task: TaskItem; my
           ) : (
             <button
               onClick={handleCompile}
-              disabled={busy || task.breakout_groups.every(g => !g.report_text)}
-              style={{ background: '#7c3aed', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 14px', fontSize: '0.8rem', fontWeight: 700, cursor: busy ? 'wait' : 'pointer', opacity: task.breakout_groups.every(g => !g.report_text) ? 0.5 : 1 }}
+              disabled={busy || task.breakout_groups.every(g => !g.has_report)}
+              style={{ background: '#7c3aed', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 14px', fontSize: '0.8rem', fontWeight: 700, cursor: busy ? 'wait' : 'pointer', opacity: task.breakout_groups.every(g => !g.has_report) ? 0.5 : 1 }}
             >
               Compile reports with AI
             </button>
@@ -517,6 +616,22 @@ function TaskDetail({ task, myUsername, token, onChanged }: { task: TaskItem; my
             </div>
           )}
         </>
+      )}
+
+      {/* Staff report preview */}
+      {preview && (
+        <div
+          onClick={e => { if (e.target === e.currentTarget) setPreview(null); }}
+          style={{ position: 'fixed', inset: 0, zIndex: 955, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+        >
+          <div style={{ width: 460, maxWidth: '90vw', maxHeight: '80vh', overflowY: 'auto', background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 14, padding: 20 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+              <span style={{ fontWeight: 800, fontSize: '0.95rem', color: 'var(--text-primary)', flex: 1 }}>{preview.username}'s report</span>
+              <button onClick={() => setPreview(null)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: '1.1rem', cursor: 'pointer' }}>✕</button>
+            </div>
+            <div style={{ whiteSpace: 'pre-wrap', fontSize: '0.85rem', color: 'var(--text-primary)', lineHeight: 1.5 }}>{preview.text}</div>
+          </div>
+        </div>
       )}
     </div>
   );

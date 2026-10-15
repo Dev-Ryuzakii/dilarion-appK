@@ -261,11 +261,21 @@ data class TaskAssigneeItem(
     @SerializedName("completed_at") val completedAt: String? = null,
 )
 
+data class TaskGroupMemberItem(
+    @SerializedName("user_id") val userId: Int,
+    val username: String,
+    @SerializedName("report_text") val reportText: String? = null,
+    val submitted: Boolean = false,
+    @SerializedName("report_submitted_at") val reportSubmittedAt: String? = null,
+)
+
 data class TaskBreakoutGroupItem(
     @SerializedName("group_id") val groupId: Int,
     val name: String? = null,
     @SerializedName("member_usernames") val memberUsernames: List<String> = emptyList(),
+    val members: List<TaskGroupMemberItem> = emptyList(),
     @SerializedName("report_text") val reportText: String? = null,
+    @SerializedName("has_report") val hasReport: Boolean = false,
     @SerializedName("report_submitted_by") val reportSubmittedBy: String? = null,
     @SerializedName("report_submitted_at") val reportSubmittedAt: String? = null,
 )
@@ -315,7 +325,9 @@ data class TaskReportTreeTeam(
 
 data class TaskReportTreeStaff(
     val username: String,
-    @SerializedName("is_submitter") val isSubmitter: Boolean = false,
+    val submitted: Boolean = false,
+    @SerializedName("report_submitted_at") val reportSubmittedAt: String? = null,
+    val sections: List<TaskReportTreeSection> = emptyList(),
 )
 
 data class TaskReportTreeSection(val index: Int, val heading: String)

@@ -469,6 +469,19 @@ interface ApiService {
         @Body request: com.dilarion.app.data.model.TaskGroupReportSubmitRequest,
     ): Response<com.dilarion.app.data.model.TaskItem>
 
+    @POST("tasks/{taskId}/my-report")
+    suspend fun submitMyReport(
+        @Header("Authorization") bearer: String,
+        @Path("taskId") taskId: Int,
+        @Body request: com.dilarion.app.data.model.TaskGroupReportSubmitRequest,
+    ): Response<com.dilarion.app.data.model.TaskItem>
+
+    @DELETE("tasks/{taskId}")
+    suspend fun deleteTask(
+        @Header("Authorization") bearer: String,
+        @Path("taskId") taskId: Int,
+    ): Response<Unit>
+
     @POST("tasks/{taskId}/compile")
     suspend fun compileTask(
         @Header("Authorization") bearer: String,

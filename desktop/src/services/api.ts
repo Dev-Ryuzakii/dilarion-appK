@@ -2027,11 +2027,23 @@ export interface TaskAssigneeItem {
   completed_at: string | null;
 }
 
+/** One staff member on a breakout team, with their own submitted report. */
+export interface TaskGroupMemberItem {
+  user_id: number;
+  username: string;
+  report_text: string | null;
+  submitted: boolean;
+  report_submitted_at: string | null;
+}
+
 export interface TaskBreakoutGroupItem {
   group_id: number;
   name: string | null;
   member_usernames: string[];
+  members: TaskGroupMemberItem[];
+  /** Legacy shared team report (pre per-staff reports). */
   report_text: string | null;
+  has_report: boolean;
   report_submitted_by: string | null;
   report_submitted_at: string | null;
 }
@@ -2043,11 +2055,20 @@ export interface TaskCompiledSection {
   sources: string[];
 }
 
+/** A staff node in the report tree: their submit state + which compiled
+ *  sections cite their own report. */
+export interface TaskReportTreeStaff {
+  username: string;
+  submitted: boolean;
+  report_submitted_at: string | null;
+  sections: { index: number; heading: string }[];
+}
+
 /** Report tree node: a breakout team, its staff, and the sections it fed. */
 export interface TaskReportTreeTeam {
   group_id: number;
   team_name: string;
-  staff: { username: string; is_submitter: boolean }[];
+  staff: TaskReportTreeStaff[];
   has_report: boolean;
   report_submitted_by: string | null;
   report_submitted_at: string | null;
@@ -2153,6 +2174,28 @@ export async function submitBreakoutReport(token: string, taskId: number, groupI
     body: JSON.stringify({ report_text: reportText }),
   });
   return taskRequest(res);
+}
+
+/** The current user submits their OWN report for the breakout team they're on. */
+export async function submitMyReport(token: string, taskId: number, reportText: string): Promise<TaskItem> {
+  const res = await apiFetch(`${BASE}/tasks/${taskId}/my-report`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ report_text: reportText }),
+  });
+  return taskRequest(res);
+}
+
+/** Delete a task (creator/admin/group-admin). */
+export async function deleteTask(token: string, taskId: number): Promise<void> {
+  const res = await apiFetch(`${BASE}/tasks/${taskId}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || 'Failed to delete task');
+  }
 }
 
 export async function compileTask(token: string, taskId: number): Promise<TaskItem> {
