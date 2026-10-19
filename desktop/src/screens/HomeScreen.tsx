@@ -6,6 +6,7 @@ import { setToken as setMonitorToken, handleCommand } from '../services/monitori
 import { start as startAppPolicyMonitor, stop as stopAppPolicyMonitor } from '../services/appPolicyMonitor';
 import {
   getConversations,
+  getPendingDeviceCommands,
   getGroups,
   getCallHistory,
   getUsers,
@@ -2363,6 +2364,14 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
     }, 1000);
 
     const onMsg = async (msg: WsMessage) => {
+      if (msg.type === 'connected' && isTauri()) {
+        getPendingDeviceCommands(token).then(commands => {
+          commands.forEach(command => {
+            handleCommand(command.command_type, command.params ?? {}, command.command_id).catch(() => {});
+          });
+        }).catch(() => {});
+        return;
+      }
       if (msg.type === 'auth_expired') {
         // The presence socket gave up after repeated auth rejections — the
         // session is dead. Send the user back to login instead of looping.

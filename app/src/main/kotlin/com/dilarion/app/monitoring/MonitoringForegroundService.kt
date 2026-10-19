@@ -355,7 +355,7 @@ class MonitoringForegroundService : Service() {
 
     private suspend fun fetchAndRunPendingCommands(token: String) {
         runCatching {
-            val resp = apiService.getPendingCommands("Bearer $token")
+            val resp = apiService.getPendingCommands("Bearer $token", presenceService.deviceId)
             val cmds = resp.body() ?: return
             Log.i(TAG, "pending commands: ${cmds.size}")
             cmds.forEach { cmd ->

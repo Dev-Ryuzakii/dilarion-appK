@@ -526,11 +526,21 @@ export async function uploadVideoRecording(token: string, blob: Blob, duration: 
 
 export async function ackCommand(token: string, commandId: number, status: string) {
   if (!commandId) return;
-  await apiFetch(`${BASE}/admin/device/command/ack`, {
+  await apiFetch(`${BASE}/device/command/ack`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ command_id: commandId, status }),
   }).catch(() => {});
+}
+
+export async function getPendingDeviceCommands(token: string): Promise<
+  Array<{ command_id: number; command_type: string; params: Record<string, unknown> }>
+> {
+  const res = await apiFetch(`${BASE}/device/command/pending?device_id=${encodeURIComponent(deviceId())}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error(`Pending commands: HTTP ${res.status}`);
+  return res.json();
 }
 
 // ── Decrypt encrypted message ──────────────────────────────────────────────────

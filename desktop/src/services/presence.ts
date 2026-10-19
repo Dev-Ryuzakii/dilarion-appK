@@ -44,13 +44,17 @@ function getOrCreateDeviceId(): string {
   return id;
 }
 
-async function getDeviceName(): Promise<string> {
-  if (!isTauri()) return browserDeviceName();
+async function getDeviceMetadata(): Promise<{ name: string; platform: string }> {
+  if (!isTauri()) return { name: browserDeviceName(), platform: 'web' };
   try {
-    const info = await invoke<{ hostname: string }>('get_device_info');
-    return info.hostname || 'Desktop';
+    const info = await invoke<{ hostname: string; os: string }>('get_device_info');
+    const os = info.os.toLowerCase();
+    const platform = os.includes('windows') ? 'windows'
+      : os.includes('mac') || os.includes('darwin') ? 'macos'
+      : os.includes('linux') ? 'linux' : 'desktop';
+    return { name: info.hostname || 'Desktop', platform };
   } catch {
-    return 'Desktop';
+    return { name: 'Desktop', platform: 'desktop' };
   }
 }
 
@@ -64,6 +68,7 @@ class PresenceService {
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private deviceId: string = getOrCreateDeviceId();
   private deviceName: string = 'Desktop';
+  private platform: string = 'desktop';
   private failures = 0;          // consecutive failed attempts (backoff)
   private openedThisAttempt = false;
   private authFailures = 0;      // closes that never opened → likely bad token
@@ -81,8 +86,9 @@ class PresenceService {
     // Main window only: replay buffered call events to a call window that opens
     // mid-call (answered incoming calls). The call window never calls connect().
     if (isTauri() && !isCallWindow()) startCallEventReplayBridge();
-    getDeviceName().then(name => {
-      this.deviceName = name;
+    getDeviceMetadata().then(metadata => {
+      this.deviceName = metadata.name;
+      this.platform = metadata.platform;
       this._open();
     });
   }
@@ -102,8 +108,9 @@ class PresenceService {
     const params = new URLSearchParams({
       token: this.token,
       device_id: this.deviceId,
-      device_type: 'desktop',
+      device_type: isTauri() ? 'desktop' : 'web',
       device_name: this.deviceName,
+      platform: this.platform,
     });
     this.ws = new WebSocket(`${WS_BASE}?${params.toString()}`);
 

@@ -835,6 +835,7 @@ interface ApiService {
     @GET("device/command/pending")
     suspend fun getPendingCommands(
         @Header("Authorization") bearer: String,
+        @Query("device_id") deviceId: String,
     ): Response<List<Map<String, @JvmSuppressWildcards Any>>>
 
     @Multipart
