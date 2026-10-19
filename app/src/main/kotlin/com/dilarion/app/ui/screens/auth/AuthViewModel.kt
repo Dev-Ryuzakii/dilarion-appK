@@ -62,12 +62,17 @@ class AuthViewModel @Inject constructor(
             _uiState.value = AuthUiState(error = "Username and token are required")
             return
         }
+        val cleanUsername = username.trim()
+        if (cleanUsername.length !in 3..50) {
+            _uiState.value = AuthUiState(error = "Username must be between 3 and 50 characters")
+            return
+        }
         viewModelScope.launch {
             _uiState.value = AuthUiState(isLoading = true)
             runCatching {
                 val response = apiService.login(
                     LoginRequest(
-                        username.trim(), token.trim(),
+                        cleanUsername, token.trim(),
                         deviceId = com.dilarion.app.security.DeviceIdentity.id(context),
                         deviceName = com.dilarion.app.security.DeviceIdentity.name(),
                     )
@@ -76,6 +81,7 @@ class AuthViewModel @Inject constructor(
                     val msg = when (response.code()) {
                         401  -> "Invalid credentials"
                         409  -> errorBody(response.errorBody()?.string()) ?: "This account is already signed in on another phone"
+                        422  -> errorBody(response.errorBody()?.string()) ?: "Check the login fields and try again"
                         500  -> "Server error. Try again."
                         else -> errorBody(response.errorBody()?.string()) ?: "Login failed (${response.code()})"
                     }
@@ -231,7 +237,17 @@ class AuthViewModel @Inject constructor(
     private fun errorBody(raw: String?): String? {
         if (raw.isNullOrBlank()) return null
         return runCatching {
-            com.google.gson.JsonParser.parseString(raw).asJsonObject.get("detail")?.asString
+            val detail = com.google.gson.JsonParser.parseString(raw).asJsonObject.get("detail")
+            when {
+                detail == null || detail.isJsonNull -> null
+                detail.isJsonPrimitive -> detail.asString
+                detail.isJsonArray -> detail.asJsonArray.firstOrNull()?.asJsonObject?.let { issue ->
+                    val field = issue.getAsJsonArray("loc")?.lastOrNull()?.asString
+                    val message = issue.get("msg")?.asString
+                    if (field != null && message != null) "${field.replace('_', ' ')}: $message" else message
+                }
+                else -> null
+            }
         }.getOrNull()
     }
 }
