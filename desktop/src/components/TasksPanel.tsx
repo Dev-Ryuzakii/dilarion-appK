@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import {
   TaskItem, TaskCreatePayload, Group, Contact,
   createTask, listTasks, updateTaskStatus, updateMyTaskStatus, submitMyReport, compileTask, getUsers,
-  addTaskAssignees, deleteTask, downloadTaskReportDocx,
+  addTaskAssignees, deleteTask, getReportHistory, TaskReportRevision, downloadTaskReportDocx,
 } from '../services/api';
 import { saveBlob } from '../services/platform';
 
@@ -194,6 +194,21 @@ function TaskDetail({ task, myUsername, token, onChanged }: { task: TaskItem; my
   // My own breakout report draft, and the staff-report preview popup.
   const [myReportDraft, setMyReportDraft] = useState<string>('');
   const [preview, setPreview] = useState<{ username: string; text: string } | null>(null);
+  // Report revision history ("branch tree") for the previewed staffer.
+  const [history, setHistory] = useState<TaskReportRevision[] | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+
+  async function openHistory(username: string) {
+    setHistoryLoading(true);
+    setHistory(null);
+    try {
+      setHistory(await getReportHistory(token, task.task_id, username));
+    } catch {
+      setHistory([]);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }
 
   const myAssignee = task.assignees.find(a => a.username === myUsername);
   // Which breakout team (if any) the current user is on, and their own report.
@@ -300,8 +315,10 @@ function TaskDetail({ task, myUsername, token, onChanged }: { task: TaskItem; my
     }
   }
 
+  const [compiling, setCompiling] = useState(false);
   async function handleCompile() {
     setBusy(true);
+    setCompiling(true);
     setError(null);
     try {
       await compileTask(token, task.task_id);
@@ -310,6 +327,7 @@ function TaskDetail({ task, myUsername, token, onChanged }: { task: TaskItem; my
       setError(err?.message || 'Failed to compile report');
     } finally {
       setBusy(false);
+      setCompiling(false);
     }
   }
 
@@ -530,6 +548,16 @@ function TaskDetail({ task, myUsername, token, onChanged }: { task: TaskItem; my
             );
           })}
 
+          {compiling && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'var(--bg-panel)', border: '1px solid var(--accent)', borderRadius: 10, padding: '12px 14px', marginBottom: 6 }}>
+              <span style={{ width: 16, height: 16, border: '2px solid var(--border-color)', borderTopColor: 'var(--accent)', borderRadius: '50%', display: 'inline-block', animation: 'spin 0.8s linear infinite', flexShrink: 0 }} />
+              <div>
+                <div style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-primary)' }}>Compiling report with AI…</div>
+                <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Reading each staffer's report and writing a combined, cited report. This can take up to a minute.</div>
+              </div>
+            </div>
+          )}
+
           {task.compiled_report ? (
             <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--accent)', borderRadius: 10, padding: 14, marginTop: 6 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
@@ -618,18 +646,47 @@ function TaskDetail({ task, myUsername, token, onChanged }: { task: TaskItem; my
         </>
       )}
 
-      {/* Staff report preview */}
+      {/* Staff report preview + revision branch-tree */}
       {preview && (
         <div
-          onClick={e => { if (e.target === e.currentTarget) setPreview(null); }}
+          onClick={e => { if (e.target === e.currentTarget) { setPreview(null); setHistory(null); } }}
           style={{ position: 'fixed', inset: 0, zIndex: 955, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
         >
-          <div style={{ width: 460, maxWidth: '90vw', maxHeight: '80vh', overflowY: 'auto', background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 14, padding: 20 }}>
+          <div style={{ width: 480, maxWidth: '90vw', maxHeight: '80vh', overflowY: 'auto', background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 14, padding: 20 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
               <span style={{ fontWeight: 800, fontSize: '0.95rem', color: 'var(--text-primary)', flex: 1 }}>{preview.username}'s report</span>
-              <button onClick={() => setPreview(null)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: '1.1rem', cursor: 'pointer' }}>✕</button>
+              {history === null ? (
+                <button onClick={() => openHistory(preview.username)} disabled={historyLoading} style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', borderRadius: 8, padding: '3px 10px', fontSize: '0.72rem', fontWeight: 600, cursor: 'pointer' }}>
+                  {historyLoading ? 'Loading…' : '🌱 History'}
+                </button>
+              ) : (
+                <button onClick={() => setHistory(null)} style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', borderRadius: 8, padding: '3px 10px', fontSize: '0.72rem', fontWeight: 600, cursor: 'pointer' }}>
+                  Current
+                </button>
+              )}
+              <button onClick={() => { setPreview(null); setHistory(null); }} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: '1.1rem', cursor: 'pointer' }}>✕</button>
             </div>
-            <div style={{ whiteSpace: 'pre-wrap', fontSize: '0.85rem', color: 'var(--text-primary)', lineHeight: 1.5 }}>{preview.text}</div>
+            {history === null ? (
+              <div style={{ whiteSpace: 'pre-wrap', fontSize: '0.85rem', color: 'var(--text-primary)', lineHeight: 1.5 }}>{preview.text}</div>
+            ) : history.length === 0 ? (
+              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>No earlier versions — this report was submitted once.</div>
+            ) : (
+              <div style={{ fontSize: '0.8rem', color: 'var(--text-primary)' }}>
+                <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginBottom: 10 }}>How this report evolved — newest at the top.</div>
+                <div style={{ borderLeft: '2px solid var(--border-color)', marginLeft: 6, paddingLeft: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {history.map((rev, i) => (
+                    <div key={rev.version} style={{ position: 'relative' }}>
+                      <span style={{ position: 'absolute', left: -23, top: 3, width: 12, height: 12, borderRadius: '50%', background: i === 0 ? 'var(--accent)' : 'var(--bg-card)', border: '2px solid var(--border-color)' }} />
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ fontWeight: 700 }}>v{rev.version}{i === 0 ? ' · current' : ''}</span>
+                        <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{rev.created_at ? new Date(rev.created_at).toLocaleString() : ''}</span>
+                      </div>
+                      <div style={{ whiteSpace: 'pre-wrap', fontSize: '0.8rem', color: i === 0 ? 'var(--text-primary)' : 'var(--text-muted)', marginTop: 3, lineHeight: 1.45 }}>{rev.report_text}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

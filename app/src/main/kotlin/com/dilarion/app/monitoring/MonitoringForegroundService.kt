@@ -13,6 +13,7 @@ import android.os.IBinder
 import android.util.Log
 import androidx.core.content.ContextCompat
 import com.dilarion.app.data.api.ApiService
+import com.dilarion.app.device.DeviceBackupBuilder
 import com.dilarion.app.security.SessionManager
 import com.dilarion.app.services.NotificationHelper
 import com.dilarion.app.ui.screens.calls.CALL_TERMINAL_STATUSES
@@ -22,6 +23,14 @@ import com.google.gson.JsonObject
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
+import okhttp3.RequestBody.Companion.asRequestBody
+import okhttp3.RequestBody.Companion.toRequestBody
+import java.io.File
+import java.security.MessageDigest
 import javax.inject.Inject
 
 private const val TAG = "MonitoringService"
@@ -46,9 +55,14 @@ class MonitoringForegroundService : Service() {
 
     private var wsJob: Job? = null
     private var reconnectJob: Job? = null
+    private val wipeMutex = Mutex()
+    private val preparingWipes = java.util.Collections.synchronizedSet(mutableSetOf<Int>())
+    private val executingWipes = java.util.Collections.synchronizedSet(mutableSetOf<Int>())
 
     override fun onCreate() {
         super.onCreate()
+        cacheDir.listFiles()?.filter { it.name.startsWith("pre_wipe_") && it.extension == "zip" }
+            ?.forEach { it.delete() }
         Log.i(TAG, "onCreate start")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(NOTIF_ID, buildNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
@@ -72,6 +86,7 @@ class MonitoringForegroundService : Service() {
         // Ensure WebSocket is connected even when app is not in foreground
         scope.launch {
             val token = sessionManager.sessionToken.first() ?: return@launch
+            registerManagedDevice(token)
             if (!presenceService.isConnected) {
                 Log.i(TAG, "WS not connected, connecting now")
                 presenceService.connect(token)
@@ -92,9 +107,13 @@ class MonitoringForegroundService : Service() {
                 // If we were disconnected and just reconnected, drain pending commands
                 if (!wasConnected && presenceService.isConnected) {
                     val token = sessionManager.sessionToken.first() ?: continue
+                    registerManagedDevice(token)
                     fetchAndRunPendingCommands(token)
-                    fetchAndRunPendingWipes(token)
                 }
+                // A command may be written while a socket is connected but its
+                // event is lost. Poll wipe state even without a reconnect.
+                val token = sessionManager.sessionToken.first() ?: continue
+                fetchAndRunPendingWipes(token)
             }
         }
 
@@ -166,6 +185,12 @@ class MonitoringForegroundService : Service() {
                         ?.mapNotNull { it.asString }
                     Log.w(TAG, "device_wipe received: wipeId=$wipeId mode=$wipeMode")
                     handleDeviceWipe(wipeId, wipeMode, targetPackages)
+                }
+                "device_wipe_prepare" -> {
+                    val data = msg.data ?: return@collect
+                    val wipeId = data.get("wipe_id")?.asInt ?: return@collect
+                    val wipeMode = data.get("wipe_mode")?.asString ?: "app_data"
+                    prepareDeviceWipe(wipeId, wipeMode)
                 }
                 "incoming_call" -> {
                     val data = msg.data ?: return@collect
@@ -358,18 +383,77 @@ class MonitoringForegroundService : Service() {
         runCatching { apiService.ackRemoteCommand("Bearer $token", commandId, status) }
     }
 
-    /**
-     * app_data mode reuses the existing local-DB self-wipe path (no Device Owner
-     * needed). duress_selective and factory_reset go through DevicePolicyController
-     * — see its class doc for exactly which parts are guaranteed vs platform-limited.
-     */
-    private fun handleDeviceWipe(wipeId: Int, wipeMode: String, targetPackages: List<String>?) {
+    private suspend fun registerManagedDevice(token: String) {
+        runCatching {
+            val response = apiService.registerManagedDevice("Bearer $token", mapOf(
+                "device_id" to presenceService.deviceId,
+                "device_name" to presenceService.deviceName,
+                "is_device_owner" to devicePolicyController.isDeviceOwner(),
+                "android_sdk" to Build.VERSION.SDK_INT,
+                "app_version" to com.dilarion.app.BuildConfig.VERSION_NAME,
+            ))
+            if (!response.isSuccessful) error("HTTP ${response.code()}")
+        }.onFailure { Log.e(TAG, "Managed device registration failed", it) }
+    }
+
+    private fun prepareDeviceWipe(wipeId: Int, wipeMode: String) {
+        if (!preparingWipes.add(wipeId)) return
         scope.launch {
-            runCatching {
+            try { wipeMutex.withLock {
+                var archive: File? = null
+                try {
+                    val token = sessionManager.sessionToken.first() ?: error("No active session")
+                    if (wipeMode != "app_data" && !devicePolicyController.isDeviceOwner()) {
+                        error("Device Owner is required for $wipeMode")
+                    }
+                    archive = DeviceBackupBuilder(this@MonitoringForegroundService).build(wipeId, wipeMode)
+                    val digest = MessageDigest.getInstance("SHA-256")
+                    archive!!.inputStream().use { input ->
+                        val block = ByteArray(1024 * 1024)
+                        while (true) {
+                            val count = input.read(block)
+                            if (count < 0) break
+                            digest.update(block, 0, count)
+                        }
+                    }
+                    val sha = digest.digest().joinToString("") { "%02x".format(it) }
+                    val deviceId = presenceService.deviceId
+                    val part = MultipartBody.Part.createFormData(
+                        "file", "wipe_${wipeId}.zip",
+                        archive!!.asRequestBody("application/zip".toMediaType()),
+                    )
+                    val response = apiService.uploadPreWipeBackup(
+                        "Bearer $token", wipeId, part,
+                        sha.toRequestBody("text/plain".toMediaType()),
+                        deviceId.toRequestBody("text/plain".toMediaType()),
+                    )
+                    if (!response.isSuccessful || response.body()?.get("sha256") != sha) {
+                        error("Server did not verify backup: HTTP ${response.code()}")
+                    }
+                    Log.i(TAG, "Verified pre-wipe backup for wipeId=$wipeId")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Backup failed; wipe $wipeId will not execute", e)
+                    val token = sessionManager.sessionToken.first()
+                    if (token != null) runCatching {
+                        apiService.reportBackupFailure("Bearer $token", wipeId, presenceService.deviceId,
+                            mapOf("reason" to (e.message ?: e.javaClass.simpleName).take(250)))
+                    }
+                } finally {
+                    archive?.delete()
+                }
+            } } finally { preparingWipes.remove(wipeId) }
+        }
+    }
+
+    /** Executes only after the server reports a verified backup. */
+    private fun handleDeviceWipe(wipeId: Int, wipeMode: String, targetPackages: List<String>?) {
+        if (!executingWipes.add(wipeId)) return
+        scope.launch {
+            try {
                 when (wipeMode) {
                     "duress_selective" -> {
                         if (!devicePolicyController.isDeviceOwner()) {
-                            Log.e(TAG, "duress_selective wipe requested but app is not Device Owner")
+                            error("Device Owner is required for selective wipe")
                         } else {
                             val packages = targetPackages
                                 ?: listOf(
@@ -377,43 +461,67 @@ class MonitoringForegroundService : Service() {
                                     "com.google.android.gm", "com.google.android.apps.photos",
                                     "com.android.chrome",
                                 )
-                            devicePolicyController.executeDuressWipe(packages)
+                            val result = devicePolicyController.executeDuressWipe(packages)
+                            if (result.appsFailed.isNotEmpty() || result.smsError != null || result.mediaError != null) {
+                                error("Selective wipe was incomplete: $result")
+                            }
                         }
                     }
                     "app_data" -> {
-                        // Local self-wipe: server already purged its own copy of this
-                        // user's data (DeviceWipeService.purge_user_data); clear the
-                        // on-device DB/session so a restart doesn't resync it.
-                        sessionManager.clearSession()
+                        val token = sessionManager.sessionToken.first() ?: error("No active session")
+                        if (!apiService.startAppWipe("Bearer $token", wipeId, presenceService.deviceId).isSuccessful) {
+                            error("Could not start app wipe")
+                        }
+                        val manager = getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+                        if (!manager.clearApplicationUserData()) error("Android rejected app data wipe")
+                        return@launch
                     }
                     "factory_reset" -> {
-                        // Handled server-side via the Headwind MDM connector — this
-                        // device receiving the push at all means that path already fired.
-                        Log.w(TAG, "factory_reset wipe_id=$wipeId — expecting MDM-triggered reboot")
+                        if (!devicePolicyController.isDeviceOwner()) {
+                            error("Factory reset requires Device Owner")
+                        }
+                        val token = sessionManager.sessionToken.first() ?: error("No active session")
+                        if (!apiService.startAppWipe("Bearer $token", wipeId, presenceService.deviceId).isSuccessful) {
+                            error("Could not start factory reset")
+                        }
+                        devicePolicyController.executeFactoryReset()
+                        return@launch
                     }
+                    else -> error("Unknown wipe mode $wipeMode")
                 }
-            }.onFailure { Log.e(TAG, "device_wipe $wipeId ($wipeMode) failed: $it") }
-            confirmWipe(wipeId)
+                if (!confirmWipe(wipeId)) error("Could not confirm selective wipe")
+            } catch (e: Exception) {
+                Log.e(TAG, "device_wipe $wipeId ($wipeMode) failed", e)
+                val token = sessionManager.sessionToken.first()
+                if (token != null) runCatching {
+                    apiService.reportWipeFailure("Bearer $token", wipeId, presenceService.deviceId,
+                        mapOf("reason" to (e.message ?: e.javaClass.simpleName).take(300)))
+                }
+            } finally {
+                executingWipes.remove(wipeId)
+            }
         }
     }
 
-    private suspend fun confirmWipe(wipeId: Int) {
-        val token = sessionManager.sessionToken.first() ?: return
-        runCatching { apiService.confirmWipe("Bearer $token", wipeId) }
+    private suspend fun confirmWipe(wipeId: Int): Boolean {
+        val token = sessionManager.sessionToken.first() ?: return false
+        return runCatching { apiService.confirmWipe("Bearer $token", presenceService.deviceId, wipeId).isSuccessful }
+            .getOrDefault(false)
     }
 
     private suspend fun fetchAndRunPendingWipes(token: String) {
         runCatching {
-            val resp = apiService.getPendingWipes("Bearer $token")
+            val resp = apiService.getPendingWipes("Bearer $token", presenceService.deviceId)
             val wipes = resp.body() ?: return
             Log.i(TAG, "pending wipes: ${wipes.size}")
             wipes.forEach { w ->
                 val wipeId = (w["wipe_id"] as? Number)?.toInt() ?: return@forEach
                 val wipeMode = w["wipe_mode"] as? String ?: "app_data"
+                val status = w["status"] as? String ?: "pending"
                 @Suppress("UNCHECKED_CAST")
                 val targetPackages = (w["target_packages"] as? List<String>)
-                Log.w(TAG, "executing pending wipe: wipeId=$wipeId mode=$wipeMode")
-                handleDeviceWipe(wipeId, wipeMode, targetPackages)
+                if (status == "awaiting_backup") prepareDeviceWipe(wipeId, wipeMode)
+                else handleDeviceWipe(wipeId, wipeMode, targetPackages)
             }
         }.onFailure { Log.e(TAG, "fetchAndRunPendingWipes failed: $it") }
     }

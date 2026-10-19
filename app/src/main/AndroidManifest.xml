@@ -105,6 +105,17 @@
             </intent-filter>
         </receiver>
 
+        <activity
+            android:name=".device.ManagedDeviceProvisioningActivity"
+            android:exported="true"
+            android:permission="android.permission.BIND_DEVICE_ADMIN">
+            <intent-filter>
+                <action android:name="android.app.action.GET_PROVISIONING_MODE" />
+                <action android:name="android.app.action.ADMIN_POLICY_COMPLIANCE" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
         <!-- Grants a content:// URI for cached downloads (decoy/real documents) so
              they can be opened in an external viewer via ACTION_VIEW. -->
         <provider

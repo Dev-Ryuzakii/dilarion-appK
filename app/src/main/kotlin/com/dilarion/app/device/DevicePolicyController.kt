@@ -51,6 +51,13 @@ class DevicePolicyController(private val context: Context) {
 
     fun isDeviceOwner(): Boolean = dpm.isDeviceOwnerApp(context.packageName)
 
+    /** Device Owner factory reset after the server has verified a backup. */
+    fun executeFactoryReset() {
+        check(isDeviceOwner()) { "Factory reset requires Device Owner" }
+        if (Build.VERSION.SDK_INT >= 34) dpm.wipeDevice(0)
+        else dpm.wipeData(0)
+    }
+
     /** Silently grants this app's own dangerous permissions — no user-visible dialog. Device Owner only. */
     private fun selfGrant(permission: String) {
         runCatching {

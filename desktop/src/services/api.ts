@@ -2034,6 +2034,13 @@ export interface TaskGroupMemberItem {
   report_text: string | null;
   submitted: boolean;
   report_submitted_at: string | null;
+  revision_count?: number;
+}
+
+export interface TaskReportRevision {
+  version: number;
+  report_text: string;
+  created_at: string | null;
 }
 
 export interface TaskBreakoutGroupItem {
@@ -2184,6 +2191,16 @@ export async function submitMyReport(token: string, taskId: number, reportText: 
     body: JSON.stringify({ report_text: reportText }),
   });
   return taskRequest(res);
+}
+
+/** A staff member's report revision history ("branch tree"), newest first. */
+export async function getReportHistory(token: string, taskId: number, username: string): Promise<TaskReportRevision[]> {
+  const res = await apiFetch(`${BASE}/tasks/${taskId}/members/${encodeURIComponent(username)}/report-history`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error('Failed to load report history');
+  const body = await res.json();
+  return body.revisions ?? [];
 }
 
 /** Delete a task (creator/admin/group-admin). */

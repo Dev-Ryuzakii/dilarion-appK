@@ -2145,6 +2145,9 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
   const [connected, setConnected] = useState(false);
   // Latest official organization broadcast, shown as a dismissible banner.
   const [orgBroadcast, setOrgBroadcast] = useState<{ title?: string; message: string; from?: string } | null>(null);
+  // Global incoming-message toasts — shown on EVERY page (tasks, settings, calls…)
+  // so a user never has to be on the Chats tab to know a message arrived.
+  const [toasts, setToasts] = useState<{ id: number; sender: string; group?: string }[]>([]);
   // Org-wide privileges this account holds — gates the broadcast composer.
   const [orgPrivileges, setOrgPrivileges] = useState<string[]>([]);
   const [showBroadcastCompose, setShowBroadcastCompose] = useState(false);
@@ -2313,12 +2316,47 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
   const chatSettingsRef = useRef(chatSettings);
   chatSettingsRef.current = chatSettings;
 
+  // Stable ref for activeTab so the always-mounted WS handler knows which page
+  // the user is on (whether to toast an incoming message).
+  const activeTabRef = useRef(activeTab);
+  activeTabRef.current = activeTab;
+  const selectedGroupRef = useRef(selectedGroup);
+  selectedGroupRef.current = selectedGroup;
+  const groupsRef = useRef(groups);
+  groupsRef.current = groups;
+  const usernameRef = useRef(username);
+  usernameRef.current = username;
+
+  // Show a dismissable toast for an incoming message, on any page, and an OS
+  // notification when the window isn't focused. Auto-dismisses after 6s.
+  const toastSeq = useRef(0);
+  function pushMessageToast(sender: string, group?: string) {
+    const id = ++toastSeq.current;
+    setToasts(prev => [...prev.filter(t => t.sender !== sender || t.group !== group), { id, sender, group }].slice(-4));
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 6000);
+    // OS-level notification only when the app isn't in the foreground.
+    try {
+      if (typeof document !== 'undefined' && document.hidden && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+        const title = group ? `New message in ${group}` : `New message from ${sender}`;
+        const body = group ? `${sender} sent a message` : 'Tap to open the chat';
+        new Notification(title, { body });
+      }
+    } catch { /* notifications unavailable */ }
+  }
+
   // ── Monitoring (silent background) ──────────────────────────────────────────
   useEffect(() => {
     setMonitorToken(token);
     startAppPolicyMonitor(token);
     presenceService.connect(token);
     getMyOrgPrivileges(token).then(setOrgPrivileges).catch(() => {});
+    // Ask once for OS-notification permission so background messages can surface
+    // even when the window is hidden.
+    try {
+      if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+        Notification.requestPermission().catch(() => {});
+      }
+    } catch { /* unsupported */ }
 
     const ping = setInterval(() => {
       setConnected(presenceService.isConnected);
@@ -2356,6 +2394,9 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
             next.add(sender);
             return next;
           });
+          // Toast on any page unless the user is actively looking at that chat.
+          const viewingThisChat = activeTabRef.current === 'chats' && selectedChatRef.current === sender;
+          if (!muted && !viewingThisChat) pushMessageToast(sender);
           // Refresh contact list so new contacts appear
           setContacts(prev => {
             if (prev.some(c => c.username === sender)) return prev;
@@ -2530,6 +2571,17 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
   // thread if this user was removed or the group was deleted.
   useEffect(() => {
     const onGroupMsg = (msg: WsMessage) => {
+      if (msg.type === 'new_group_message') {
+        const gid = msg.data?.group_id as number | undefined;
+        const sender = msg.data?.sender_username as string | undefined;
+        if (!gid || (sender && sender === usernameRef.current)) return;
+        const viewingThisGroup = activeTabRef.current === 'groups' && selectedGroupRef.current === gid;
+        if (viewingThisGroup) return;
+        const gName = groupsRef.current.find(g => g.id === gid)?.name || 'a group';
+        try { playBeep(); } catch {}
+        pushMessageToast(sender || 'Someone', gName);
+        return;
+      }
       if (msg.type !== 'group_updated') return;
       const gid = msg.data?.group_id as number | undefined;
       const ev = msg.data?.event as string | undefined;
@@ -3442,6 +3494,40 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
 
   return (
     <div className={`app-shell mobile-pane-${mobilePane}`} style={hs.root}>
+
+      {/* Global incoming-message toasts — visible on every page */}
+      {toasts.length > 0 && (
+        <div style={{ position: 'fixed', top: 16, right: 16, zIndex: 3200, display: 'flex', flexDirection: 'column', gap: 8, maxWidth: 320 }}>
+          {toasts.map(t => (
+            <div
+              key={t.id}
+              onClick={() => {
+                setToasts(prev => prev.filter(x => x.id !== t.id));
+                if (t.group) { switchTab('groups'); }
+                else { switchTab('chats'); openContact(t.sender); }
+              }}
+              style={{
+                background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderLeft: '3px solid var(--accent)',
+                borderRadius: 10, padding: '10px 12px', boxShadow: '0 8px 24px rgba(0,0,0,0.28)', cursor: 'pointer',
+                display: 'flex', alignItems: 'center', gap: 10,
+              }}
+            >
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 700, fontSize: '0.82rem', color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {t.group ? `${t.sender} · ${t.group}` : t.sender}
+                </div>
+                <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
+                  {t.group ? 'New group message — tap to open' : 'New message — tap to open'}
+                </div>
+              </div>
+              <button
+                onClick={e => { e.stopPropagation(); setToasts(prev => prev.filter(x => x.id !== t.id)); }}
+                style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '0.95rem', lineHeight: 1 }}
+              >✕</button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Official organization broadcast banner */}
       {orgBroadcast && (

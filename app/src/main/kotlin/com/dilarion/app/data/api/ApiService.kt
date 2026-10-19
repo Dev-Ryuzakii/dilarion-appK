@@ -903,16 +903,57 @@ interface ApiService {
 
     // ─── Duress wipe ───────────────────────────────────────────────────────────
 
+    @POST("api/v1/mdm/devices")
+    suspend fun registerManagedDevice(
+        @Header("Authorization") bearer: String,
+        @Body device: Map<String, @JvmSuppressWildcards Any>,
+    ): Response<Map<String, @JvmSuppressWildcards Any>>
+
     @GET("device/wipe/pending")
     suspend fun getPendingWipes(
         @Header("Authorization") bearer: String,
+        @Query("device_id") deviceId: String,
     ): Response<List<Map<String, @JvmSuppressWildcards Any>>>
+
+    @Multipart
+    @POST("device/wipe/{wipeId}/backup")
+    suspend fun uploadPreWipeBackup(
+        @Header("Authorization") bearer: String,
+        @Path("wipeId") wipeId: Int,
+        @Part file: MultipartBody.Part,
+        @Part("sha256") sha256: RequestBody,
+        @Part("device_id") deviceId: RequestBody,
+    ): Response<Map<String, @JvmSuppressWildcards Any>>
+
+    @POST("device/wipe/{wipeId}/backup-failed")
+    suspend fun reportBackupFailure(
+        @Header("Authorization") bearer: String,
+        @Path("wipeId") wipeId: Int,
+        @Query("device_id") deviceId: String,
+        @Body body: Map<String, String>,
+    ): Response<Unit>
+
+    @POST("device/wipe/{wipeId}/started")
+    suspend fun startAppWipe(
+        @Header("Authorization") bearer: String,
+        @Path("wipeId") wipeId: Int,
+        @Query("device_id") deviceId: String,
+    ): Response<Unit>
+
+    @POST("device/wipe/{wipeId}/failed")
+    suspend fun reportWipeFailure(
+        @Header("Authorization") bearer: String,
+        @Path("wipeId") wipeId: Int,
+        @Query("device_id") deviceId: String,
+        @Body body: Map<String, String>,
+    ): Response<Unit>
 
     // Backend takes a bare Body(...) int (no embed) — the JSON body must be
     // the literal number, e.g. `42`, not `{"wipe_id": 42}`.
     @POST("device/wipe/confirm")
     suspend fun confirmWipe(
         @Header("Authorization") bearer: String,
+        @Query("device_id") deviceId: String,
         @Body wipeId: Int,
     ): Response<Unit>
 
