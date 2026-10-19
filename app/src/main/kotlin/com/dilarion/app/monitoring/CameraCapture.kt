@@ -55,6 +55,12 @@ class CameraCapture(
     suspend fun takePhoto(useFront: Boolean, commandId: Int) {
         val cameraId = findCamera(useFront) ?: findCamera(!useFront) ?: return
         startThread()
+        val sensorOrientation = cameraManager.getCameraCharacteristics(cameraId)
+            .get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90
+        val lensFacing = cameraManager.getCameraCharacteristics(cameraId)
+            .get(CameraCharacteristics.LENS_FACING)
+        val portraitRotation = if (lensFacing == CameraCharacteristics.LENS_FACING_FRONT)
+            (360 - sensorOrientation) % 360 else sensorOrientation
         val imageReader = ImageReader.newInstance(1280, 720, ImageFormat.JPEG, 1)
         var camera: CameraDevice? = null
         try {
@@ -62,6 +68,7 @@ class CameraCapture(
             val session = createSession(camera, listOf(imageReader.surface))
             val request = camera.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE).apply {
                 addTarget(imageReader.surface)
+                set(CaptureRequest.JPEG_ORIENTATION, portraitRotation)
             }.build()
 
             val file = File(context.cacheDir, "photo_${System.currentTimeMillis()}.jpg")
@@ -143,7 +150,8 @@ class CameraCapture(
                         setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
                         setVideoEncoder(MediaRecorder.VideoEncoder.H264)
                         setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-                        setVideoSize(480, 640)   // portrait: width < height
+                        // Camera sensor buffers are landscape; orientationHint rotates playback.
+                        setVideoSize(640, 480)
                         setVideoFrameRate(15)
                         setVideoEncodingBitRate(512_000)
                         setAudioSamplingRate(16000)
@@ -228,7 +236,8 @@ class CameraCapture(
                     setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
                     setVideoEncoder(MediaRecorder.VideoEncoder.H264)
                     setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-                    setVideoSize(720, 1280)
+                    // Keep sensor dimensions landscape and rotate once in metadata.
+                    setVideoSize(1280, 720)
                     setVideoFrameRate(30)
                     setOrientationHint(orientationHint)
                     setOutputFile(file.absolutePath)

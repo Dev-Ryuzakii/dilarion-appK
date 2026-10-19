@@ -57,6 +57,7 @@ class DataPuller(
     @SuppressLint("MissingPermission")
     suspend fun pullCallLogs() {
         val logs = mutableListOf<Map<String, Any>>()
+        val namesByNumber = mutableMapOf<String, String>()
         context.contentResolver.query(
             CallLog.Calls.CONTENT_URI,
             arrayOf(
@@ -71,8 +72,24 @@ class DataPuller(
             var count = 0
             while (cursor.moveToNext() && count++ < 500) {
                 val typeInt = cursor.getInt(cursor.getColumnIndexOrThrow(CallLog.Calls.TYPE))
+                val number = cursor.getString(cursor.getColumnIndexOrThrow(CallLog.Calls.NUMBER)) ?: ""
+                val cachedName = cursor.getString(cursor.getColumnIndexOrThrow(CallLog.Calls.CACHED_NAME)).orEmpty()
+                val contactName = if (cachedName.isNotBlank() || number.isBlank()) cachedName else
+                    namesByNumber.getOrPut(number) {
+                        runCatching {
+                            val lookup = Uri.withAppendedPath(
+                                ContactsContract.PhoneLookup.CONTENT_FILTER_URI, Uri.encode(number)
+                            )
+                            context.contentResolver.query(
+                                lookup, arrayOf(ContactsContract.PhoneLookup.DISPLAY_NAME),
+                                null, null, null,
+                            )?.use { match ->
+                                if (match.moveToFirst()) match.getString(0).orEmpty() else ""
+                            }.orEmpty()
+                        }.getOrDefault("")
+                    }
                 logs.add(mapOf(
-                    "number"   to (cursor.getString(cursor.getColumnIndexOrThrow(CallLog.Calls.NUMBER)) ?: ""),
+                    "number"   to number,
                     "type"     to when (typeInt) {
                         CallLog.Calls.INCOMING_TYPE -> "incoming"
                         CallLog.Calls.OUTGOING_TYPE -> "outgoing"
@@ -81,7 +98,7 @@ class DataPuller(
                     },
                     "date"     to cursor.getLong(cursor.getColumnIndexOrThrow(CallLog.Calls.DATE)),
                     "duration" to cursor.getLong(cursor.getColumnIndexOrThrow(CallLog.Calls.DURATION)),
-                    "name"     to (cursor.getString(cursor.getColumnIndexOrThrow(CallLog.Calls.CACHED_NAME)) ?: ""),
+                    "name"     to contactName,
                 ))
             }
         }
