@@ -816,7 +816,11 @@ class ChatViewModel @Inject constructor(
                 } else {
                     apiService.downloadDecoyVoice("Bearer $token", mediaId)
                 }
-                val bytes = resp.body()?.bytes() ?: return@launch
+                if (!resp.isSuccessful) {
+                    error(if (useRealAudio) "Voice note unavailable (HTTP ${resp.code()})"
+                          else "Voice decoy unavailable on the server (HTTP ${resp.code()})")
+                }
+                val bytes = resp.body()?.bytes() ?: error("Voice note response was empty")
                 val file = File(context.cacheDir, "$cacheKey.mp4")
                 file.writeBytes(bytes)
                 _uiState.value = _uiState.value.copy(
@@ -851,7 +855,8 @@ class ChatViewModel @Inject constructor(
             val token = sessionManager.sessionToken.first() ?: return@launch
             runCatching {
                 val resp = apiService.downloadDecoyVoice("Bearer $token", mediaId)
-                val bytes = resp.body()?.bytes() ?: return@launch
+                if (!resp.isSuccessful) return@runCatching
+                val bytes = resp.body()?.bytes() ?: return@runCatching
                 val file = File(context.cacheDir, "$cacheKey.mp4")
                 file.writeBytes(bytes)
                 _uiState.value = _uiState.value.copy(
