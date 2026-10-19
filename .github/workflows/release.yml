@@ -24,6 +24,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check release versions
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, re, os
+          from pathlib import Path
+          tag = os.environ["GITHUB_REF_NAME"].removeprefix("v")
+          desktop = json.loads(Path("desktop/src-tauri/tauri.conf.json").read_text())["version"]
+          android = re.search(r'versionName\s*=\s*"([^"]+)"', Path("app/build.gradle.kts").read_text()).group(1)
+          if desktop != tag or android != tag:
+              raise SystemExit(f"Release tag {tag}, desktop {desktop}, Android {android} must match")
+          PY
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
