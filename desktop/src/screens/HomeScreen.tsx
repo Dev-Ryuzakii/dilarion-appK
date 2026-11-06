@@ -2243,7 +2243,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
       // Media starts only now, after the owner authenticated and accepted.
       // Renders via GalleryView (LiveKit), same as starting a group call —
       // group calls no longer use the mesh CallModal conference path.
-      setActiveGalleryCall({ conferenceId: conferenceInvite.conferenceId });
+      setActiveGalleryCall({ conferenceId: conferenceInvite.conferenceId, initialCamOn: conferenceInvite.callType === 'video' });
       setConferenceInvite(null);
     } catch (err: any) {
       // A wrong token is retryable; the call keeps ringing.
@@ -2513,7 +2513,9 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
           stopRinging();
           setIncomingCall(null);
           closeCallWindowIfOpen().catch(() => {});
-          setActiveGalleryCall({ conferenceId: confId });
+          // The other side added someone to our 1:1 call; we weren't asked to
+          // turn a camera on, so don't default one on for them here.
+          setActiveGalleryCall({ conferenceId: confId, initialCamOn: false });
         }
       }
     };
@@ -2535,17 +2537,18 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
     if (!isTauri()) {
       // Web: the in-page call hands off through a window event instead.
       const onUpgrade = (e: Event) => {
-        const confId = (e as CustomEvent<{ conferenceId: number }>).detail?.conferenceId;
+        const detail = (e as CustomEvent<{ conferenceId: number; camOn?: boolean }>).detail;
+        const confId = detail?.conferenceId;
         if (!confId) return;
         setCallWindowOpen(false);
-        setActiveGalleryCall({ conferenceId: confId });
+        setActiveGalleryCall({ conferenceId: confId, initialCamOn: !!detail?.camOn });
       };
       window.addEventListener(UPGRADE_TO_GALLERY_EVENT, onUpgrade);
       return () => window.removeEventListener(UPGRADE_TO_GALLERY_EVENT, onUpgrade);
     }
-    const unlisten = listen<{ conferenceId: number }>('dilarion://upgrade-to-gallery', (event) => {
+    const unlisten = listen<{ conferenceId: number; camOn?: boolean }>('dilarion://upgrade-to-gallery', (event) => {
       setCallWindowOpen(false);
-      setActiveGalleryCall({ conferenceId: event.payload.conferenceId });
+      setActiveGalleryCall({ conferenceId: event.payload.conferenceId, initialCamOn: !!event.payload.camOn });
     });
     return () => { unlisten.then(fn => fn()); };
   }, []);

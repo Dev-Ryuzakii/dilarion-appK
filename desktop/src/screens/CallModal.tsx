@@ -34,7 +34,7 @@ interface Props {
   /** Redial this partner after the call ended, as a fresh outgoing call. */
   onCallBack?: (callType: CallType) => void;
   /** Adding a third participant moves everyone to the LiveKit conference room. */
-  onUpgradeToGallery?: (conferenceId: number) => void;
+  onUpgradeToGallery?: (conferenceId: number, camOn: boolean) => void;
   minimized?: boolean;
   onMinimize?: () => void;
   onMaximize?: () => void;
@@ -699,7 +699,10 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
       if (reconnectTimerRef.current) { clearTimeout(reconnectTimerRef.current); reconnectTimerRef.current = null; }
       if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
       stopAllMedia();
-      onUpgradeToGallery(id);
+      // Carry this call's actual video state into the group call — otherwise
+      // the gallery view falls back to its own default (camera on) and an
+      // audio call silently turns into a video one for everybody.
+      onUpgradeToGallery(id, isVideo);
     }
   }
 

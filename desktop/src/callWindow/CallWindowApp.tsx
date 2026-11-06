@@ -69,10 +69,12 @@ export default function CallWindowApp() {
           });
         }, 250);
       }}
-      onUpgradeToGallery={(confId: number) => {
+      onUpgradeToGallery={(confId: number, camOn: boolean) => {
         // Group video runs in the main window (GalleryView/LiveKit) — hand
         // off and close this window rather than duplicating that UI here.
-        emitTo('main', 'dilarion://upgrade-to-gallery', { conferenceId: confId }).catch(() => {});
+        // Carry the call's actual camera state so an audio call doesn't
+        // silently turn into a video one in the gallery.
+        emitTo('main', 'dilarion://upgrade-to-gallery', { conferenceId: confId, camOn }).catch(() => {});
         getCurrentWindow().close().catch(() => {});
       }}
     />

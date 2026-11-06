@@ -49,7 +49,9 @@ export default function GalleryView({
   conferenceId,
   onClose,
   initialMicOn = true,
-  initialCamOn = true,
+  // Fails safe: a caller that forgets to pass this should not silently turn
+  // an audio call into a video one for everyone in the room.
+  initialCamOn = false,
   displayName,
   myUsername,
   masterToken,
