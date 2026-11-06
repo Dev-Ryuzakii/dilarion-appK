@@ -21,6 +21,7 @@ import {
   createPersonalPlan, deletePersonalPlan,
   getGoogleCalendarStatus, getGoogleCalendarAuthorizeUrl, unlinkGoogleCalendar, GoogleCalendarStatus,
 } from '../services/api';
+import { userMessage } from '../services/errors';
 
 const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -135,7 +136,7 @@ export default function CalendarView({
       setPlanNotes('');
       setReloadTick(t => t + 1);
     } catch (err: any) {
-      setPlanError(err?.message || 'Failed to create plan');
+      setPlanError(userMessage(err, "Couldn't create that plan. Please try again."));
     } finally {
       setPlanSaving(false);
     }
@@ -155,7 +156,7 @@ export default function CalendarView({
       const url = await getGoogleCalendarAuthorizeUrl(token);
       await openExternal(url);
     } catch (err: any) {
-      setGoogleError(err?.message || 'Google Calendar linking is not available');
+      setGoogleError(userMessage(err, "Couldn't link Google Calendar right now. Please try again."));
     } finally {
       setGoogleBusy(false);
     }

@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import com.dilarion.app.utils.toUserMessage
 
 data class NewChatUiState(
     val users: List<UserInfo> = emptyList(),
@@ -48,7 +49,7 @@ class NewChatViewModel @Inject constructor(
                     ?: emptyList()
                 _uiState.value = _uiState.value.copy(isLoading = false, users = users)
             }.onFailure { e ->
-                _uiState.value = _uiState.value.copy(isLoading = false, error = e.message)
+                _uiState.value = _uiState.value.copy(isLoading = false, error = e.toUserMessage("Couldn't load contacts. Check your connection and try again."))
             }
         }
     }

@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import com.dilarion.app.utils.toUserMessage
 
 data class MeetingChatUiState(
     val messages: List<Message> = emptyList(),
@@ -132,7 +133,7 @@ class MeetingChatViewModel @Inject constructor(
                 apiService.sendConferenceMessage(bearer, SendConferenceMessageRequest(conferenceId, ciphertext, encryptedKeyJson, iv, decoy))
                 loadMessages()
             }.onFailure {
-                _uiState.value = _uiState.value.copy(error = it.message)
+                _uiState.value = _uiState.value.copy(error = it.toUserMessage(it.message ?: "Couldn't send your message. Check your connection and try again."))
             }
             _uiState.value = _uiState.value.copy(sending = false)
         }

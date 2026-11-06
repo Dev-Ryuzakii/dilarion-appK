@@ -42,6 +42,7 @@ import java.io.File
 import java.nio.ByteOrder
 import javax.inject.Inject
 import kotlin.math.sqrt
+import com.dilarion.app.utils.toUserMessage
 
 data class VoiceWaveform(val bars: List<Float>, val durationMs: Int)
 
@@ -210,7 +211,7 @@ class ChatViewModel @Inject constructor(
                     if (response.isSuccessful) loadGroupMembers(gId)
                     else _uiState.value = _uiState.value.copy(groupAdminError = "Failed to promote $username")
                 }
-                .onFailure { e -> _uiState.value = _uiState.value.copy(groupAdminError = e.message ?: "Network error") }
+                .onFailure { e -> _uiState.value = _uiState.value.copy(groupAdminError = e.toUserMessage("Couldn't update the group. Please try again.")) }
             _uiState.value = _uiState.value.copy(groupAdminBusy = false)
         }
     }
@@ -225,7 +226,7 @@ class ChatViewModel @Inject constructor(
                     if (response.isSuccessful) loadGroupMembers(gId)
                     else _uiState.value = _uiState.value.copy(groupAdminError = "Failed to demote $username — a group needs at least one admin")
                 }
-                .onFailure { e -> _uiState.value = _uiState.value.copy(groupAdminError = e.message ?: "Network error") }
+                .onFailure { e -> _uiState.value = _uiState.value.copy(groupAdminError = e.toUserMessage("Couldn't update the group. Please try again.")) }
             _uiState.value = _uiState.value.copy(groupAdminBusy = false)
         }
     }
@@ -253,11 +254,11 @@ class ChatViewModel @Inject constructor(
             runCatching {
                 val resp = if (query.isBlank()) apiService.getTrendingGifs("Bearer $token")
                 else apiService.searchGifs("Bearer $token", query)
-                if (resp.isSuccessful) resp.body()?.results ?: emptyList() else throw Exception("GIF search failed")
+                if (resp.isSuccessful) resp.body()?.results ?: emptyList() else throw Exception("Couldn't load GIFs right now. Please try again.")
             }.onSuccess { results ->
                 _uiState.value = _uiState.value.copy(gifsLoading = false, gifs = results)
             }.onFailure { e ->
-                _uiState.value = _uiState.value.copy(gifsLoading = false, gifsError = e.message ?: "GIF search unavailable")
+                _uiState.value = _uiState.value.copy(gifsLoading = false, gifsError = e.toUserMessage("Couldn't load GIFs right now. Please try again."))
             }
         }
     }
@@ -499,7 +500,7 @@ class ChatViewModel @Inject constructor(
                 apiService.sendDm(bearer, SendDmRequest(targetUsername, ciphertext, encryptedKeyJson, iv, workDecoy(), forwardedFromMessageId = target.id))
                 _uiState.value = _uiState.value.copy(forwardTarget = null)
             }.onFailure {
-                _uiState.value = _uiState.value.copy(forwardError = it.message ?: "Failed to forward message")
+                _uiState.value = _uiState.value.copy(forwardError = it.toUserMessage(it.message ?: "Couldn't forward that message. Please try again."))
             }
         }
     }
@@ -530,7 +531,7 @@ class ChatViewModel @Inject constructor(
                     isLoading = false,
                 )
             }.onFailure {
-                _uiState.value = _uiState.value.copy(isLoading = false, error = it.message)
+                _uiState.value = _uiState.value.copy(isLoading = false, error = it.toUserMessage("Couldn't load messages. Check your connection and try again."))
             }
         }
     }
@@ -615,7 +616,7 @@ class ChatViewModel @Inject constructor(
             }.onFailure {
                 _uiState.value = _uiState.value.copy(
                     messages = if (editTarget == null) _uiState.value.messages.filter { it.id >= 0 } else _uiState.value.messages,
-                    error = it.message,
+                    error = it.toUserMessage(it.message ?: "Couldn't send your message. Check your connection and try again."),
                     editingMessage = editTarget,
                 )
             }
@@ -655,7 +656,7 @@ class ChatViewModel @Inject constructor(
                 }
                 loadMessages()
             }.onFailure {
-                _uiState.value = _uiState.value.copy(error = it.message)
+                _uiState.value = _uiState.value.copy(error = it.toUserMessage(it.message ?: "Couldn't send that. Check your connection and try again."))
             }
             _uiState.value = _uiState.value.copy(isSending = false)
         }
@@ -692,10 +693,10 @@ class ChatViewModel @Inject constructor(
                 val filePart = MultipartBody.Part.createFormData("file", displayName, requestFile)
                 val resp = uploadAttachment("Bearer $token", filePart, mime, decoyKind)
                 tempFile.delete()
-                if (!resp.isSuccessful) throw IllegalStateException("Upload failed (${resp.code()})")
+                if (!resp.isSuccessful) throw IllegalStateException("Couldn't upload that. Please try again.")
                 refreshAfterUpload()
             }.onFailure {
-                _uiState.value = _uiState.value.copy(error = it.message)
+                _uiState.value = _uiState.value.copy(error = it.toUserMessage(it.message ?: "Couldn't send that file. Check your connection and try again."))
             }
             _uiState.value = _uiState.value.copy(
                 isUploadingMedia = false,
@@ -776,10 +777,10 @@ class ChatViewModel @Inject constructor(
                 val filePart = MultipartBody.Part.createFormData("file", file.name, requestFile)
                 val resp = uploadAttachment("Bearer $token", filePart, "media/voice", null)
                 file.delete()
-                if (!resp.isSuccessful) throw IllegalStateException("Upload failed (${resp.code()})")
+                if (!resp.isSuccessful) throw IllegalStateException("Couldn't upload that. Please try again.")
                 refreshAfterUpload()
             }.onFailure {
-                _uiState.value = _uiState.value.copy(error = it.message)
+                _uiState.value = _uiState.value.copy(error = it.toUserMessage("Couldn't send that voice message. Check your connection and try again."))
             }
             _uiState.value = _uiState.value.copy(
                 isUploadingMedia = false,
@@ -829,7 +830,7 @@ class ChatViewModel @Inject constructor(
                 ensureWaveform(cacheKey, file.absolutePath)
                 startPlayer(file.absolutePath, mediaId)
             }.onFailure {
-                _uiState.value = _uiState.value.copy(error = it.message, playingMediaId = null)
+                _uiState.value = _uiState.value.copy(error = it.toUserMessage("Couldn't load this media. Please try again."), playingMediaId = null)
             }
         }
     }
@@ -1059,7 +1060,7 @@ class ChatViewModel @Inject constructor(
                 documentBytesCache[cacheKey] = bytes
                 _uiState.value = _uiState.value.copy(viewingDocumentKey = cacheKey)
             }.onFailure {
-                _uiState.value = _uiState.value.copy(error = it.message)
+                _uiState.value = _uiState.value.copy(error = it.toUserMessage("Couldn't open this document. Please try again."))
             }
         }
     }
@@ -1112,7 +1113,7 @@ class ChatViewModel @Inject constructor(
                 }
             }
         }.onFailure {
-            _uiState.value = _uiState.value.copy(error = it.message, playingMediaId = null)
+            _uiState.value = _uiState.value.copy(error = it.toUserMessage("Couldn't play this media. Please try again."), playingMediaId = null)
         }
     }
 
@@ -1319,7 +1320,7 @@ class ChatViewModel @Inject constructor(
                     )
                 }
                 .onFailure {
-                    _uiState.value = _uiState.value.copy(copilotResult = CopilotResultUi("Thread summary", false, it.message ?: "Failed to summarize", null))
+                    _uiState.value = _uiState.value.copy(copilotResult = CopilotResultUi("Thread summary", false, it.toUserMessage("Couldn't summarize this thread. Please try again."), null))
                 }
         }
     }
@@ -1344,7 +1345,7 @@ class ChatViewModel @Inject constructor(
                     _uiState.value = _uiState.value.copy(suggestLoading = false, replySuggestions = resp.body()?.suggestions)
                 }
                 .onFailure {
-                    _uiState.value = _uiState.value.copy(suggestLoading = false, error = it.message ?: "Copilot could not draft a reply")
+                    _uiState.value = _uiState.value.copy(suggestLoading = false, error = it.toUserMessage("Copilot couldn't draft a reply. Please try again."))
                 }
         }
     }
@@ -1364,7 +1365,7 @@ class ChatViewModel @Inject constructor(
                     )
                 }
                 .onFailure {
-                    _uiState.value = _uiState.value.copy(copilotResult = CopilotResultUi(title, false, it.message ?: "Failed to translate", null))
+                    _uiState.value = _uiState.value.copy(copilotResult = CopilotResultUi(title, false, it.toUserMessage("Couldn't translate this message. Please try again."), null))
                 }
         }
     }
@@ -1388,7 +1389,7 @@ class ChatViewModel @Inject constructor(
                     )
                 }
                 .onFailure {
-                    _uiState.value = _uiState.value.copy(copilotResult = CopilotResultUi("Document Q&A", false, it.message ?: "Failed to answer", null))
+                    _uiState.value = _uiState.value.copy(copilotResult = CopilotResultUi("Document Q&A", false, it.toUserMessage("Couldn't answer that. Please try again."), null))
                 }
         }
     }
@@ -1417,7 +1418,7 @@ class ChatViewModel @Inject constructor(
                     else CopilotResultUi("Transcript", false, null, text.ifBlank { "No speech detected." }),
                 )
             }.onFailure {
-                _uiState.value = _uiState.value.copy(copilotResult = CopilotResultUi("Transcript", false, it.message ?: "Failed to transcribe", null))
+                _uiState.value = _uiState.value.copy(copilotResult = CopilotResultUi("Transcript", false, it.toUserMessage("Couldn't transcribe this recording. Please try again."), null))
             }
         }
     }

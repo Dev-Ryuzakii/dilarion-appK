@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { login, requestPasswordReset, signUp, resetWithRecoveryCode, activateAccount, loginOrganization } from '../services/api';
 import OnboardingScreen from './OnboardingScreen';
+import { userMessage } from '../services/errors';
 
 interface Props {
   onLogin: (token: string, username: string) => void;
@@ -99,7 +100,7 @@ export default function LoginScreen({ onLogin, onBack, initialView = 'login', no
           return;
         }
       } catch {}
-      setError(err.message || 'Login failed');
+      setError(userMessage(err, err?.message || 'Invalid username or token. Please check your details and try again.'));
     } finally {
       setLoading(false);
     }
@@ -115,7 +116,7 @@ export default function LoginScreen({ onLogin, onBack, initialView = 'login', no
       setSavedAck(false);
       setSignupUsername(''); setSignupPhone(''); setSignupToken('');
     } catch (err: any) {
-      setSignupError(err.message || 'Failed to create account');
+      setSignupError(userMessage(err, err?.message || "Couldn't create your account. Please try again."));
     } finally {
       setSignupLoading(false);
     }
@@ -131,7 +132,7 @@ export default function LoginScreen({ onLogin, onBack, initialView = 'login', no
       setSavedAck(false);
       setRecUsername(''); setRecCode(''); setRecNewToken('');
     } catch (err: any) {
-      setRecError(err.message || 'Failed to reset');
+      setRecError(userMessage(err, err?.message || "Couldn't reset with that code. Please check it and try again."));
     } finally {
       setRecLoading(false);
     }
@@ -168,7 +169,7 @@ export default function LoginScreen({ onLogin, onBack, initialView = 'login', no
         onLogin(r.token, r.username);
       }
     } catch (err: any) {
-      setActError(err?.message || 'Activation failed');
+      setActError(userMessage(err, err?.message || "Couldn't activate your account. Please check the code and try again."));
     } finally {
       setActLoading(false);
     }

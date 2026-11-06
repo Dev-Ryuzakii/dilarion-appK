@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { presenceService } from '../services/presence';
 import { initiateCall, performCallAction, sendCallIceCandidate, setCallMediaState, getCallStatus, createConference, conferenceInvite, conferenceSignal, conferenceLeave, getUsers, getIceServers, Contact, CALL_TERMINAL_STATUSES, profilePictureUrl } from '../services/api';
 import { CloseIcon, MuteIcon } from '../components/Icons';
+import { userMessage } from '../services/errors';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -314,7 +315,7 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
       if (localVideoRef.current) localVideoRef.current.srcObject = stream;
       return stream;
     } catch {
-      setError('Could not access camera/microphone');
+      setError('Couldn\'t access your camera or microphone. Check that Dilarion has permission and try again.');
       return null;
     }
   }, [callType]);
@@ -377,7 +378,7 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
       buffered.forEach(c => sendCallIceCandidate(token, call_id, partner, c).catch(() => {}));
       startAnswerPoll(call_id);
     } catch (err: any) {
-      setError(err?.message || 'Could not start call');
+      setError(userMessage(err, "Couldn't connect to the call. Check your connection and retry."));
     }
   }, [startLocalMedia, createPc, token, partner, callType]);
 
@@ -425,7 +426,7 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
         setState('ringing');
         return;
       }
-      setError(err?.message || 'Could not accept the call');
+      setError(userMessage(err, "Couldn't connect to the call. Check your connection and retry."));
       setState('ended');
     }
   }, [startLocalMedia, createPc, token, incomingOfferSdp]);
@@ -834,7 +835,7 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
         if (trackKind === 'video' && !sharing && localVideoRef.current) localVideoRef.current.srcObject = local;
       }
     } catch (err: any) {
-      setError(err?.message || 'Could not switch device');
+      setError(userMessage(err, "Couldn't switch to that device. Please try again."));
     }
   }
 

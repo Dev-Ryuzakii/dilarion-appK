@@ -40,6 +40,7 @@ import MasterTokenPromptModal from '../components/MasterTokenPromptModal';
 import { GroupInfoDrawer } from '../components/GroupDialogs';
 import DeleteMessageDialog, { DeleteScope } from '../components/DeleteMessageDialog';
 import { summarizeThreadCopilot, composeReplyCopilot, translateCopilot } from '../services/api';
+import { userMessage } from '../services/errors';
 
 interface Props {
   token: string;
@@ -225,7 +226,7 @@ function EncryptedBubble({ token, messageId, decoyContent, masterToken, onDecryp
         setDecryptedContent(null);
       }, 30000);
     } catch (err: any) {
-      setError(err?.message || 'Invalid master token');
+      setError(userMessage(err, "Couldn't unlock this message. Check your master token and try again."));
     } finally {
       setLoading(false);
     }
@@ -715,7 +716,7 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
       const summary = await summarizeThreadCopilot(token, lines.join('\n'));
       setCopilotResult({ title: 'Thread summary', loading: false, error: null, content: summary });
     } catch (err: any) {
-      setCopilotResult({ title: 'Thread summary', loading: false, error: err?.message || 'Failed to summarize', content: null });
+      setCopilotResult({ title: 'Thread summary', loading: false, error: userMessage(err, "Couldn't summarize this thread. Please try again."), content: null });
     }
   }
 
@@ -741,7 +742,7 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
       const suggestions = await composeReplyCopilot(token, contextText);
       setReplySuggestions(suggestions);
     } catch (err: any) {
-      setSendError(err?.message || 'Copilot could not draft a reply');
+      setSendError(userMessage(err, "Copilot couldn't draft a reply. Please try again."));
     } finally {
       setSuggestLoading(false);
     }
@@ -755,7 +756,7 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
       const translated = await translateCopilot(token, text, target.trim());
       setCopilotResult({ title: `Translation (${target.trim()})`, loading: false, error: null, content: translated });
     } catch (err: any) {
-      setCopilotResult({ title: `Translation (${target.trim()})`, loading: false, error: err?.message || 'Failed to translate', content: null });
+      setCopilotResult({ title: `Translation (${target.trim()})`, loading: false, error: userMessage(err, "Couldn't translate this message. Please try again."), content: null });
     }
   }
 
@@ -806,7 +807,7 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
       else setMessages(prev => prev.map(m => (m.id === msg.id ? { ...m, is_deleted: true } : m)));
       loadMessages();
     } catch (err: any) {
-      setSendError(err?.message || 'Failed to delete message');
+      setSendError(userMessage(err, "Couldn't delete that message. Please try again."));
     }
   }
 
@@ -822,7 +823,7 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
       setReplyTarget(null);
       setText(plaintext);
     } catch (err: any) {
-      setSendError(err?.message || 'Could not decrypt this message to edit it');
+      setSendError(userMessage(err, "Couldn't open this message to edit it. Please try again."));
     }
   }
 
@@ -849,7 +850,7 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
       setForwardTarget(null);
       setForwardUsername('');
     } catch (err: any) {
-      setForwardError(err?.message || 'Failed to forward message');
+      setForwardError(userMessage(err, "Couldn't forward that message. Please try again."));
     }
   }
 
@@ -908,7 +909,7 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
       setText(trimmed);
       setTaggedUser(savedTagged);
       if (editTarget) setEditingMessage(editTarget);
-      setSendError(err?.message || 'Failed to send message');
+      setSendError(userMessage(err, "Couldn't send your message. Check your connection and try again."));
     } finally {
       setSending(false);
     }
@@ -941,7 +942,7 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
       );
       await loadMessages();
     } catch (err: any) {
-      setSendError(err?.message || `Failed to send ${contentType}`);
+      setSendError(userMessage(err, `Couldn't send that ${contentType}. Check your connection and try again.`));
     } finally {
       setSending(false);
     }
@@ -964,7 +965,7 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
       await uploadGroupMedia(token, group.id, file, ct, file.name);
       await loadMessages();
     } catch (err: any) {
-      setSendError(err?.message || 'Failed to send file');
+      setSendError(userMessage(err, "Couldn't send that file. Check your connection and try again."));
     } finally {
       setPending(prev => prev.filter(p => p.localId !== localId));
     }
@@ -981,7 +982,7 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
       await uploadGroupMedia(token, group.id, file, ct, file.name, kind);
       await loadMessages();
     } catch (err: any) {
-      setSendError(err?.message || 'Failed to send file');
+      setSendError(userMessage(err, "Couldn't send that file. Check your connection and try again."));
     } finally {
       setPending(prev => prev.filter(p => p.localId !== localId));
     }

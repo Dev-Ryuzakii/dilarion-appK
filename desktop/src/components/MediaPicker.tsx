@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { searchGifs, getTrendingGifs, GifResult } from '../services/api';
 import { EMOJI_CATEGORIES, searchEmoji } from './emojiCatalog';
 import { STICKERS } from './stickers';
+import { userMessage } from '../services/errors';
 
 type PickerTab = 'emoji' | 'gif' | 'sticker';
 
@@ -47,7 +48,7 @@ export default function MediaPicker({
     const fetcher = query.trim() ? searchGifs(token, query.trim()) : getTrendingGifs(token);
     fetcher
       .then(setGifs)
-      .catch(err => setGifsError(err?.message || 'GIF search unavailable'))
+      .catch(err => setGifsError(userMessage(err, "Couldn't load GIFs right now. Please try again.")))
       .finally(() => setGifsLoading(false));
   }, [tab, query, token]);
 

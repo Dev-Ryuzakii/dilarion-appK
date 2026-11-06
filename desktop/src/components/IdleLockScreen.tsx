@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { login } from '../services/api';
 import { LockIcon } from './Icons';
+import { userMessage } from '../services/errors';
 
 // Shown after the idle timeout logs the user out. Asks for the access token
 // (same as the username/token sign-in) and starts a fresh session.
@@ -25,7 +26,7 @@ export default function IdleLockScreen({ username, onUnlocked, onSwitchAccount }
       setAccessToken('');
       onUnlocked(sessionToken, username);
     } catch (err: any) {
-      setError(err?.message || 'Invalid access token');
+      setError(userMessage(err, 'That access token is incorrect. Please try again.'));
     } finally {
       setBusy(false);
     }

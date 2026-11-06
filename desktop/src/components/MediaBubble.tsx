@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { downloadMedia, downloadDecoyFile, downloadDecoyVoice, downloadDecoyImage, confirmMasterToken, documentQACopilot, transcribeCopilot } from '../services/api';
 import { CameraIcon, MicIcon as MicIconSvg, PaperclipIcon as PaperclipIconSvg, SpinnerIcon, CloseIcon, SparkleIcon } from './Icons';
 import CopilotResultModal from './CopilotResultModal';
+import { userMessage } from '../services/errors';
 
 /** Best-effort check that bytes are readable text, not binary — Document Q&A
  * only makes sense for text content, and there's no server-side extraction
@@ -260,7 +261,7 @@ function VoiceBubble({ token, mediaId, masterToken, onMasterTokenSaved, isMine, 
         setStage('ready');
       } catch (err: any) {
         if (cancelled) return;
-        setError(err?.message || 'Failed to load — check connection');
+        setError(userMessage(err, "Couldn't load this. Check your connection and try again."));
         setStage('error');
       }
     })();
@@ -335,7 +336,7 @@ function VoiceBubble({ token, mediaId, masterToken, onMasterTokenSaved, isMine, 
       setRevealing(false);
       // 410/404: the real file is already gone server-side. The decoy stays
       // exactly as it was — not an error state, nothing to change.
-      if (err?.status !== 410 && err?.status !== 404) setError('Failed to reveal');
+      if (err?.status !== 410 && err?.status !== 404) setError("Couldn't reveal this. Please try again.");
     }
   }
 
@@ -360,7 +361,7 @@ function VoiceBubble({ token, mediaId, masterToken, onMasterTokenSaved, isMine, 
       const text = await transcribeCopilot(token, blob, `voice.${meta.mime.split('/')[1] || 'm4a'}`);
       setTranscript({ loading: false, error: null, content: text || 'No speech detected.' });
     } catch (err: any) {
-      setTranscript({ loading: false, error: err?.message || 'Failed to transcribe', content: null });
+      setTranscript({ loading: false, error: userMessage(err, "Couldn't transcribe this recording. Please try again."), content: null });
     } finally {
       setTranscribing(false);
     }
@@ -634,7 +635,7 @@ function VisualMediaBubble({
       setStage('decoy');
       if (openViewer) setViewerOpen(true);
     } catch {
-      setError('Failed to load');
+      setError("Couldn't load this. Check your connection and try again.");
       setStage('idle');
     }
   }
@@ -672,7 +673,7 @@ function VisualMediaBubble({
       if (err?.status === 410 || err?.status === 404) {
         setStage('decoy');
       } else {
-        setError('Failed to reveal');
+        setError("Couldn't reveal this. Please try again.");
         setStage('decoy');
       }
     }
@@ -852,7 +853,7 @@ export function DocumentBubble({
       setViewerUrl(toDataUrl(buf, 'application/pdf'));
       setStage('decoy');
     } catch {
-      setError('Failed to load');
+      setError("Couldn't load this. Check your connection and try again.");
       setStage('idle');
     }
   }
@@ -884,7 +885,7 @@ export function DocumentBubble({
       if (err?.status === 410 || err?.status === 404) {
         setStage('decoy');
       } else {
-        setError('Failed to reveal');
+        setError("Couldn't reveal this. Please try again.");
         setStage('decoy');
       }
     }
@@ -924,7 +925,7 @@ export function DocumentBubble({
       const answer = await documentQACopilot(token, documentText, question.trim());
       setQaResult({ title: 'Document Q&A', loading: false, error: null, content: answer });
     } catch (err: any) {
-      setQaResult({ title: 'Document Q&A', loading: false, error: err?.message || 'Failed to answer', content: null });
+      setQaResult({ title: 'Document Q&A', loading: false, error: userMessage(err, "Couldn't answer that. Please try again."), content: null });
     }
   }
 

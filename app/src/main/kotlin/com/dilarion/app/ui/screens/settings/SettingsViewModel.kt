@@ -24,6 +24,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.io.File
 import javax.inject.Inject
+import com.dilarion.app.utils.toUserMessage
 
 data class SettingsUiState(
     val username: String = "",
@@ -222,11 +223,11 @@ class SettingsViewModel @Inject constructor(
                 val resp = apiService.uploadVoiceIdentity(bearer, filePart)
                 file.delete()
                 if (!resp.isSuccessful) {
-                    throw IllegalStateException(resp.errorBody().parseErrorDetail("Failed to save voice sample (${resp.code()})"))
+                    throw IllegalStateException(resp.errorBody().parseErrorDetail("Couldn't save your voice sample. Please try again."))
                 }
                 _uiState.value = _uiState.value.copy(voiceIdentityUploading = false, voiceIdentityEnrolled = true)
             }.onFailure { e ->
-                _uiState.value = _uiState.value.copy(voiceIdentityUploading = false, voiceIdentityError = e.message)
+                _uiState.value = _uiState.value.copy(voiceIdentityUploading = false, voiceIdentityError = e.toUserMessage(e.message ?: "Couldn't save your voice sample. Please try again."))
             }
         }
     }
@@ -265,11 +266,11 @@ class SettingsViewModel @Inject constructor(
             runCatching {
                 val resp = apiService.enableMasterToken2FA(bearer, MasterToken2FAEnableRequest(masterToken, twoFaPassword))
                 if (!resp.isSuccessful) {
-                    throw IllegalStateException(resp.errorBody().parseErrorDetail("Failed to enable 2FA (${resp.code()})"))
+                    throw IllegalStateException(resp.errorBody().parseErrorDetail("Couldn't enable 2FA. Please try again."))
                 }
                 _uiState.value = _uiState.value.copy(twoFaLoading = false, twoFaEnabled = true)
             }.onFailure { e ->
-                _uiState.value = _uiState.value.copy(twoFaLoading = false, twoFaError = e.message)
+                _uiState.value = _uiState.value.copy(twoFaLoading = false, twoFaError = e.toUserMessage(e.message ?: "Couldn't enable 2FA. Please try again."))
             }
         }
     }
@@ -282,11 +283,11 @@ class SettingsViewModel @Inject constructor(
             runCatching {
                 val resp = apiService.disableMasterToken2FA(bearer, MasterToken2FADisableRequest(twoFaPassword))
                 if (!resp.isSuccessful) {
-                    throw IllegalStateException(resp.errorBody().parseErrorDetail("Failed to disable 2FA (${resp.code()})"))
+                    throw IllegalStateException(resp.errorBody().parseErrorDetail("Couldn't disable 2FA. Please try again."))
                 }
                 _uiState.value = _uiState.value.copy(twoFaLoading = false, twoFaEnabled = false)
             }.onFailure { e ->
-                _uiState.value = _uiState.value.copy(twoFaLoading = false, twoFaError = e.message)
+                _uiState.value = _uiState.value.copy(twoFaLoading = false, twoFaError = e.toUserMessage(e.message ?: "Couldn't disable 2FA. Please try again."))
             }
         }
     }
@@ -300,11 +301,11 @@ class SettingsViewModel @Inject constructor(
             runCatching {
                 val resp = apiService.requestAccountDeletion(bearer, AccountDeletionRequestCreate(reason?.takeIf { it.isNotBlank() }))
                 if (!resp.isSuccessful) {
-                    throw IllegalStateException(resp.errorBody().parseErrorDetail("Failed to submit request (${resp.code()})"))
+                    throw IllegalStateException(resp.errorBody().parseErrorDetail("Couldn't submit your request. Please try again."))
                 }
                 _uiState.value = _uiState.value.copy(deletionLoading = false, deletionStatus = "pending")
             }.onFailure { e ->
-                _uiState.value = _uiState.value.copy(deletionLoading = false, deletionError = e.message)
+                _uiState.value = _uiState.value.copy(deletionLoading = false, deletionError = e.toUserMessage(e.message ?: "Couldn't submit your request. Please try again."))
             }
         }
     }
@@ -372,11 +373,11 @@ class SettingsViewModel @Inject constructor(
                     sessionManager.updateUsername(trimmed)
                     _uiState.value = _uiState.value.copy(usernameSaving = false, usernameChanged = true)
                 } else {
-                    val msg = response.errorBody().parseErrorDetail("Failed to update username")
+                    val msg = response.errorBody().parseErrorDetail("Couldn't update your username. Please try again.")
                     _uiState.value = _uiState.value.copy(usernameSaving = false, usernameError = msg)
                 }
             }.onFailure { e ->
-                _uiState.value = _uiState.value.copy(usernameSaving = false, usernameError = e.message ?: "Network error")
+                _uiState.value = _uiState.value.copy(usernameSaving = false, usernameError = e.toUserMessage(e.message ?: "Couldn't update your username. Please try again."))
             }
         }
     }
@@ -403,7 +404,7 @@ class SettingsViewModel @Inject constructor(
                     }
                 }
                 .onFailure { e ->
-                    _uiState.value = _uiState.value.copy(recoveryCodeBusy = false, recoveryCodeError = e.message ?: "Network error")
+                    _uiState.value = _uiState.value.copy(recoveryCodeBusy = false, recoveryCodeError = e.toUserMessage(e.message ?: "Couldn't generate a new recovery code. Please try again."))
                 }
         }
     }
@@ -424,7 +425,7 @@ class SettingsViewModel @Inject constructor(
                 val filePart = MultipartBody.Part.createFormData("file", "profile.jpg", requestFile)
                 val resp = apiService.uploadProfilePicture(bearer, filePart)
                 if (!resp.isSuccessful) {
-                    throw IllegalStateException(resp.errorBody().parseErrorDetail("Failed to upload (${resp.code()})"))
+                    throw IllegalStateException(resp.errorBody().parseErrorDetail("Couldn't upload that picture. Please try again."))
                 }
                 _uiState.value = _uiState.value.copy(
                     profilePictureBusy = false,
@@ -432,7 +433,7 @@ class SettingsViewModel @Inject constructor(
                     profilePictureVersion = _uiState.value.profilePictureVersion + 1,
                 )
             }.onFailure { e ->
-                _uiState.value = _uiState.value.copy(profilePictureBusy = false, profilePictureError = e.message)
+                _uiState.value = _uiState.value.copy(profilePictureBusy = false, profilePictureError = e.toUserMessage("Couldn't upload that picture. Please try again."))
             }
         }
     }
@@ -449,7 +450,7 @@ class SettingsViewModel @Inject constructor(
                         profilePictureVersion = _uiState.value.profilePictureVersion + 1,
                     )
                 }
-                .onFailure { e -> _uiState.value = _uiState.value.copy(profilePictureBusy = false, profilePictureError = e.message) }
+                .onFailure { e -> _uiState.value = _uiState.value.copy(profilePictureBusy = false, profilePictureError = e.toUserMessage("Couldn't remove your picture. Please try again.")) }
         }
     }
 
@@ -467,10 +468,10 @@ class SettingsViewModel @Inject constructor(
                 if (resp.isSuccessful) {
                     _uiState.value = _uiState.value.copy(availabilityBusy = false, availabilityStatus = status, statusText = statusText ?: "")
                 } else {
-                    _uiState.value = _uiState.value.copy(availabilityBusy = false, availabilityError = "Failed to update status")
+                    _uiState.value = _uiState.value.copy(availabilityBusy = false, availabilityError = "Couldn't update your status. Please try again.")
                 }
             }.onFailure { e ->
-                _uiState.value = _uiState.value.copy(availabilityBusy = false, availabilityError = e.message)
+                _uiState.value = _uiState.value.copy(availabilityBusy = false, availabilityError = e.toUserMessage("Couldn't update your status. Please try again."))
             }
         }
     }

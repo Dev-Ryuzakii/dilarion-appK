@@ -23,6 +23,7 @@ import org.webrtc.EglBase
 import org.webrtc.IceCandidate
 import org.webrtc.VideoTrack
 import javax.inject.Inject
+import com.dilarion.app.utils.toUserMessage
 
 enum class CallState { IDLE, CALLING, RINGING, CONNECTED, INCOMING, ENDED }
 enum class CallType { VOICE, VIDEO }
@@ -135,11 +136,11 @@ class CallViewModel @Inject constructor(
                     pollForAnswer(token, callId)
                 } else {
                     teardownMedia()
-                    _uiState.value = _uiState.value.copy(error = "Failed to initiate call", state = CallState.ENDED)
+                    _uiState.value = _uiState.value.copy(error = "Couldn't start the call. Check your connection and retry.", state = CallState.ENDED)
                 }
             }.onFailure { e ->
                 teardownMedia()
-                _uiState.value = _uiState.value.copy(error = e.message, state = CallState.ENDED)
+                _uiState.value = _uiState.value.copy(error = e.toUserMessage("Couldn't connect to the call. Check your connection and retry."), state = CallState.ENDED)
             }
         }
     }
@@ -169,7 +170,7 @@ class CallViewModel @Inject constructor(
                     viewModelScope.launch { sendIceCandidate(incoming.callerUsername, candidate) }
                 })
             }.onFailure { e ->
-                _uiState.value = _uiState.value.copy(error = e.message)
+                _uiState.value = _uiState.value.copy(error = e.toUserMessage("Couldn't connect to the call. Check your connection and retry."))
             }
         }
         // Tell caller our device is ringing
@@ -225,8 +226,8 @@ class CallViewModel @Inject constructor(
                 if (!resp.isSuccessful) {
                     throw Exception(
                         when (resp.code()) {
-                            404 -> "Call no longer exists"
-                            else -> "Could not accept call (${resp.code()})"
+                            404 -> "This call is no longer available."
+                            else -> "Couldn't connect to the call. Check your connection and retry."
                         }
                     )
                 }
@@ -241,7 +242,7 @@ class CallViewModel @Inject constructor(
                 // Unrecoverable — the caller was never told, so do not sit in a
                 // half-open state pretending to be connected.
                 teardownMedia()
-                _uiState.value = _uiState.value.copy(state = CallState.ENDED, error = e.message)
+                _uiState.value = _uiState.value.copy(state = CallState.ENDED, error = e.toUserMessage("Couldn't connect to the call. Check your connection and retry."))
             }
         }
     }
@@ -657,8 +658,8 @@ class CallViewModel @Inject constructor(
                     "device_name" to presenceService.deviceName,
                 ),
             )
-            if (resp.code() == 401) return "Master token rejected"
-            if (!resp.isSuccessful) return "Could not join the call (${resp.code()})"
+            if (resp.code() == 401) return "That master token is incorrect. Please try again."
+            if (!resp.isSuccessful) return "Couldn't connect to the call. Check your connection and retry."
 
             val participants = resp.body()?.getAsJsonArray("participants")
                 ?.map { it.asString } ?: emptyList()
@@ -676,7 +677,7 @@ class CallViewModel @Inject constructor(
             rememberSession()
             startTimer()
             null
-        }.getOrElse { it.message ?: "Could not join the call" }
+        }.getOrElse { it.toUserMessage("Couldn't connect to the call. Check your connection and retry.") }
     }
 
     /**
@@ -696,10 +697,10 @@ class CallViewModel @Inject constructor(
                     "device_name" to presenceService.deviceName,
                 ),
             )
-            if (resp.code() == 401) return "Master token rejected"
-            if (!resp.isSuccessful) return "Could not join the call (${resp.code()})"
+            if (resp.code() == 401) return "That master token is incorrect. Please try again."
+            if (!resp.isSuccessful) return "Couldn't connect to the call. Check your connection and retry."
             null
-        }.getOrElse { it.message ?: "Could not join the call" }
+        }.getOrElse { it.toUserMessage("Couldn't connect to the call. Check your connection and retry.") }
     }
 
     /**
@@ -741,7 +742,7 @@ class CallViewModel @Inject constructor(
                 }
             }.onFailure { e ->
                 _uiState.value = _uiState.value.copy(
-                    error = e.message ?: "Could not start meeting",
+                    error = e.toUserMessage("Couldn't start the meeting. Please try again."),
                     state = CallState.ENDED,
                 )
             }
@@ -784,7 +785,7 @@ class CallViewModel @Inject constructor(
                 rememberSession()
                 startTimer()
             }.onFailure { e ->
-                onError(e.message ?: "Could not join the meeting")
+                onError(e.toUserMessage("Couldn't join the meeting. Check your connection and retry."))
             }
         }
     }

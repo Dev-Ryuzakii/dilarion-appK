@@ -14,6 +14,7 @@ import {
 import { presenceService, WsMessage } from '../services/presence';
 import WhiteboardModal from './WhiteboardModal';
 import MeetingChatPanel from './MeetingChatPanel';
+import { userMessage } from '../services/errors';
 
 // Group video via self-hosted LiveKit — the SFU room every group call (2+
 // people) now renders through, replacing the old mesh-WebRTC conference path
@@ -301,7 +302,7 @@ export default function GalleryView({
         setConnecting(false);
       } catch (err: any) {
         if (!cancelled) {
-          setError(err?.message || 'Failed to join group video');
+          setError(userMessage(err, "Couldn't join the group video call. Check your connection and retry."));
           setConnecting(false);
         }
       }
@@ -420,7 +421,7 @@ export default function GalleryView({
         setRecording(true);
       }
     } catch (err: any) {
-      setRecordingError(err?.message || 'Recording failed');
+      setRecordingError(userMessage(err, "Couldn't start recording. Please try again."));
     }
     setRecordingBusy(false);
   }
@@ -433,7 +434,7 @@ export default function GalleryView({
       setBreakoutActive(true);
       setShowBreakoutPanel(false);
     } catch (err: any) {
-      setBreakoutError(err?.message || 'Failed to start breakout rooms');
+      setBreakoutError(userMessage(err, "Couldn't start breakout rooms. Please try again."));
     } finally {
       setBreakoutBusy(false);
     }
@@ -449,7 +450,7 @@ export default function GalleryView({
       setBreakoutActive(true);
       setShowBreakoutPanel(false);
     } catch (err: any) {
-      setBreakoutError(err?.message || 'Failed to start breakout rooms');
+      setBreakoutError(userMessage(err, "Couldn't start breakout rooms. Please try again."));
     } finally {
       setBreakoutBusy(false);
     }
@@ -464,7 +465,7 @@ export default function GalleryView({
       setInBreakoutName(null);
       setActiveConferenceId(conferenceId);
     } catch (err: any) {
-      setBreakoutError(err?.message || 'Failed to end breakout rooms');
+      setBreakoutError(userMessage(err, "Couldn't end breakout rooms. Please try again."));
     } finally {
       setBreakoutBusy(false);
     }
@@ -575,7 +576,7 @@ export default function GalleryView({
       await requestRemoteControl(token, conferenceId, targetUsername);
     } catch (err: any) {
       setControlRequestBusy(false);
-      setControlError(err?.message || 'Failed to request control');
+      setControlError(userMessage(err, "Couldn't request control. Please try again."));
     }
   }
 
@@ -656,7 +657,7 @@ export default function GalleryView({
     try {
       await apiConferenceInvite(token, conferenceId, username);
     } catch (err: any) {
-      setAddError(err?.message || `Could not invite ${username}`);
+      setAddError(userMessage(err, `Couldn't invite ${username}. Please try again.`));
     } finally {
       setInviting(null);
     }

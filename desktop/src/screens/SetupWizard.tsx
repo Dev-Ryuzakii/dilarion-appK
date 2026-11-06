@@ -5,6 +5,7 @@ import {
   getMasterToken2FAStatus, enableMasterToken2FA,
   confirmMasterToken,
 } from '../services/api';
+import { userMessage } from '../services/errors';
 
 /**
  * First-run security setup, shown after the profile/camera onboarding and on
@@ -139,7 +140,7 @@ function VoiceStep({ token, onDone, onSkip }: { token: string; onDone: () => voi
       await uploadVoiceIdentity(token, blob, 'voice_identity.webm');
       onDone();
     } catch (e: any) {
-      setError(e?.message || 'Could not save your voice recording');
+      setError(userMessage(e, "Couldn't save your voice recording. Please try again."));
     } finally {
       setBusy(false);
     }
@@ -189,7 +190,7 @@ function MasterStep({ token, onDone, onSkip }: { token: string; onDone: (mt: str
       await createMasterToken(token, v);
       onDone(v);
     } catch (e: any) {
-      setError(e?.message || 'Could not set your master token');
+      setError(userMessage(e, "Couldn't set your master token. Please try again."));
     } finally {
       setBusy(false);
     }
@@ -232,7 +233,7 @@ function TwoFaStep({ token, presetMaster, onDone, onSkip }: { token: string; pre
       await enableMasterToken2FA(token, m, pw.trim());
       onDone();
     } catch (e: any) {
-      setError(e?.message || 'Could not enable 2FA');
+      setError(userMessage(e, "Couldn't enable 2FA. Please try again."));
     } finally {
       setBusy(false);
     }

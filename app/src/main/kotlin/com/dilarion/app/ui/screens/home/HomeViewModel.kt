@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import com.dilarion.app.utils.toUserMessage
 
 data class HomeUiState(
     val isLoading: Boolean = true,
@@ -62,7 +63,7 @@ class HomeViewModel @Inject constructor(
                     groups    = groupsResp.body() ?: emptyList(),
                 )
             }.onFailure { e ->
-                _uiState.value = _uiState.value.copy(isLoading = false, error = e.message)
+                _uiState.value = _uiState.value.copy(isLoading = false, error = e.toUserMessage("Couldn't load your chats. Check your connection and try again."))
             }
         }
     }
@@ -77,7 +78,7 @@ class HomeViewModel @Inject constructor(
                 val history = resp.body()?.calls ?: emptyList()
                 _uiState.value = _uiState.value.copy(callHistory = history, isCallHistoryLoading = false)
             }.onFailure {
-                _uiState.value = _uiState.value.copy(isCallHistoryLoading = false, error = it.message)
+                _uiState.value = _uiState.value.copy(isCallHistoryLoading = false, error = it.toUserMessage("Couldn't load your call history. Check your connection and try again."))
             }
         }
     }

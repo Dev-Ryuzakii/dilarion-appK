@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import com.dilarion.app.utils.toUserMessage
 
 data class AuthUiState(
     val isLoading: Boolean = false,
@@ -83,7 +84,7 @@ class AuthViewModel @Inject constructor(
                         409  -> errorBody(response.errorBody()?.string()) ?: "This account is already signed in on another phone"
                         422  -> errorBody(response.errorBody()?.string()) ?: "Check the login fields and try again"
                         500  -> "Server error. Try again."
-                        else -> errorBody(response.errorBody()?.string()) ?: "Login failed (${response.code()})"
+                        else -> errorBody(response.errorBody()?.string()) ?: "Couldn't sign you in. Please try again."
                     }
                     _uiState.value = AuthUiState(error = msg)
                     return@launch
@@ -91,13 +92,13 @@ class AuthViewModel @Inject constructor(
                 val body = response.body()!!
                 val sessionToken = body.sessionToken
                 if (sessionToken.isNullOrBlank()) {
-                    _uiState.value = AuthUiState(error = "Server returned no session token")
+                    _uiState.value = AuthUiState(error = "Something went wrong signing you in. Please try again.")
                     return@launch
                 }
                 establishSession(sessionToken, body.username, body.onboardingRequired)
                 _uiState.value = AuthUiState(success = true, onboardingRequired = body.onboardingRequired)
             }.onFailure { e ->
-                _uiState.value = AuthUiState(error = e.message ?: "Network error")
+                _uiState.value = AuthUiState(error = e.toUserMessage("Can't reach the server. Check your connection and try again."))
             }
         }
     }
@@ -120,7 +121,7 @@ class AuthViewModel @Inject constructor(
                     com.dilarion.app.data.model.ActivationRequest(cleanCode, token)
                 )
                 if (!response.isSuccessful) {
-                    val msg = errorBody(response.errorBody()?.string()) ?: "Activation failed (${response.code()})"
+                    val msg = errorBody(response.errorBody()?.string()) ?: "Couldn't activate your account. Please check the code and try again."
                     _uiState.value = AuthUiState(error = msg)
                     return@launch
                 }
@@ -133,7 +134,7 @@ class AuthViewModel @Inject constructor(
                     activated = true,
                 )
             }.onFailure { e ->
-                _uiState.value = AuthUiState(error = e.message ?: "Network error")
+                _uiState.value = AuthUiState(error = e.toUserMessage("Can't reach the server. Check your connection and try again."))
             }
         }
     }
@@ -192,7 +193,7 @@ class AuthViewModel @Inject constructor(
                     com.dilarion.app.data.model.SignUpRequest(username.trim(), phoneNumber.trim(), token.trim())
                 )
                 if (!response.isSuccessful) {
-                    val msg = errorBody(response.errorBody()?.string()) ?: "Failed to create account (${response.code()})"
+                    val msg = errorBody(response.errorBody()?.string()) ?: "Couldn't create your account. Please try again."
                     _uiState.value = AuthUiState(error = msg)
                     return@launch
                 }
@@ -202,7 +203,7 @@ class AuthViewModel @Inject constructor(
                     revealedRecoveryCode = body.recoveryCode,
                 )
             }.onFailure { e ->
-                _uiState.value = AuthUiState(error = e.message ?: "Network error")
+                _uiState.value = AuthUiState(error = e.toUserMessage("Can't reach the server. Check your connection and try again."))
             }
         }
     }
@@ -229,7 +230,7 @@ class AuthViewModel @Inject constructor(
                     revealedRecoveryCode = body.recoveryCode,
                 )
             }.onFailure { e ->
-                _uiState.value = AuthUiState(error = e.message ?: "Network error")
+                _uiState.value = AuthUiState(error = e.toUserMessage("Can't reach the server. Check your connection and try again."))
             }
         }
     }

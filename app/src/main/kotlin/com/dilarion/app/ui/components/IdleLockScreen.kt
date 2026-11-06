@@ -33,6 +33,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import com.dilarion.app.utils.toUserMessage
 
 @HiltViewModel
 class IdleLockViewModel @Inject constructor(
@@ -66,13 +67,13 @@ class IdleLockViewModel @Inject constructor(
                         IdleLogoutManager.unlock(context)
                     } else {
                         error = when (resp.code()) {
-                            401 -> "Invalid access token"
+                            401 -> "That access token is incorrect. Please try again."
                             409 -> "This account is now signed in on another phone"
-                            else -> "Sign-in failed (${resp.code()})"
+                            else -> "Couldn't sign you in. Please try again."
                         }
                     }
                 }
-                .onFailure { error = it.message ?: "Network error" }
+                .onFailure { error = it.toUserMessage("Couldn't sign you in. Check your connection and try again.") }
             busy = false
         }
     }

@@ -113,7 +113,7 @@ class GroupManageViewModel @Inject constructor(
             }.getOrNull()
             val g = resp?.body()
             _uiState.value = if (resp?.isSuccessful == true && g != null) _uiState.value.copy(busy = false, openedGroup = g)
-            else _uiState.value.copy(busy = false, error = errorOf(resp, "Failed to create group"))
+            else _uiState.value.copy(busy = false, error = errorOf(resp, "Couldn't create the group. Please try again."))
         }
     }
 
@@ -124,7 +124,7 @@ class GroupManageViewModel @Inject constructor(
             _uiState.value = _uiState.value.copy(busy = true, error = null, preview = null)
             val resp = runCatching { apiService.previewGroupInvite(b, normalizeInviteCode(code)) }.getOrNull()
             _uiState.value = if (resp?.isSuccessful == true) _uiState.value.copy(busy = false, preview = resp.body())
-            else _uiState.value.copy(busy = false, error = errorOf(resp, "Invite link is invalid or has been reset"))
+            else _uiState.value.copy(busy = false, error = errorOf(resp, "That invite link is invalid or has expired."))
         }
     }
 
@@ -135,7 +135,7 @@ class GroupManageViewModel @Inject constructor(
             val resp = runCatching { apiService.joinGroupViaInvite(b, normalizeInviteCode(code)) }.getOrNull()
             val g = resp?.body()
             _uiState.value = if (resp?.isSuccessful == true && g != null) _uiState.value.copy(busy = false, openedGroup = g)
-            else _uiState.value.copy(busy = false, error = errorOf(resp, "Failed to join group"))
+            else _uiState.value.copy(busy = false, error = errorOf(resp, "Couldn't join the group. Please try again."))
         }
     }
 
@@ -147,7 +147,7 @@ class GroupManageViewModel @Inject constructor(
                 apiService.updateGroup(b, gid, GroupUpdateRequest(name = name.trim(), description = description.trim()))
             }.getOrNull()
             _uiState.value = if (resp?.isSuccessful == true) _uiState.value.copy(group = resp.body())
-            else _uiState.value.copy(error = errorOf(resp, "Failed to save"))
+            else _uiState.value.copy(error = errorOf(resp, "Couldn't save your changes. Please try again."))
         }
     }
 
@@ -159,7 +159,7 @@ class GroupManageViewModel @Inject constructor(
             val req = if (hours == null) GroupUpdateRequest(clearDisappear = true) else GroupUpdateRequest(disappearAfterHours = hours)
             val resp = runCatching { apiService.updateGroup(b, gid, req) }.getOrNull()
             _uiState.value = if (resp?.isSuccessful == true) _uiState.value.copy(group = resp.body())
-            else _uiState.value.copy(error = errorOf(resp, "Failed to change timer"))
+            else _uiState.value.copy(error = errorOf(resp, "Couldn't change the timer. Please try again."))
         }
     }
 
@@ -171,7 +171,7 @@ class GroupManageViewModel @Inject constructor(
                 if (reset) apiService.resetGroupInvite(b, gid) else apiService.getGroupInvite(b, gid)
             }.getOrNull()
             _uiState.value = if (resp?.isSuccessful == true) _uiState.value.copy(invite = resp.body())
-            else _uiState.value.copy(error = errorOf(resp, "Failed to load invite link"))
+            else _uiState.value.copy(error = errorOf(resp, "Couldn't load the invite link. Please try again."))
         }
     }
 
@@ -194,7 +194,7 @@ class GroupManageViewModel @Inject constructor(
             var failure: String? = null
             for (u in usernames) {
                 val resp = runCatching { apiService.addGroupMember(b, gid, u) }.getOrNull()
-                if (resp?.isSuccessful != true) failure = errorOf(resp, "Failed to add $u")
+                if (resp?.isSuccessful != true) failure = errorOf(resp, "Couldn't add $u. Please try again.")
             }
             _uiState.value = _uiState.value.copy(busy = false, error = failure)
             load(gid)
@@ -211,7 +211,7 @@ class GroupManageViewModel @Inject constructor(
             val b = bearer() ?: return@launch
             val resp = runCatching { apiService.leaveGroup(b, gid) }.getOrNull()
             _uiState.value = if (resp?.isSuccessful == true) _uiState.value.copy(gone = true)
-            else _uiState.value.copy(error = errorOf(resp, "Failed to leave group"))
+            else _uiState.value.copy(error = errorOf(resp, "Couldn't leave the group. Please try again."))
         }
     }
 
@@ -221,7 +221,7 @@ class GroupManageViewModel @Inject constructor(
             val b = bearer() ?: return@launch
             val resp = runCatching { apiService.deleteGroup(b, gid) }.getOrNull()
             _uiState.value = if (resp?.isSuccessful == true) _uiState.value.copy(gone = true)
-            else _uiState.value.copy(error = errorOf(resp, "Failed to delete group"))
+            else _uiState.value.copy(error = errorOf(resp, "Couldn't delete the group. Please try again."))
         }
     }
 }

@@ -22,6 +22,7 @@ import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.asRequestBody
 import java.io.File
 import javax.inject.Inject
+import com.dilarion.app.utils.toUserMessage
 
 enum class SetupStep { VOICE, MASTER, TWOFA }
 
@@ -144,12 +145,12 @@ class SecuritySetupViewModel @Inject constructor(
                 val part = MultipartBody.Part.createFormData("file", file.name, body)
                 val resp = apiService.uploadVoiceIdentity(bearer, part)
                 file.delete()
-                if (!resp.isSuccessful) throw IllegalStateException(resp.errorBody().parseErrorDetail("Failed to save voice sample (${resp.code()})"))
+                if (!resp.isSuccessful) throw IllegalStateException(resp.errorBody().parseErrorDetail("Couldn't save your voice sample. Please try again."))
             }.onSuccess {
                 _uiState.value = _uiState.value.copy(uploading = false)
                 advance()
             }.onFailure { e ->
-                _uiState.value = _uiState.value.copy(uploading = false, error = e.message)
+                _uiState.value = _uiState.value.copy(uploading = false, error = e.toUserMessage(e.message ?: "Couldn't save your voice sample. Please try again."))
             }
         }
     }
@@ -172,14 +173,14 @@ class SecuritySetupViewModel @Inject constructor(
             _uiState.value = _uiState.value.copy(busy = true, error = null)
             runCatching {
                 val resp = apiService.createMasterToken(bearer, MasterTokenRequest(v))
-                if (!resp.isSuccessful) throw IllegalStateException(resp.errorBody().parseErrorDetail("Failed to set master token (${resp.code()})"))
+                if (!resp.isSuccessful) throw IllegalStateException(resp.errorBody().parseErrorDetail("Couldn't set your master token. Please try again."))
             }.onSuccess {
                 pendingMaster = v
                 sessionManager.saveMasterToken(v)
                 _uiState.value = _uiState.value.copy(busy = false)
                 advance()
             }.onFailure { e ->
-                _uiState.value = _uiState.value.copy(busy = false, error = e.message)
+                _uiState.value = _uiState.value.copy(busy = false, error = e.toUserMessage(e.message ?: "Couldn't set your master token. Please try again."))
             }
         }
     }
@@ -199,12 +200,12 @@ class SecuritySetupViewModel @Inject constructor(
                 val confirmResp = apiService.confirmMasterToken(bearer, MasterTokenRequest(m))
                 if (!confirmResp.isSuccessful) throw IllegalStateException("That master token is incorrect")
                 val resp = apiService.enableMasterToken2FA(bearer, MasterToken2FAEnableRequest(m, password.trim()))
-                if (!resp.isSuccessful) throw IllegalStateException(resp.errorBody().parseErrorDetail("Failed to enable 2FA (${resp.code()})"))
+                if (!resp.isSuccessful) throw IllegalStateException(resp.errorBody().parseErrorDetail("Couldn't enable 2FA. Please try again."))
             }.onSuccess {
                 _uiState.value = _uiState.value.copy(busy = false)
                 advance()
             }.onFailure { e ->
-                _uiState.value = _uiState.value.copy(busy = false, error = e.message)
+                _uiState.value = _uiState.value.copy(busy = false, error = e.toUserMessage(e.message ?: "Couldn't enable 2FA. Please try again."))
             }
         }
     }

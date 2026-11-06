@@ -5,6 +5,7 @@ import {
   addTaskAssignees, deleteTask, getReportHistory, TaskReportRevision, downloadTaskReportDocx,
 } from '../services/api';
 import { saveBlob } from '../services/platform';
+import { userMessage } from '../services/errors';
 
 type StatusFilter = 'all' | 'open' | 'in_progress' | 'completed' | 'cancelled';
 
@@ -256,7 +257,7 @@ function TaskDetail({ task, myUsername, token, onChanged }: { task: TaskItem; my
       setShowAdd(false);
       onChanged();
     } catch (err: any) {
-      setError(err?.message || 'Failed to add people');
+      setError(userMessage(err, "Couldn't add those people. Please try again."));
     } finally {
       setBusy(false);
     }
@@ -270,7 +271,7 @@ function TaskDetail({ task, myUsername, token, onChanged }: { task: TaskItem; my
       await submitMyReport(token, task.task_id, myReportDraft.trim());
       onChanged();
     } catch (err: any) {
-      setError(err?.message || 'Failed to submit report');
+      setError(userMessage(err, "Couldn't submit your report. Please try again."));
     } finally {
       setBusy(false);
     }
@@ -284,7 +285,7 @@ function TaskDetail({ task, myUsername, token, onChanged }: { task: TaskItem; my
       await deleteTask(token, task.task_id);
       onChanged();
     } catch (err: any) {
-      setError(err?.message || 'Failed to delete task');
+      setError(userMessage(err, "Couldn't delete that task. Please try again."));
       setBusy(false);
     }
   }
@@ -296,7 +297,7 @@ function TaskDetail({ task, myUsername, token, onChanged }: { task: TaskItem; my
       await updateTaskStatus(token, task.task_id, status);
       onChanged();
     } catch (err: any) {
-      setError(err?.message || 'Failed to update status');
+      setError(userMessage(err, "Couldn't update the status. Please try again."));
     } finally {
       setBusy(false);
     }
@@ -309,7 +310,7 @@ function TaskDetail({ task, myUsername, token, onChanged }: { task: TaskItem; my
       await updateMyTaskStatus(token, task.task_id, status);
       onChanged();
     } catch (err: any) {
-      setError(err?.message || 'Failed to update status');
+      setError(userMessage(err, "Couldn't update the status. Please try again."));
     } finally {
       setBusy(false);
     }
@@ -324,7 +325,7 @@ function TaskDetail({ task, myUsername, token, onChanged }: { task: TaskItem; my
       await compileTask(token, task.task_id);
       onChanged();
     } catch (err: any) {
-      setError(err?.message || 'Failed to compile report');
+      setError(userMessage(err, "Couldn't compile the report. Please try again."));
     } finally {
       setBusy(false);
       setCompiling(false);
@@ -340,7 +341,7 @@ function TaskDetail({ task, myUsername, token, onChanged }: { task: TaskItem; my
       const path = await saveBlob(blob, filename);
       if (path) setNotice(`Saved to ${path}`);
     } catch (err: any) {
-      setError(err?.message || 'Failed to export report');
+      setError(userMessage(err, "Couldn't export the report. Please try again."));
     } finally {
       setBusy(false);
     }
@@ -753,7 +754,7 @@ function CreateTaskModal({ token, myUsername, groups, onClose, onCreated }: { to
       }
       onCreated();
     } catch (err: any) {
-      setError(err?.message || 'Failed to create task');
+      setError(userMessage(err, "Couldn't create that task. Please try again."));
     } finally {
       setSaving(false);
     }

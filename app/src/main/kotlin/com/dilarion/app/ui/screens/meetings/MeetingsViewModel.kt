@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import com.dilarion.app.utils.toUserMessage
 
 data class MeetingsUiState(
     val meetings: List<MeetingSummary> = emptyList(),
@@ -56,7 +57,7 @@ class MeetingsViewModel @Inject constructor(
                 val meetings = resp.body()?.meetings ?: emptyList()
                 _uiState.value = _uiState.value.copy(isLoading = false, meetings = meetings)
             }.onFailure { e ->
-                _uiState.value = _uiState.value.copy(isLoading = false, error = e.message)
+                _uiState.value = _uiState.value.copy(isLoading = false, error = e.toUserMessage("Couldn't load your meetings. Check your connection and try again."))
             }
         }
     }
@@ -122,7 +123,7 @@ class MeetingsViewModel @Inject constructor(
                 _uiState.value = _uiState.value.copy(scheduling = false, showForm = false, waitingRoomEnabled = false)
                 loadMeetings()
             }.onFailure { e ->
-                _uiState.value = _uiState.value.copy(scheduling = false, error = e.message ?: "Failed to schedule meeting")
+                _uiState.value = _uiState.value.copy(scheduling = false, error = e.toUserMessage("Couldn't schedule the meeting. Please try again."))
             }
         }
     }

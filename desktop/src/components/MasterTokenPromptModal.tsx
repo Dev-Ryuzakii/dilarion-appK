@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { confirmMasterToken } from '../services/api';
 import { CloseIcon, LockIcon } from './Icons';
+import { userMessage } from '../services/errors';
 
 /**
  * Shared gate for copilot actions that need plaintext of already-encrypted
@@ -33,8 +34,8 @@ export default function MasterTokenPromptModal({ token, onConfirmed, onCancel }:
         return;
       }
       onConfirmed(trimmed);
-    } catch {
-      setError('Failed to verify master token');
+    } catch (err) {
+      setError(userMessage(err, "Couldn't verify your master token. Check your connection and try again."));
     } finally {
       setLoading(false);
     }

@@ -119,7 +119,7 @@ object AppUpdater {
                 null
             }
             if (apk == null) {
-                Toast.makeText(activity, "Update download failed", Toast.LENGTH_SHORT).show()
+                Toast.makeText(activity, "Couldn't download the update. Check your connection and try again.", Toast.LENGTH_LONG).show()
                 return@launch
             }
             val uri = FileProvider.getUriForFile(activity, "${activity.packageName}.fileprovider", apk)

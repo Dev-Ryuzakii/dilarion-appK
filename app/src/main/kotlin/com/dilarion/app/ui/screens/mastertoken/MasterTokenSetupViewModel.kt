@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import com.dilarion.app.utils.toUserMessage
 
 data class MasterTokenUiState(
     val step: Step = Step.CREATE,
@@ -63,7 +64,7 @@ class MasterTokenSetupViewModel @Inject constructor(
                     step = MasterTokenUiState.Step.CONFIRM,
                 )
             }.onFailure { e ->
-                _uiState.value = _uiState.value.copy(isLoading = false, error = e.message)
+                _uiState.value = _uiState.value.copy(isLoading = false, error = e.toUserMessage("Couldn't create your master token. Please try again."))
             }
         }
     }
@@ -84,7 +85,7 @@ class MasterTokenSetupViewModel @Inject constructor(
                 sessionManager.saveMasterToken(token)
                 _uiState.value = _uiState.value.copy(isLoading = false, success = true)
             }.onFailure { e ->
-                _uiState.value = _uiState.value.copy(isLoading = false, error = e.message)
+                _uiState.value = _uiState.value.copy(isLoading = false, error = e.toUserMessage("Couldn't confirm your master token. Please try again."))
             }
         }
     }

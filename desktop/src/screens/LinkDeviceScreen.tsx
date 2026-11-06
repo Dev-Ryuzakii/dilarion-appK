@@ -5,6 +5,7 @@ import { platformName } from '../services/platform';
 import { generateKeyPair } from '../services/crypto';
 import { saveKeypair } from '../services/keys';
 import { linkStart, linkStatus } from '../services/api';
+import { userMessage } from '../services/errors';
 
 interface Props {
   onLinked: (token: string, username: string) => void;
@@ -79,7 +80,7 @@ export default function LinkDeviceScreen({ onLinked, onUsePassword, onActivate }
       } catch (e: any) {
         if (!cancelled) {
           clearTimeout(startTimeout);
-          setError(e?.message || 'Could not generate a link code. Is the server updated?');
+          setError(userMessage(e, "Couldn't generate a link code. Please try again in a moment."));
           setPhase('error');
         }
       }

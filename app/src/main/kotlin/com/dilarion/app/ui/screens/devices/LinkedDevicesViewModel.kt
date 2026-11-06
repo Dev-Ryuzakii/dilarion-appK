@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import com.dilarion.app.utils.toUserMessage
 
 data class LinkedDevicesUiState(
     val devices: List<MyDevice> = emptyList(),
@@ -37,7 +38,7 @@ class LinkedDevicesViewModel @Inject constructor(
             _uiState.value = _uiState.value.copy(loading = true, error = null)
             runCatching { apiService.getMyDevices("Bearer $token").body()?.devices ?: emptyList() }
                 .onSuccess { _uiState.value = _uiState.value.copy(devices = it, loading = false) }
-                .onFailure { _uiState.value = _uiState.value.copy(loading = false, error = it.message) }
+                .onFailure { _uiState.value = _uiState.value.copy(loading = false, error = it.toUserMessage("Couldn't load your devices. Check your connection and try again.")) }
         }
     }
 
@@ -60,12 +61,12 @@ class LinkedDevicesViewModel @Inject constructor(
                         val msg = when (resp.code()) {
                             404 -> "Link code not found or already used"
                             410 -> "Link code expired — regenerate it on the other device"
-                            else -> "Could not link device (${resp.code()})"
+                            else -> "Couldn't link that device. Please try again."
                         }
                         _uiState.value = _uiState.value.copy(error = msg)
                     }
                 }
-                .onFailure { _uiState.value = _uiState.value.copy(error = it.message) }
+                .onFailure { _uiState.value = _uiState.value.copy(error = it.toUserMessage("Couldn't link that device. Check your connection and try again.")) }
         }
     }
 
@@ -74,7 +75,7 @@ class LinkedDevicesViewModel @Inject constructor(
             val token = sessionManager.sessionToken.first() ?: return@launch
             runCatching { apiService.revokeDevice("Bearer $token", deviceUuid) }
                 .onSuccess { loadDevices() }
-                .onFailure { _uiState.value = _uiState.value.copy(error = it.message) }
+                .onFailure { _uiState.value = _uiState.value.copy(error = it.toUserMessage("Couldn't remove that device. Please try again.")) }
         }
     }
 

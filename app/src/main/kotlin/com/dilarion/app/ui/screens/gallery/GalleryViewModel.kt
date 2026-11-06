@@ -28,6 +28,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import com.dilarion.app.utils.toUserMessage
 
 data class GalleryTile(
     val identity: String,
@@ -191,7 +192,7 @@ class GalleryViewModel @Inject constructor(
                         _uiState.value = _uiState.value.copy(breakoutError = "Failed to start breakout rooms")
                     }
                 }
-                .onFailure { e -> _uiState.value = _uiState.value.copy(breakoutError = e.message ?: "Failed to start breakout rooms") }
+                .onFailure { e -> _uiState.value = _uiState.value.copy(breakoutError = e.toUserMessage("Couldn't start breakout rooms. Please try again.")) }
             _uiState.value = _uiState.value.copy(breakoutBusy = false)
         }
     }
@@ -208,7 +209,7 @@ class GalleryViewModel @Inject constructor(
                         _uiState.value = _uiState.value.copy(breakoutError = "Failed to start breakout rooms")
                     }
                 }
-                .onFailure { e -> _uiState.value = _uiState.value.copy(breakoutError = e.message ?: "Failed to start breakout rooms") }
+                .onFailure { e -> _uiState.value = _uiState.value.copy(breakoutError = e.toUserMessage("Couldn't start breakout rooms. Please try again.")) }
             _uiState.value = _uiState.value.copy(breakoutBusy = false)
         }
     }
@@ -231,7 +232,7 @@ class GalleryViewModel @Inject constructor(
                         _uiState.value = _uiState.value.copy(breakoutError = "Failed to end breakout rooms")
                     }
                 }
-                .onFailure { e -> _uiState.value = _uiState.value.copy(breakoutError = e.message ?: "Failed to end breakout rooms") }
+                .onFailure { e -> _uiState.value = _uiState.value.copy(breakoutError = e.toUserMessage("Couldn't end breakout rooms. Please try again.")) }
             _uiState.value = _uiState.value.copy(breakoutBusy = false)
         }
     }
@@ -429,7 +430,7 @@ class GalleryViewModel @Inject constructor(
 
                 _uiState.value = _uiState.value.copy(connecting = false)
             }.onFailure { e ->
-                _uiState.value = _uiState.value.copy(connecting = false, error = e.message ?: "Failed to join group video")
+                _uiState.value = _uiState.value.copy(connecting = false, error = e.toUserMessage("Couldn't join the group video call. Check your connection and retry."))
             }
         }
     }
@@ -485,7 +486,7 @@ class GalleryViewModel @Inject constructor(
             runCatching {
                 apiService.conferenceInvite("Bearer $token", conferenceId, mapOf("username" to username))
             }.onFailure { e ->
-                _uiState.value = _uiState.value.copy(addError = e.message ?: "Could not invite $username")
+                _uiState.value = _uiState.value.copy(addError = e.toUserMessage("Couldn't invite $username. Please try again."))
             }
             _uiState.value = _uiState.value.copy(inviting = null)
         }

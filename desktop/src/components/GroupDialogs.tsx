@@ -23,6 +23,7 @@ import {
   updateGroup,
 } from '../services/api';
 import { CloseIcon } from './Icons';
+import { userMessage } from '../services/errors';
 
 // Self-service groups: any user creates and runs their own groups from the
 // app — no admin website involved. The creator is the group's first admin;
@@ -204,7 +205,7 @@ export function CreateGroupModal({
       });
       onCreated(g);
     } catch (err: any) {
-      setError(err?.message || 'Failed to create group');
+      setError(userMessage(err, "Couldn't create the group. Please try again."));
     } finally {
       setBusy(false);
     }
@@ -278,7 +279,7 @@ export function JoinGroupModal({
     try {
       setPreview(await previewGroupInvite(token, code));
     } catch (err: any) {
-      setError(err?.message || 'Invite link is invalid');
+      setError(userMessage(err, err?.message || 'That invite link is invalid or has expired.'));
     } finally {
       setBusy(false);
     }
@@ -290,7 +291,7 @@ export function JoinGroupModal({
     try {
       onJoined(await joinGroupViaInvite(token, code));
     } catch (err: any) {
-      setError(err?.message || 'Failed to join group');
+      setError(userMessage(err, err?.message || "Couldn't join the group. Please try again."));
     } finally {
       setBusy(false);
     }
@@ -363,7 +364,7 @@ function InviteSection({ token, groupId }: { token: string; groupId: number }) {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    getGroupInvite(token, groupId).then(setInvite).catch(err => setError(err?.message || 'Failed to load invite link'));
+    getGroupInvite(token, groupId).then(setInvite).catch(err => setError(userMessage(err, "Couldn't load the invite link. Please try again.")));
   }, [token, groupId]);
 
   useEffect(() => {
@@ -380,7 +381,7 @@ function InviteSection({ token, groupId }: { token: string; groupId: number }) {
     try {
       setInvite(await resetGroupInvite(token, groupId));
     } catch (err: any) {
-      setError(err?.message || 'Failed to reset link');
+      setError(userMessage(err, "Couldn't reset the invite link. Please try again."));
     } finally {
       setBusy(false);
     }
@@ -458,7 +459,7 @@ export function GroupInfoDrawer({
       onGroupChanged(await updateGroup(token, group.id, { name: name.trim(), description: description.trim() }));
       setEditing(false);
     } catch (err: any) {
-      setError(err?.message || 'Failed to save');
+      setError(userMessage(err, "Couldn't save your changes. Please try again."));
     } finally {
       setSavingInfo(false);
     }
@@ -471,7 +472,7 @@ export function GroupInfoDrawer({
     try {
       onGroupChanged(await updateGroup(token, group.id, { disappearAfterHours: hours }));
     } catch (err: any) {
-      setError(err?.message || 'Failed to change timer');
+      setError(userMessage(err, "Couldn't change the timer. Please try again."));
     } finally {
       setSavingTimer(false);
     }
@@ -484,7 +485,7 @@ export function GroupInfoDrawer({
       await fn();
       onMembersChanged();
     } catch (err: any) {
-      setError(err?.message || 'Action failed');
+      setError(userMessage(err, "Something went wrong. Please try again."));
     } finally {
       setMemberBusy(null);
     }
@@ -500,7 +501,7 @@ export function GroupInfoDrawer({
       setAdding(false);
       onMembersChanged();
     } catch (err: any) {
-      setError(err?.message || 'Failed to add members');
+      setError(userMessage(err, "Couldn't add those members. Please try again."));
       onMembersChanged();
     } finally {
       setMemberBusy(null);
@@ -513,7 +514,7 @@ export function GroupInfoDrawer({
       await leaveGroup(token, group.id);
       onGroupGone();
     } catch (err: any) {
-      setError(err?.message || 'Failed to leave group');
+      setError(userMessage(err, "Couldn't leave the group. Please try again."));
     }
   }
 
@@ -523,7 +524,7 @@ export function GroupInfoDrawer({
       await deleteGroup(token, group.id);
       onGroupGone();
     } catch (err: any) {
-      setError(err?.message || 'Failed to delete group');
+      setError(userMessage(err, "Couldn't delete the group. Please try again."));
     }
   }
 

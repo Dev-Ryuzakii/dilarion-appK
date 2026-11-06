@@ -36,6 +36,7 @@ import MediaPicker from '../components/MediaPicker';
 import { getSticker } from '../components/stickers';
 import ContactInfoPanel from '../components/ContactInfoPanel';
 import { summarizeThreadCopilot, composeReplyCopilot, translateCopilot, clearConversation, GifResult } from '../services/api';
+import { userMessage } from '../services/errors';
 
 interface Props {
   token: string;
@@ -254,7 +255,7 @@ function EncryptedBubble({ token, messageId, decoyContent, masterToken, isMine, 
         userTappedRef.current = false;
       }, 30000);
     } catch (err: any) {
-      setError(err?.message || 'Invalid master token');
+      setError(userMessage(err, "Couldn't unlock this message. Check your master token and try again."));
     } finally {
       setLoading(false);
       userTappedRef.current = false;
@@ -933,7 +934,7 @@ export default function ChatPanel({
       const summary = await summarizeThreadCopilot(token, lines.join('\n'));
       setCopilotResult({ title: 'Thread summary', loading: false, error: null, content: summary });
     } catch (err: any) {
-      setCopilotResult({ title: 'Thread summary', loading: false, error: err?.message || 'Failed to summarize', content: null });
+      setCopilotResult({ title: 'Thread summary', loading: false, error: userMessage(err, "Couldn't summarize this thread. Please try again."), content: null });
     }
   }
 
@@ -959,7 +960,7 @@ export default function ChatPanel({
       const suggestions = await composeReplyCopilot(token, contextText);
       setReplySuggestions(suggestions);
     } catch (err: any) {
-      setSendError(err?.message || 'Copilot could not draft a reply');
+      setSendError(userMessage(err, "Copilot couldn't draft a reply. Please try again."));
     } finally {
       setSuggestLoading(false);
     }
@@ -971,7 +972,7 @@ export default function ChatPanel({
       await clearConversation(token, partner);
       setMessages([]);
     } catch (err: any) {
-      setSendError(err?.message || 'Failed to clear conversation');
+      setSendError(userMessage(err, "Couldn't clear this conversation. Please try again."));
     }
   }
 
@@ -983,7 +984,7 @@ export default function ChatPanel({
       const translated = await translateCopilot(token, text, target.trim());
       setCopilotResult({ title: `Translation (${target.trim()})`, loading: false, error: null, content: translated });
     } catch (err: any) {
-      setCopilotResult({ title: `Translation (${target.trim()})`, loading: false, error: err?.message || 'Failed to translate', content: null });
+      setCopilotResult({ title: `Translation (${target.trim()})`, loading: false, error: userMessage(err, "Couldn't translate this message. Please try again."), content: null });
     }
   }
 
@@ -1035,7 +1036,7 @@ export default function ChatPanel({
       else setMessages(prev => prev.map(m => (m.id === msg.id ? { ...m, is_deleted: true } : m)));
       loadConversation();
     } catch (err: any) {
-      setSendError(err?.message || 'Failed to delete message');
+      setSendError(userMessage(err, "Couldn't delete that message. Please try again."));
     }
   }
 
@@ -1050,7 +1051,7 @@ export default function ChatPanel({
       setReplyTarget(null);
       setText(plaintext);
     } catch (err: any) {
-      setSendError(err?.message || 'Could not decrypt this message to edit it');
+      setSendError(userMessage(err, "Couldn't open this message to edit it. Please try again."));
     }
   }
 
@@ -1077,7 +1078,7 @@ export default function ChatPanel({
       setForwardTarget(null);
       setForwardUsername('');
     } catch (err: any) {
-      setForwardError(err?.message || 'Failed to forward message');
+      setForwardError(userMessage(err, "Couldn't forward that message. Please try again."));
     }
   }
 
@@ -1146,7 +1147,7 @@ export default function ChatPanel({
       setPending(prev => prev.filter(p => p.localId !== localId));
       setText(trimmed);
       if (editTarget) setEditingMessage(editTarget);
-      setSendError(err?.message || 'Failed to send message');
+      setSendError(userMessage(err, "Couldn't send your message. Check your connection and try again."));
     } finally {
       setIsSending(false);
     }
@@ -1178,7 +1179,7 @@ export default function ChatPanel({
       });
       await loadConversation();
     } catch (err: any) {
-      setSendError(err?.message || `Failed to send ${contentType}`);
+      setSendError(userMessage(err, `Couldn't send that ${contentType}. Check your connection and try again.`));
     } finally {
       setIsSending(false);
     }
@@ -1204,7 +1205,7 @@ export default function ChatPanel({
       await loadConversation();
     } catch (err: any) {
       // Surface the failure instead of letting the bubble silently vanish.
-      setSendError(err?.message || 'Failed to send file');
+      setSendError(userMessage(err, "Couldn't send that file. Check your connection and try again."));
     } finally {
       setPending(prev => prev.filter(p => p.localId !== localId));
     }
@@ -1223,7 +1224,7 @@ export default function ChatPanel({
     } catch (err: any) {
       // Previously swallowed — a failed document upload just disappeared with no
       // explanation. Show why so it's actionable.
-      setSendError(err?.message || 'Failed to send document');
+      setSendError(userMessage(err, "Couldn't send that document. Check your connection and try again."));
     } finally {
       setPending(prev => prev.filter(p => p.localId !== localId));
     }

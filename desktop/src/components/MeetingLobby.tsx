@@ -34,7 +34,7 @@ export default function MeetingLobby({
         streamRef.current = stream;
         if (videoRef.current) videoRef.current.srcObject = stream;
       })
-      .catch(() => setError('Could not access camera/microphone — check permissions.'));
+      .catch(() => setError("Couldn't access your camera or microphone. Check that Dilarion has permission and try again."));
 
     return () => {
       cancelled = true;

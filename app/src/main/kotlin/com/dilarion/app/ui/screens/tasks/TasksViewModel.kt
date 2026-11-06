@@ -24,6 +24,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import javax.inject.Inject
+import com.dilarion.app.utils.toUserMessage
 
 enum class TaskStatusFilter { ALL, OPEN, IN_PROGRESS, COMPLETED, CANCELLED }
 
@@ -78,7 +79,7 @@ class TasksViewModel @Inject constructor(
                         _uiState.value = _uiState.value.copy(loading = false, error = "Failed to load tasks")
                     }
                 }
-                .onFailure { e -> _uiState.value = _uiState.value.copy(loading = false, error = e.message) }
+                .onFailure { e -> _uiState.value = _uiState.value.copy(loading = false, error = e.toUserMessage("Couldn't load tasks. Check your connection and try again.")) }
         }
     }
 
@@ -143,7 +144,7 @@ class TasksViewModel @Inject constructor(
                         _uiState.value = _uiState.value.copy(busy = false, createError = resp.errorBody().parseErrorDetail("Failed to create task"))
                     }
                 }
-                .onFailure { e -> _uiState.value = _uiState.value.copy(busy = false, createError = e.message) }
+                .onFailure { e -> _uiState.value = _uiState.value.copy(busy = false, createError = e.toUserMessage("Couldn't create that task. Please try again.")) }
         }
     }
 
@@ -164,10 +165,10 @@ class TasksViewModel @Inject constructor(
                         }
                         loadTasks()
                     } else {
-                        _uiState.value = _uiState.value.copy(error = resp.errorBody().parseErrorDetail("Failed to add people"))
+                        _uiState.value = _uiState.value.copy(error = resp.errorBody().parseErrorDetail("Couldn't add those people. Please try again."))
                     }
                 }
-                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
+                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.toUserMessage("Couldn't add those people. Please try again.")) }
             _uiState.value = _uiState.value.copy(busy = false)
         }
     }
@@ -220,9 +221,9 @@ class TasksViewModel @Inject constructor(
             runCatching { apiService.submitMyReport(bearer, taskId, TaskGroupReportSubmitRequest(text.trim())) }
                 .onSuccess { resp ->
                     if (resp.isSuccessful) loadTasks()
-                    else _uiState.value = _uiState.value.copy(error = resp.errorBody().parseErrorDetail("Failed to submit report"))
+                    else _uiState.value = _uiState.value.copy(error = resp.errorBody().parseErrorDetail("Couldn't submit your report. Please try again."))
                 }
-                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
+                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.toUserMessage("Couldn't submit your report. Please try again.")) }
             _uiState.value = _uiState.value.copy(busy = false)
         }
     }
@@ -238,10 +239,10 @@ class TasksViewModel @Inject constructor(
                         _uiState.value = _uiState.value.copy(selectedTaskId = null)
                         loadTasks()
                     } else {
-                        _uiState.value = _uiState.value.copy(error = resp.errorBody().parseErrorDetail("Failed to delete task"))
+                        _uiState.value = _uiState.value.copy(error = resp.errorBody().parseErrorDetail("Couldn't delete that task. Please try again."))
                     }
                 }
-                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
+                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.toUserMessage("Couldn't delete that task. Please try again.")) }
             _uiState.value = _uiState.value.copy(busy = false)
         }
     }
@@ -253,9 +254,9 @@ class TasksViewModel @Inject constructor(
             runCatching { apiService.compileTask(bearer, taskId) }
                 .onSuccess { resp ->
                     if (resp.isSuccessful) loadTasks()
-                    else _uiState.value = _uiState.value.copy(error = resp.errorBody().parseErrorDetail("Failed to compile report"))
+                    else _uiState.value = _uiState.value.copy(error = resp.errorBody().parseErrorDetail("Couldn't compile the report. Please try again."))
                 }
-                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
+                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.toUserMessage("Couldn't compile the report. Please try again.")) }
             _uiState.value = _uiState.value.copy(busy = false)
         }
     }
@@ -274,7 +275,7 @@ class TasksViewModel @Inject constructor(
                 }
             }
                 .onSuccess { f -> _uiState.value = _uiState.value.copy(exportedReport = f) }
-                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
+                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.toUserMessage("Couldn't export the report. Please try again.")) }
             _uiState.value = _uiState.value.copy(busy = false)
         }
     }

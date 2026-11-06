@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import com.dilarion.app.utils.toUserMessage
 
 data class NewMeetingUiState(
     val users: List<UserInfo> = emptyList(),
@@ -50,7 +51,7 @@ class NewMeetingViewModel @Inject constructor(
                     ?: emptyList()
                 _uiState.value = _uiState.value.copy(isLoading = false, users = users)
             }.onFailure { e ->
-                _uiState.value = _uiState.value.copy(isLoading = false, error = e.message)
+                _uiState.value = _uiState.value.copy(isLoading = false, error = e.toUserMessage("Couldn't load contacts. Check your connection and try again."))
             }
         }
     }
@@ -91,7 +92,7 @@ class NewMeetingViewModel @Inject constructor(
                 _uiState.value = _uiState.value.copy(starting = false)
                 onResult(confId, null)
             }.onFailure { e ->
-                val msg = e.message ?: "Failed to start meeting"
+                val msg = e.toUserMessage("Couldn't start the meeting. Please try again.")
                 _uiState.value = _uiState.value.copy(starting = false, error = msg)
                 onResult(null, msg)
             }

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { completeOnboarding } from '../services/api';
+import { userMessage } from '../services/errors';
 
 /**
  * First-run profile for invited organization staff: details plus a LIVE
@@ -89,7 +90,7 @@ export default function OnboardingScreen({ sessionToken, username, onDone, onCan
       });
       onDone();
     } catch (err: any) {
-      setError(err?.message || 'Could not save your profile');
+      setError(userMessage(err, "Couldn't save your profile. Please try again."));
     } finally {
       setBusy(false);
     }

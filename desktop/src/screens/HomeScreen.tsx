@@ -90,6 +90,7 @@ import {
   CloseIcon,
   SparkleIcon,
 } from '../components/Icons';
+import { userMessage } from '../services/errors';
 
 interface Props {
   token: string;
@@ -549,7 +550,7 @@ export function DevicePolicySection({ token }: { token: string }) {
       await setAppPolicyConsent(token, next);
       setEnabled(next);
     } catch (err: any) {
-      setError(err?.message || 'Failed to update');
+      setError(userMessage(err, "Couldn't save your changes. Please try again."));
     } finally {
       setBusy(false);
     }
@@ -640,7 +641,7 @@ function DisappearingMessagesSection({ token }: { token: string }) {
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch (err: any) {
-      setError(err?.message || 'Failed to save');
+      setError(userMessage(err, "Couldn't save your changes. Please try again."));
     } finally {
       setSaving(false);
     }
@@ -728,7 +729,7 @@ function AccountIdentitySection({ token, username, onLogout }: { token: string; 
       setDone(true);
       setTimeout(onLogout, 1500);
     } catch (err: any) {
-      setError(err?.message || 'Failed to update username');
+      setError(userMessage(err, "Couldn't update your username. Please try again."));
     } finally {
       setSaving(false);
     }
@@ -742,7 +743,7 @@ function AccountIdentitySection({ token, username, onLogout }: { token: string; 
       setRecCode(res.recovery_code);
       setAck(false);
     } catch (err: any) {
-      setRecError(err?.message || 'Failed to generate a new recovery code');
+      setRecError(userMessage(err, "Couldn't generate a new recovery code. Please try again."));
     } finally {
       setRecBusy(false);
     }
@@ -848,7 +849,7 @@ function EncryptionKeySection({ token, username }: { token: string; username: st
       setImporting(false);
       setBlob('');
     } catch (err: any) {
-      setError(err?.message || 'Could not import that key.');
+      setError(userMessage(err, "Couldn't import that key. Make sure you pasted the complete key and try again."));
     } finally {
       setBusy(false);
     }
@@ -1130,7 +1131,7 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
       setPfpFailed(false);
       setPfpVersion(v => v + 1);
     } catch (err: any) {
-      setPfpError(err?.message || 'Failed to upload picture');
+      setPfpError(userMessage(err, "Couldn't upload that picture. Please try again."));
     } finally {
       setPfpUploading(false);
     }
@@ -1144,7 +1145,7 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
       setPfpFailed(true);
       setPfpVersion(v => v + 1);
     } catch (err: any) {
-      setPfpError(err?.message || 'Failed to remove picture');
+      setPfpError(userMessage(err, "Couldn't remove your picture. Please try again."));
     } finally {
       setPfpUploading(false);
     }
@@ -1157,7 +1158,7 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
       await setAvailabilityStatus(token, status, statusText.trim() || undefined);
       setAvailabilityStatusState(status);
     } catch (err: any) {
-      setStatusError(err?.message || 'Failed to update status');
+      setStatusError(userMessage(err, "Couldn't update your status. Please try again."));
     } finally {
       setStatusSaving(false);
     }
@@ -1216,7 +1217,7 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
       await uploadVoiceIdentity(token, blob);
       setVoiceIdentityEnrolled(true);
     } catch (err: any) {
-      setVoiceIdentityError(err?.message || 'Failed to save voice sample');
+      setVoiceIdentityError(userMessage(err, "Couldn't save your voice sample. Please try again."));
     } finally {
       setVoiceIdentityUploading(false);
     }
@@ -1233,7 +1234,7 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
       setEnable2FAMasterToken('');
       setEnable2FAPassword('');
     } catch (err: any) {
-      setTwoFaError(err?.message || 'Failed to enable 2FA');
+      setTwoFaError(userMessage(err, "Couldn't enable 2FA. Please try again."));
     } finally {
       setTwoFaLoading(false);
     }
@@ -1249,7 +1250,7 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
       setShowDisable2FA(false);
       setDisable2FAPassword('');
     } catch (err: any) {
-      setTwoFaError(err?.message || 'Failed to disable 2FA');
+      setTwoFaError(userMessage(err, "Couldn't disable 2FA. Please try again."));
     } finally {
       setTwoFaLoading(false);
     }
@@ -1265,7 +1266,7 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
       setShowDeleteConfirm(false);
       setDeleteReason('');
     } catch (err: any) {
-      setDeleteError(err?.message || 'Failed to submit request');
+      setDeleteError(userMessage(err, "Couldn't submit your request. Please try again."));
     } finally {
       setDeleteLoading(false);
     }
@@ -1305,7 +1306,7 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
       setCreateInput('');
       setCreate2FAInput('');
     } catch (err: any) {
-      setCreateError(err?.message || 'Failed to create master token');
+      setCreateError(userMessage(err, "Couldn't create your master token. Please try again."));
     } finally {
       setCreateLoading(false);
     }
@@ -2166,7 +2167,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
       setBroadcastForm({ title: '', message: '' });
       setTimeout(() => { setShowBroadcastCompose(false); setBroadcastState({ sending: false, error: '', notice: '' }); }, 1400);
     } catch (e: any) {
-      setBroadcastState({ sending: false, error: e.message || 'Failed to send', notice: '' });
+      setBroadcastState({ sending: false, error: userMessage(e, "Couldn't send the broadcast. Please try again."), notice: '' });
     }
   }
   const [unread, setUnread] = useState<Set<string>>(new Set());
@@ -2736,7 +2737,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
       openGroupCallWindow({ conference_id, group_id: group.id, group_name: group.name, call_type: callType });
       if (not_rung > 0) setChatJoinError(`Call is full — ${not_rung} member${not_rung === 1 ? '' : 's'} couldn't be rung`);
     } catch (err: any) {
-      setChatJoinError(err?.message || 'Failed to start group call');
+      setChatJoinError(userMessage(err, "Couldn't start the group call. Check your connection and retry."));
     }
   }
 
@@ -2816,7 +2817,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
       setMeetingLobby(null);
       setActiveGalleryCall({ conferenceId: conference_id, initialMicOn: opts.micOn, initialCamOn: opts.camOn, displayName: opts.displayName });
     } catch (err: any) {
-      setChatJoinError(err?.message || 'Failed to start group video');
+      setChatJoinError(userMessage(err, "Couldn't start the group video call. Check your connection and retry."));
       setMeetingLobby(null);
     } finally {
       setCreatingMeeting(false);
@@ -2832,7 +2833,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
       const list = await getUpcomingMeetings(token);
       setUpcomingMeetings(list);
     } catch (err: any) {
-      setMeetingsError(err?.message || 'Failed to load meetings');
+      setMeetingsError(userMessage(err, "Couldn't load your meetings. Check your connection and try again."));
     } finally {
       setLoadingMeetings(false);
     }
@@ -2876,7 +2877,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
       const list = await getUpcomingMeetings(token);
       setUpcomingMeetings(list);
     } catch (err: any) {
-      setMeetingsError(err?.message || 'Failed to schedule meeting');
+      setMeetingsError(userMessage(err, "Couldn't schedule the meeting. Please try again."));
     } finally {
       setScheduling(false);
     }
@@ -2945,7 +2946,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
         setActiveGalleryCall({ conferenceId: conference_id, initialMicOn: opts.micOn, initialCamOn: opts.camOn, displayName: opts.displayName });
       }
     } catch (err: any) {
-      setChatJoinError(err?.message || 'Failed to join meeting');
+      setChatJoinError(userMessage(err, "Couldn't join the meeting. Check your connection and retry."));
       setMeetingLobby(null);
     }
   }
@@ -2955,7 +2956,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
       await cancelMeeting(token, meetingId);
       setUpcomingMeetings(prev => prev.filter(m => m.id !== meetingId));
     } catch (err: any) {
-      setMeetingsError(err?.message || 'Failed to cancel meeting');
+      setMeetingsError(userMessage(err, "Couldn't cancel the meeting. Please try again."));
     }
   }
 

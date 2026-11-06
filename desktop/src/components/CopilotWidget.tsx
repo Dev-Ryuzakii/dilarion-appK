@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { chatCopilot } from '../services/api';
 import { CloseIcon, SparkleIcon, CheckIcon } from './Icons';
+import { userMessage } from '../services/errors';
 
 export interface CopilotScheduleDraft {
   title: string;
@@ -152,7 +153,7 @@ export default function CopilotWidget({ token, onScheduleDraft }: {
         setMessages(prev => [...prev, { role: 'assistant', text: chat.text || "I'm here to help." }]);
       }
     } catch (err: any) {
-      setMessages(prev => [...prev, { role: 'assistant', text: err?.message || "Something went wrong — try again." }]);
+      setMessages(prev => [...prev, { role: 'assistant', text: userMessage(err, "Something went wrong. Please try again.") }]);
     } finally {
       setLoading(false);
     }

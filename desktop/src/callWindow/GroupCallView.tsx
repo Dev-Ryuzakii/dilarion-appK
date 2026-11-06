@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Room, RoomEvent, Track, Participant } from 'livekit-client';
 import { getLiveKitToken, getIceServers, conferenceLeave } from '../services/api';
 import { presenceService } from '../services/presence';
+import { userMessage } from '../services/errors';
 
 // WhatsApp-style group call — deliberately NOT the meeting UI (GalleryView):
 // no recording, breakout rooms, whiteboard, reactions, waiting room or
@@ -208,7 +209,7 @@ export default function GroupCallView({ token, myUsername, info, onEnd }: {
         othersChanged();
       } catch (err: any) {
         if (!cancelled) {
-          setError(err?.message || 'Could not connect the call');
+          setError(userMessage(err, "Couldn't connect to the call. Check your connection and retry."));
           setStatus('ended');
         }
       }

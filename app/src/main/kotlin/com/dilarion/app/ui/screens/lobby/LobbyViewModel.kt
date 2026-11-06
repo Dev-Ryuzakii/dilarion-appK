@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import com.dilarion.app.utils.toUserMessage
 
 data class LobbyUiState(
     val micOn: Boolean = true,
@@ -62,15 +63,16 @@ class LobbyViewModel @Inject constructor(
                 val resp = apiService.joinMeetingByCode("Bearer $token", MeetingJoinRequest(joinCode = joinCode))
                 if (!resp.isSuccessful) {
                     val detail = resp.errorBody()?.string()
-                    throw IllegalStateException(detail?.takeIf { it.isNotBlank() } ?: "Could not join the meeting (${resp.code()})")
+                    throw IllegalStateException(detail?.takeIf { it.isNotBlank() } ?: "Couldn't join the meeting. Check your connection and retry.")
                 }
                 resp.body() ?: throw IllegalStateException("Could not join the meeting")
             }.onSuccess { body ->
                 _uiState.value = _uiState.value.copy(joining = false)
                 onResult(body.conferenceId, body.status, null)
             }.onFailure { e ->
-                _uiState.value = _uiState.value.copy(joining = false, error = e.message)
-                onResult(null, null, e.message)
+                val friendly = e.toUserMessage(e.message ?: "Couldn't join the meeting. Check your connection and retry.")
+                _uiState.value = _uiState.value.copy(joining = false, error = friendly)
+                onResult(null, null, friendly)
             }
         }
     }

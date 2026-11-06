@@ -61,6 +61,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Locale
+import com.dilarion.app.utils.toUserMessage
 
 private val DECOY_PHRASES = listOf(
     "I will share the project update before the review.",
@@ -1254,7 +1255,7 @@ private fun DocumentViewerDialog(bytes: ByteArray, onDismiss: () -> Unit, onAsk:
                 bitmaps
             }
         }
-        result.onSuccess { pages = it }.onFailure { error = it.message ?: "Could not open document" }
+        result.onSuccess { pages = it }.onFailure { error = it.toUserMessage("Couldn't open this document. Please try again.") }
         loading = false
     }
 

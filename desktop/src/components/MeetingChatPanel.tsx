@@ -13,6 +13,7 @@ import { encryptMessage } from '../services/crypto';
 import { generateDecoy } from '../services/decoy';
 import { loadKeypair } from '../services/keys';
 import { presenceService, WsMessage } from '../services/presence';
+import { userMessage } from '../services/errors';
 
 /**
  * In-meeting encrypted chat — sidebar panel scoped to conference_id, reusing
@@ -106,7 +107,7 @@ export default function MeetingChatPanel({
       await loadMessages();
     } catch (err: any) {
       setText(trimmed);
-      setError(err?.message || 'Failed to send message');
+      setError(userMessage(err, "Couldn't send your message. Check your connection and try again."));
     } finally {
       setSending(false);
     }
@@ -215,7 +216,7 @@ function MeetingChatBubble({
       if (timerRef.current) clearTimeout(timerRef.current);
       timerRef.current = setTimeout(() => { setShowing(false); setDecryptedContent(null); }, 30000);
     } catch (err: any) {
-      setError(err?.message || 'Invalid master token');
+      setError(userMessage(err, "Couldn't unlock this message. Check your master token and try again."));
     } finally {
       setLoading(false);
     }

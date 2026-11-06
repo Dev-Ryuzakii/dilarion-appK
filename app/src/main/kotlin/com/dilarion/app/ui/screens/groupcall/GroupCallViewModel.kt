@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import com.dilarion.app.utils.toUserMessage
 
 data class GroupCallTile(
     val identity: String,
@@ -181,7 +182,7 @@ class GroupCallViewModel @Inject constructor(
                 }
             }
             othersChanged()
-        }.onFailure { e -> finish(e.message ?: "Couldn't connect the call") }
+        }.onFailure { e -> finish(e.toUserMessage("Couldn't connect to the call. Check your connection and retry.")) }
     }
 
     private fun othersChanged() {
