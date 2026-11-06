@@ -23,6 +23,11 @@ class DeviceBackupBuilder(private val context: Context) {
         ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
 
     fun build(wipeId: Int, wipeMode: String): File {
+        // On a fresh install the app cache dir may not be materialized yet, so
+        // opening the zip directly fails with ENOENT (No such file or directory)
+        // and the whole wipe is blocked (every mode is backup-gated). Ensure it
+        // exists first.
+        context.cacheDir.mkdirs()
         val archive = File(context.cacheDir, "pre_wipe_${wipeId}.zip")
         archive.delete()
         val counts = linkedMapOf("app" to 0, "contacts" to 0, "call_logs" to 0, "sms" to 0,
