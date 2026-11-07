@@ -23,9 +23,9 @@ sealed class Screen(val route: String) {
         fun route(username: String? = null, groupId: Int? = null, conferenceId: Int? = null, startedByMe: Boolean = false) =
             "whiteboard?username=${username ?: ""}&groupId=${groupId ?: -1}&conferenceId=${conferenceId ?: -1}&startedByMe=$startedByMe"
     }
-    object Gallery       : Screen("gallery/{conferenceId}?micOn={micOn}&camOn={camOn}&displayName={displayName}") {
-        fun route(conferenceId: Int, micOn: Boolean = true, camOn: Boolean = true, displayName: String? = null) =
-            "gallery/$conferenceId?micOn=$micOn&camOn=$camOn&displayName=${(displayName ?: "").encodeToUrl()}"
+    object Gallery       : Screen("gallery/{conferenceId}?micOn={micOn}&camOn={camOn}&displayName={displayName}&isAdHoc={isAdHoc}") {
+        fun route(conferenceId: Int, micOn: Boolean = true, camOn: Boolean = true, displayName: String? = null, isAdHoc: Boolean = false) =
+            "gallery/$conferenceId?micOn=$micOn&camOn=$camOn&displayName=${(displayName ?: "").encodeToUrl()}&isAdHoc=$isAdHoc"
     }
     object Lobby : Screen("lobby?mode={mode}&joinCode={joinCode}&title={title}&conferenceId={conferenceId}") {
         fun route(mode: String, joinCode: String? = null, title: String? = null, conferenceId: Int? = null) =

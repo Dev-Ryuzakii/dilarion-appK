@@ -66,6 +66,10 @@ data class GalleryUiState(
     val showBreakoutPanel: Boolean = false,
     val breakoutBusy: Boolean = false,
     val breakoutError: String? = null,
+    // A 1:1 call that picked up a third participant, not a Meeting someone
+    // explicitly started — same room/transport, just without meeting-only
+    // chrome (breakout rooms, waiting room/admit).
+    val isAdHocCall: Boolean = false,
 )
 
 /**
@@ -262,7 +266,8 @@ class GalleryViewModel @Inject constructor(
             runCatching { apiService.getWaitingRoom("Bearer $token", conferenceId) }
                 .onSuccess { resp ->
                     if (resp.isSuccessful) {
-                        _uiState.value = _uiState.value.copy(waiting = resp.body()?.waiting.orEmpty(), isHost = true)
+                        val list = if (_uiState.value.isAdHocCall) emptyList() else resp.body()?.waiting.orEmpty()
+                        _uiState.value = _uiState.value.copy(waiting = list, isHost = true)
                     }
                 }
         }
@@ -353,11 +358,12 @@ class GalleryViewModel @Inject constructor(
         )
     }
 
-    fun connect(conferenceId: Int, initialMicOn: Boolean = true, initialCamOn: Boolean = true, displayName: String? = null) {
+    fun connect(conferenceId: Int, initialMicOn: Boolean = true, initialCamOn: Boolean = true, displayName: String? = null, isAdHocCall: Boolean = false) {
         parentConferenceId = conferenceId
         lastMicOn = initialMicOn
         lastCamOn = initialCamOn
         lastDisplayName = displayName
+        _uiState.value = _uiState.value.copy(isAdHocCall = isAdHocCall)
         // Waiting room / host status is always about the parent meeting, even
         // after switching into a breakout room — mirrors desktop, which keys
         // this effect on [token, conferenceId] (the prop), not activeConferenceId.
@@ -446,6 +452,9 @@ class GalleryViewModel @Inject constructor(
         viewModelScope.launch {
             runCatching { r.localParticipant.setMicrophoneEnabled(next) }
             _uiState.value = _uiState.value.copy(micOn = next)
+            // Without this, a breakout-room hop reconnects with the stale
+            // lastMicOn from connect() and silently re-enables a muted mic.
+            lastMicOn = next
         }
     }
 
@@ -455,6 +464,7 @@ class GalleryViewModel @Inject constructor(
         viewModelScope.launch {
             runCatching { r.localParticipant.setCameraEnabled(next) }
             _uiState.value = _uiState.value.copy(camOn = next)
+            lastCamOn = next
         }
     }
 

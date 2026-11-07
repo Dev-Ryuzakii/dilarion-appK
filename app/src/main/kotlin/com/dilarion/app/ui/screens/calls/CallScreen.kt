@@ -54,7 +54,7 @@ fun CallScreen(
     username: String,
     onCallEnded: () -> Unit,
     /** Adding a third participant moves everyone into the LiveKit conference room. */
-    onOpenGallery: ((conferenceId: Int) -> Unit)? = null,
+    onOpenGallery: ((conferenceId: Int, wasVideo: Boolean) -> Unit)? = null,
     onMinimize: ((callId: Int?) -> Unit)? = null,
     viewModel: CallViewModel = hiltViewModel(LocalContext.current as ComponentActivity),
 ) {
@@ -86,10 +86,10 @@ fun CallScreen(
     // conference room, which is where a group call renders video.
     val conferenceUpgrade by viewModel.conferenceUpgrade.collectAsState()
     LaunchedEffect(conferenceUpgrade) {
-        val confId = conferenceUpgrade ?: return@LaunchedEffect
+        val (confId, wasVideo) = conferenceUpgrade ?: return@LaunchedEffect
         viewModel.clearConferenceUpgrade()
         viewModel.endCallForConferenceUpgrade()
-        if (onOpenGallery != null) onOpenGallery(confId) else onCallEnded()
+        if (onOpenGallery != null) onOpenGallery(confId, wasVideo) else onCallEnded()
     }
 
     uiState.error?.let { err ->

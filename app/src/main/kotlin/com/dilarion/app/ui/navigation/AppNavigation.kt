@@ -87,14 +87,17 @@ fun AppNavigation(pendingIncomingCall: IncomingCallData? = null) {
     // run in the LiveKit room — staying on the mesh leg would leave us connected
     // to no one — so follow it there.
     LaunchedEffect(conferenceUpgrade) {
-        val confId = conferenceUpgrade ?: return@LaunchedEffect
+        val (confId, wasVideo) = conferenceUpgrade ?: return@LaunchedEffect
         overlayVm.clearConferenceUpgrade()
         overlayVm.clearMinimized()
         overlayVm.clear()
         // Drop the 1:1 call screen so its "ended" state can't sit under the
         // group room or pop the user out of it.
         navController.popBackStack(Screen.Call.route, inclusive = true)
-        navController.navigate(Screen.Gallery.route(confId))
+        // isAdHoc: still a call that picked up a third person, not a Meeting
+        // someone explicitly started — keep video/audio as it was, and keep
+        // meeting-only chrome (breakout rooms, waiting room) out of it.
+        navController.navigate(Screen.Gallery.route(confId, camOn = wasVideo, isAdHoc = true))
     }
 
     // Inject call from notification intent into overlay VM
@@ -358,10 +361,10 @@ fun AppNavigation(pendingIncomingCall: IncomingCallData? = null) {
             CallScreen(
                 username = username,
                 onCallEnded = { overlayVm.clearMinimized(); navController.popBackStack() },
-                onOpenGallery = { confId ->
+                onOpenGallery = { confId, wasVideo ->
                     overlayVm.clearMinimized()
                     navController.popBackStack()
-                    navController.navigate(Screen.Gallery.route(confId))
+                    navController.navigate(Screen.Gallery.route(confId, camOn = wasVideo, isAdHoc = true))
                 },
                 onMinimize = { callId ->
                     overlayVm.setMinimized(callId ?: 0, username)
@@ -474,6 +477,7 @@ fun AppNavigation(pendingIncomingCall: IncomingCallData? = null) {
                 navArgument("micOn") { type = NavType.BoolType; defaultValue = true },
                 navArgument("camOn") { type = NavType.BoolType; defaultValue = true },
                 navArgument("displayName") { type = NavType.StringType; defaultValue = "" },
+                navArgument("isAdHoc") { type = NavType.BoolType; defaultValue = false },
             ),
         ) { backStack ->
             val conferenceId = backStack.arguments?.getInt("conferenceId") ?: return@composable
@@ -483,6 +487,7 @@ fun AppNavigation(pendingIncomingCall: IncomingCallData? = null) {
                 initialCamOn = backStack.arguments?.getBoolean("camOn") ?: true,
                 displayName = backStack.arguments?.getString("displayName")
                     ?.let { java.net.URLDecoder.decode(it, "UTF-8") }?.takeIf { it.isNotEmpty() },
+                isAdHocCall = backStack.arguments?.getBoolean("isAdHoc") ?: false,
                 onClose = { navController.popBackStack() },
                 onOpenWhiteboard = { confId, startedByMe -> navController.navigate(Screen.Whiteboard.route(conferenceId = confId, startedByMe = startedByMe)) },
             )

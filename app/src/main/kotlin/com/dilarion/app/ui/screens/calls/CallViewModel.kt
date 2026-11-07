@@ -78,8 +78,8 @@ class CallViewModel @Inject constructor(
      * gets per-participant video; the mesh leg this screen is on carries audio
      * only, so everyone has to move into the room rather than stay here.
      */
-    private val _conferenceUpgrade = MutableStateFlow<Int?>(null)
-    val conferenceUpgrade: StateFlow<Int?> = _conferenceUpgrade
+    private val _conferenceUpgrade = MutableStateFlow<Pair<Int, Boolean>?>(null)
+    val conferenceUpgrade: StateFlow<Pair<Int, Boolean>?> = _conferenceUpgrade
 
     val localVideo: StateFlow<VideoTrack?> = webRtcManager.localVideo
     val remoteVideo: StateFlow<VideoTrack?> = webRtcManager.remoteVideo
@@ -835,7 +835,7 @@ class CallViewModel @Inject constructor(
                     // Everyone now belongs in the LiveKit room, not on this mesh
                     // leg — the invitee joins there, and it is the only path with
                     // video for a third participant.
-                    _conferenceUpgrade.value = confId
+                    _conferenceUpgrade.value = confId to (_uiState.value.callType == CallType.VIDEO)
                 }
             }
         }

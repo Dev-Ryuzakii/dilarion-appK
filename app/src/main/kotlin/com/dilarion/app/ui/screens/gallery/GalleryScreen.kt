@@ -51,6 +51,7 @@ fun GalleryScreen(
     initialMicOn: Boolean = true,
     initialCamOn: Boolean = true,
     displayName: String? = null,
+    isAdHocCall: Boolean = false,
     onClose: () -> Unit,
     onOpenWhiteboard: (Int, Boolean) -> Unit = { _, _ -> },
     viewModel: GalleryViewModel = hiltViewModel(),
@@ -60,7 +61,7 @@ fun GalleryScreen(
     var showChat by remember { mutableStateOf(false) }
     val isInPip by PipController.isInPip
 
-    LaunchedEffect(conferenceId) { viewModel.connect(conferenceId, initialMicOn, initialCamOn, displayName) }
+    LaunchedEffect(conferenceId) { viewModel.connect(conferenceId, initialMicOn, initialCamOn, displayName, isAdHocCall) }
 
     DisposableEffect(Unit) {
         PipController.meetingActive.value = true
@@ -94,7 +95,7 @@ fun GalleryScreen(
                 title = {
                     Column {
                         Text(
-                            (state.inBreakoutName?.let { "Breakout: $it" } ?: "Group Video") +
+                            (state.inBreakoutName?.let { "Breakout: $it" } ?: if (state.isAdHocCall) "Group call" else "Group Video") +
                                 if (state.tiles.isNotEmpty()) " · ${state.tiles.size}" else "",
                             color = SurfaceWhite,
                         )
@@ -109,7 +110,7 @@ fun GalleryScreen(
                     }) {
                         TextButton(onClick = { viewModel.openParticipants() }) { Text("Participants", color = SurfaceWhite) }
                     }
-                    if (state.isHost) {
+                    if (state.isHost && !state.isAdHocCall) {
                         IconButton(onClick = {
                             if (state.breakoutActive) {
                                 viewModel.endBreakoutRooms()

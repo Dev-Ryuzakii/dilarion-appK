@@ -83,9 +83,10 @@ class CallOverlayViewModel @Inject constructor(
     private val _missedCall = MutableStateFlow<MissedCallInfo?>(null)
     val missedCall: StateFlow<MissedCallInfo?> = _missedCall
 
-    /** Conference id our current 1:1 call was upgraded into, if any. */
-    private val _conferenceUpgrade = MutableStateFlow<Int?>(null)
-    val conferenceUpgrade: StateFlow<Int?> = _conferenceUpgrade
+    /** Conference id (+ whether the ending 1:1 call was video) our current call
+     * was upgraded into, if any. */
+    private val _conferenceUpgrade = MutableStateFlow<Pair<Int, Boolean>?>(null)
+    val conferenceUpgrade: StateFlow<Pair<Int, Boolean>?> = _conferenceUpgrade
 
     /**
      * 1:1 call ids that were turned into a group call. The server then reports
@@ -150,12 +151,13 @@ class CallOverlayViewModel @Inject constructor(
                     "conference_upgraded" -> {
                         val confId = data.get("conference_id")?.asInt ?: return@collect
                         data.get("call_id")?.takeIf { !it.isJsonNull }?.asInt?.let { upgradedCallIds.add(it) }
+                        val wasVideo = data.get("call_type")?.takeIf { !it.isJsonNull }?.asString == "video"
                         // The incoming-call overlay covers the whole app. Leave it
                         // up and the group room we navigate to is never visible,
                         // so the call looks like it died on two tiles.
                         NotificationHelper.stopRingtone()
                         _incomingCall.value = null
-                        _conferenceUpgrade.value = confId
+                        _conferenceUpgrade.value = confId to wasVideo
                     }
                     // Being added to a live call rings like any other call: the
                     // invitee has to answer before their microphone joins it.
