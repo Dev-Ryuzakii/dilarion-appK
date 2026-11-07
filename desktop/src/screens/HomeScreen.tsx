@@ -2203,7 +2203,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
   // used to.
   const [callWindowOpen, setCallWindowOpen] = useState(false);
   // LiveKit gallery-view group call — separate from the mesh-based call window above.
-  const [activeGalleryCall, setActiveGalleryCall] = useState<{ conferenceId: number; initialMicOn?: boolean; initialCamOn?: boolean; displayName?: string; title?: string } | null>(null);
+  const [activeGalleryCall, setActiveGalleryCall] = useState<{ conferenceId: number; initialMicOn?: boolean; initialCamOn?: boolean; displayName?: string; title?: string; isAdHocCall?: boolean } | null>(null);
   const [galleryMinimized, setGalleryMinimized] = useState(false);
   // Device-setup lobby shown before actually connecting to a group call.
   const [meetingLobby, setMeetingLobby] = useState<
@@ -2515,7 +2515,9 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
           closeCallWindowIfOpen().catch(() => {});
           // Carry the 1:1 call's actual type into the conference — without
           // this the camera silently defaulted off even on a video call.
-          setActiveGalleryCall({ conferenceId: confId, initialCamOn: data.call_type === 'video' });
+          // isAdHocCall: this is still "a call" that picked up a third person,
+          // not a Meeting — keep the meeting-only chrome out of it.
+          setActiveGalleryCall({ conferenceId: confId, initialCamOn: data.call_type === 'video', isAdHocCall: true });
         }
       }
     };
@@ -2541,14 +2543,14 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
         const confId = detail?.conferenceId;
         if (!confId) return;
         setCallWindowOpen(false);
-        setActiveGalleryCall({ conferenceId: confId, initialCamOn: !!detail?.camOn });
+        setActiveGalleryCall({ conferenceId: confId, initialCamOn: !!detail?.camOn, isAdHocCall: true });
       };
       window.addEventListener(UPGRADE_TO_GALLERY_EVENT, onUpgrade);
       return () => window.removeEventListener(UPGRADE_TO_GALLERY_EVENT, onUpgrade);
     }
     const unlisten = listen<{ conferenceId: number; camOn?: boolean }>('dilarion://upgrade-to-gallery', (event) => {
       setCallWindowOpen(false);
-      setActiveGalleryCall({ conferenceId: event.payload.conferenceId, initialCamOn: !!event.payload.camOn });
+      setActiveGalleryCall({ conferenceId: event.payload.conferenceId, initialCamOn: !!event.payload.camOn, isAdHocCall: true });
     });
     return () => { unlisten.then(fn => fn()); };
   }, []);
@@ -3748,6 +3750,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
           initialCamOn={activeGalleryCall.initialCamOn}
           displayName={activeGalleryCall.displayName}
           title={activeGalleryCall.title}
+          isAdHocCall={activeGalleryCall.isAdHocCall}
           myUsername={username}
           masterToken={masterToken}
           onMasterTokenSaved={setMasterToken}

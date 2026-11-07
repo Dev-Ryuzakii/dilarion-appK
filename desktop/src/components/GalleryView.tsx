@@ -60,6 +60,7 @@ export default function GalleryView({
   onMinimize,
   onMaximize,
   title,
+  isAdHocCall = false,
 }: {
   token: string;
   conferenceId: number;
@@ -75,6 +76,11 @@ export default function GalleryView({
   onMaximize?: () => void;
   /** Header label, e.g. "Group voice call · Ops". Defaults to "Group Video". */
   title?: string;
+  /** A 1:1 call that picked up a third participant, not a Meeting someone
+   * explicitly started. Same room/transport (tiles, screen share, mic/cam) —
+   * just without meeting-only chrome (breakout rooms, waiting room/admit)
+   * that makes an ordinary call feel like it turned into a different app. */
+  isAdHocCall?: boolean;
 }) {
   const roomRef = useRef<Room | null>(null);
   const [tiles, setTiles] = useState<Record<string, Tile>>({});
@@ -331,7 +337,10 @@ export default function GalleryView({
   // just silently finds nothing to show for a guest. Refreshes on load and on
   // every "someone wants to join" WS push instead of polling.
   useEffect(() => {
-    getWaitingRoom(token, conferenceId).then(list => { setWaiting(list); setIsHost(true); }).catch(() => {});
+    // Still used for host detection (keeps the recording button working on
+    // an ad-hoc call); isAdHocCall only hides the waiting-room/breakout UI,
+    // it doesn't skip this.
+    getWaitingRoom(token, conferenceId).then(list => { setWaiting(isAdHocCall ? [] : list); setIsHost(true); }).catch(() => {});
     getMyOrgPrivileges(token).then(privs => setHasCallControlPriv(privs.includes('call_control'))).catch(() => {});
     const onMsg = (msg: WsMessage) => {
       if (msg.type === 'conference_join_request') {
@@ -718,7 +727,7 @@ export default function GalleryView({
         padding: '14px 20px', flexShrink: 0,
       }}>
         <span style={{ color: '#fff', fontWeight: 700, fontSize: '0.95rem', display: 'flex', alignItems: 'center', gap: 8 }}>
-          {inBreakoutName ? `Breakout: ${inBreakoutName}` : (title || 'Group Video')} {tileList.length > 0 && `· ${tileList.length}`}
+          {inBreakoutName ? `Breakout: ${inBreakoutName}` : (title || (isAdHocCall ? 'Group call' : 'Group Video'))} {tileList.length > 0 && `· ${tileList.length}`}
           {inBreakoutName && (
             <span style={{ background: 'rgba(124,58,237,0.25)', border: '1px solid rgba(124,58,237,0.5)', borderRadius: 20, padding: '2px 10px', fontSize: '0.68rem', color: '#c4b5fd', fontWeight: 700 }}>
               in breakout room
@@ -740,7 +749,7 @@ export default function GalleryView({
               style={{ background: recording ? 'rgba(239,68,68,0.25)' : 'rgba(255,255,255,0.1)', border: 'none', borderRadius: 8, color: '#fff', width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: recordingBusy ? 'wait' : 'pointer', opacity: recordingBusy ? 0.6 : 1 }}
             ><RecordIcon active={recording} /></button>
           )}
-          {isHost && (
+          {isHost && !isAdHocCall && (
             <button
               onClick={() => {
                 if (breakoutActive) { handleEndBreakout(); return; }
