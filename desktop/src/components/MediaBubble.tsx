@@ -240,6 +240,13 @@ function VoiceBubble({ token, mediaId, masterToken, onMasterTokenSaved, isMine, 
   // Whichever audio is currently loaded (decoy or, post-reveal, real) — kept
   // around so Transcribe can build a Blob without re-fetching.
   const audioBufRef = useRef<{ buf: Uint8Array; mime: string } | null>(null);
+  // Snapshot of the decoy (set once, on first load) so a 30s auto-relock can
+  // restore it without re-fetching — see reveal()'s relockTimerRef.
+  const decoySnapshotRef = useRef<{ url: string; waveform: number[]; durationMs: number; audioBuf: { buf: Uint8Array; mime: string } } | null>(null);
+  const relockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    return () => { if (relockTimerRef.current) clearTimeout(relockTimerRef.current); };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -254,7 +261,9 @@ function VoiceBubble({ token, mediaId, masterToken, onMasterTokenSaved, isMine, 
           extractWaveform(arrBuf),
         ]);
         if (cancelled) return;
-        audioBufRef.current = { buf, mime: mime.startsWith('audio/') ? mime : 'audio/mp4' };
+        const resolvedMime = mime.startsWith('audio/') ? mime : 'audio/mp4';
+        audioBufRef.current = { buf, mime: resolvedMime };
+        decoySnapshotRef.current = { url, waveform: wf.bars, durationMs: wf.durationMs, audioBuf: { buf, mime: resolvedMime } };
         setVoiceUrl(url);
         setWaveform(wf.bars);
         setDurationMs(wf.durationMs);
@@ -332,6 +341,23 @@ function VoiceBubble({ token, mediaId, masterToken, onMasterTokenSaved, isMine, 
       setTokenInputVisible(false);
       setTokenValue('');
       setRevealing(false);
+      // Mirrors EncryptedBubble's text-message behavior: a reveal is only
+      // good for 30s, then this falls back to the decoy and needs the master
+      // token again — unlocking one voice note was otherwise silently
+      // unlocking every media message in the thread for the rest of the session.
+      if (relockTimerRef.current) clearTimeout(relockTimerRef.current);
+      relockTimerRef.current = setTimeout(() => {
+        const decoy = decoySnapshotRef.current;
+        if (decoy) {
+          audioBufRef.current = decoy.audioBuf;
+          setVoiceUrl(decoy.url);
+          setWaveform(decoy.waveform);
+          setDurationMs(decoy.durationMs);
+          setPositionMs(0);
+          setIsPlaying(false);
+        }
+        setUsingReal(false);
+      }, 30000);
     } catch (err: any) {
       setRevealing(false);
       // 410/404: the real file is already gone server-side. The decoy stays
@@ -610,12 +636,18 @@ function VisualMediaBubble({
   const [tokenValue, setTokenValue] = useState('');
   const [viewerOpen, setViewerOpen] = useState(false);
   const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Mirrors EncryptedBubble's text-message behavior: a reveal is only good
+  // for 30s, then this falls back to the decoy and needs the master token
+  // again — unlocking one message was otherwise silently unlocking every
+  // media message in the thread for the rest of the session.
+  const relockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const isVideoAttachment = isVideoCt(contentType);
 
   useEffect(() => {
     return () => {
       if (clickTimerRef.current) clearTimeout(clickTimerRef.current);
+      if (relockTimerRef.current) clearTimeout(relockTimerRef.current);
     };
   }, []);
 
@@ -665,6 +697,12 @@ function VisualMediaBubble({
       setTokenInputVisible(false);
       setTokenValue('');
       setViewerOpen(true);
+      if (relockTimerRef.current) clearTimeout(relockTimerRef.current);
+      relockTimerRef.current = setTimeout(() => {
+        setObjectUrl(decoyImageCache.get(mediaId) ?? null);
+        setLightboxKind('image');
+        setStage('decoy');
+      }, 30000);
       // Message removal happens on viewer close (closeViewer), matching
       // DocumentBubble — closing here would unmount before anything paints.
     } catch (err: any) {
@@ -832,9 +870,13 @@ export function DocumentBubble({
   const [documentText, setDocumentText] = useState<string | null>(null);
   const [qaResult, setQaResult] = useState<{ title: string; loading: boolean; error: string | null; content: string | null } | null>(null);
   const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const relockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    return () => { if (clickTimerRef.current) clearTimeout(clickTimerRef.current); };
+    return () => {
+      if (clickTimerRef.current) clearTimeout(clickTimerRef.current);
+      if (relockTimerRef.current) clearTimeout(relockTimerRef.current);
+    };
   }, []);
 
   function closeViewer() {
@@ -877,6 +919,15 @@ export function DocumentBubble({
       setStage('revealed');
       setTokenInputVisible(false);
       setTokenValue('');
+      // Mirrors EncryptedBubble's text-message behavior: a reveal is only
+      // good for 30s, then this falls back to the decoy and needs the master
+      // token again — unlocking one document was otherwise silently
+      // unlocking every media message in the thread for the rest of the session.
+      if (relockTimerRef.current) clearTimeout(relockTimerRef.current);
+      relockTimerRef.current = setTimeout(() => {
+        setDocumentText(null);
+        loadDecoy();
+      }, 30000);
       // Message removal happens on viewer close (closeViewer), not here — see
       // its comment for why.
     } catch (err: any) {
