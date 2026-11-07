@@ -82,6 +82,16 @@ export default function GalleryView({
   const [connecting, setConnecting] = useState(true);
   const [micOn, setMicOn] = useState(initialMicOn);
   const [camOn, setCamOn] = useState(initialCamOn);
+  // Mirrors of the two above for the room-(re)connect effect below, which
+  // intentionally doesn't depend on micOn/camOn (it would reconnect on every
+  // mute toggle otherwise) but still needs their current value — not the
+  // original initialMicOn/initialCamOn props — every time it reconnects,
+  // including a breakout-room hop. Using the stale initial props there was
+  // silently re-enabling the mic/camera on every breakout start/end.
+  const micOnRef = useRef(initialMicOn);
+  const camOnRef = useRef(initialCamOn);
+  useEffect(() => { micOnRef.current = micOn; }, [micOn]);
+  useEffect(() => { camOnRef.current = camOn; }, [camOn]);
   const [screenSharing, setScreenSharing] = useState(false);
   const [showReactionPicker, setShowReactionPicker] = useState(false);
   const [floatingReactions, setFloatingReactions] = useState<FloatingReaction[]>([]);
@@ -299,8 +309,8 @@ export default function GalleryView({
         if (cancelled) { room.disconnect(); return; }
         upsertTile(room.localParticipant, true);
         for (const p of room.remoteParticipants.values()) upsertTile(p, false);
-        await room.localParticipant.setMicrophoneEnabled(initialMicOn);
-        await room.localParticipant.setCameraEnabled(initialCamOn);
+        await room.localParticipant.setMicrophoneEnabled(micOnRef.current);
+        await room.localParticipant.setCameraEnabled(camOnRef.current);
         setConnecting(false);
       } catch (err: any) {
         if (!cancelled) {

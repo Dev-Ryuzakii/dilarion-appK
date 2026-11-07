@@ -2513,9 +2513,9 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
           stopRinging();
           setIncomingCall(null);
           closeCallWindowIfOpen().catch(() => {});
-          // The other side added someone to our 1:1 call; we weren't asked to
-          // turn a camera on, so don't default one on for them here.
-          setActiveGalleryCall({ conferenceId: confId, initialCamOn: false });
+          // Carry the 1:1 call's actual type into the conference — without
+          // this the camera silently defaulted off even on a video call.
+          setActiveGalleryCall({ conferenceId: confId, initialCamOn: data.call_type === 'video' });
         }
       }
     };
