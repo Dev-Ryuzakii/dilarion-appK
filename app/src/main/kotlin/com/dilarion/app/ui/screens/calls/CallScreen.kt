@@ -19,10 +19,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.composed
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.ImageShader
+import androidx.compose.ui.graphics.ShaderBrush
+import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.imageResource
+import com.dilarion.app.R
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -42,7 +49,25 @@ import org.webrtc.EglBase
 import org.webrtc.SurfaceViewRenderer
 import org.webrtc.VideoTrack
 
-internal val CallBackground = Color(0xFF1A1A2E)
+// Matches desktop's call screen stage color (#0b0b0b), not the old flat
+// purple-blue — the two platforms should look like the same app.
+internal val CallBackground = Color(0xFF0B0B0B)
+
+/** The same tiled WhatsApp-style doodle wallpaper desktop's call window uses
+ * (call_bg.svg, rasterized once into res/drawable-nodpi/call_bg_tile.png) —
+ * draw this brush on top of a CallBackground-filled surface. */
+@Composable
+internal fun callWallpaperBrush(): Brush {
+    val bitmap = ImageBitmap.imageResource(id = R.drawable.call_bg_tile)
+    return remember(bitmap) {
+        ShaderBrush(ImageShader(bitmap, TileMode.Repeated, TileMode.Repeated))
+    }
+}
+
+/** CallBackground fill + the tiled doodle wallpaper on top, in one call. */
+internal fun Modifier.callWallpaper(): Modifier = composed {
+    this.background(CallBackground).background(callWallpaperBrush())
+}
 internal val EndCallRed = Color(0xFFE53935)
 internal val AcceptGreen = Color(0xFF43A047)
 private val ControlButton = Color(0xFF2C2C54)
@@ -175,7 +200,7 @@ fun IncomingCallOverlay(
         )
     } else {
         Box(
-            modifier = Modifier.fillMaxSize().background(CallBackground),
+            modifier = Modifier.fillMaxSize().callWallpaper(),
             contentAlignment = Alignment.Center,
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxSize()) {
@@ -268,7 +293,7 @@ private fun CallContent(
         }
         else -> {
             // Voice call or no camera yet
-            Box(modifier = Modifier.fillMaxSize().background(CallBackground)) {
+            Box(modifier = Modifier.fillMaxSize().callWallpaper()) {
                 if (uiState.state == CallState.CONNECTED) {
                     TopRightCallActions(
                         uiState, viewModel, showFlip = false, onMinimize = onMinimize,
