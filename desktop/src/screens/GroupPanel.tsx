@@ -13,6 +13,8 @@ import {
   decryptChatMessage,
   confirmMasterToken,
   uploadGroupMedia,
+  downloadMedia,
+  uploadMedia,
   toggleReaction,
   editMessage,
   deleteMessage,
@@ -38,6 +40,7 @@ import { getSticker } from '../components/stickers';
 import CopilotResultModal from '../components/CopilotResultModal';
 import MasterTokenPromptModal from '../components/MasterTokenPromptModal';
 import { GroupInfoDrawer } from '../components/GroupDialogs';
+import ForwardRecipientPicker from '../components/ForwardRecipientPicker';
 import DeleteMessageDialog, { DeleteScope } from '../components/DeleteMessageDialog';
 import { summarizeThreadCopilot, composeReplyCopilot, translateCopilot } from '../services/api';
 import { userMessage } from '../services/errors';
@@ -92,6 +95,19 @@ function isMedia(ct: string | null | undefined): boolean {
 }
 function isDocument(ct: string | null | undefined): boolean {
   return isMedia(ct) && !isImage(ct) && !isVoice(ct);
+}
+// A reasonable filename for a forwarded media blob re-uploaded under a new
+// message — the server only needs a plausible extension, not the original name.
+function extensionForContentType(ct: string | null | undefined): string {
+  if (!ct) return '.bin';
+  const map: Record<string, string> = {
+    'image/jpeg': '.jpg', 'image/png': '.png', 'image/gif': '.gif', 'image/webp': '.webp',
+    'audio/mp4': '.m4a', 'audio/mpeg': '.mp3', 'audio/webm': '.webm', 'media/voice': '.m4a',
+    'application/pdf': '.pdf',
+  };
+  if (map[ct]) return map[ct];
+  const slash = ct.split('/')[1];
+  return slash ? `.${slash.split(';')[0]}` : '.bin';
 }
 
 const DECOY_KIND_LABELS: [DecoyKind, string][] = [
@@ -601,7 +617,7 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
   const [starredIds, setStarredIds] = useState<Set<number>>(new Set());
   const [editingMessage, setEditingMessage] = useState<ChatMessage | null>(null);
   const [forwardTarget, setForwardTarget] = useState<ChatMessage | null>(null);
-  const [forwardUsername, setForwardUsername] = useState('');
+  const [forwardBusy, setForwardBusy] = useState(false);
   const [forwardError, setForwardError] = useState<string | null>(null);
   const [copilotResult, setCopilotResult] = useState<{ title: string; loading: boolean; error: string | null; content: string | null } | null>(null);
   const [tokenGateOpen, setTokenGateOpen] = useState(false);
@@ -827,30 +843,42 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
     }
   }
 
-  async function handleForwardConfirm() {
+  async function handleForwardConfirm(targetUsername: string) {
     const target = forwardTarget;
-    const targetUsername = forwardUsername.trim();
     if (!target || !targetUsername) return;
     setForwardError(null);
-    if (!masterToken) {
-      setForwardError('Unlock this message with your master token first');
-      return;
-    }
+    setForwardBusy(true);
+    const ct = target.content_type;
     try {
-      const plaintext = await handleDecrypt(masterToken, target.id);
-      const deviceKeys = await buildRecipientKeys(
-        token, [targetUsername, myUsername],
-        `${targetUsername} has no linked devices with encryption keys yet`,
-      );
-      const { ciphertext, encryptedKeys, iv } = await encryptMessage(plaintext, deviceKeys);
-      await sendText(token, targetUsername, ciphertext, {
-        encryptedKey: JSON.stringify(encryptedKeys), iv, decoyContent: generateDecoy(),
-        forwardedFromMessageId: target.id,
-      });
+      if (isImage(ct) || isMedia(ct) || isVoice(ct) || isDocument(ct)) {
+        // Media isn't end-to-end encrypted client-side the way text is — it's
+        // master-token-gated storage (see MediaBubble's reveal()). Forwarding
+        // it is just moving the bytes to a new recipient, not a decrypt step,
+        // so this never needed the master token at all.
+        const blob = await downloadMedia(token, target.content);
+        const filename = `forwarded${extensionForContentType(ct)}`;
+        await uploadMedia(token, targetUsername, blob, ct, filename, undefined, target.id);
+      } else {
+        if (!masterToken) {
+          setForwardError('Unlock this message with your master token first');
+          return;
+        }
+        const plaintext = await handleDecrypt(masterToken, target.id);
+        const deviceKeys = await buildRecipientKeys(
+          token, [targetUsername, myUsername],
+          `${targetUsername} has no linked devices with encryption keys yet`,
+        );
+        const { ciphertext, encryptedKeys, iv } = await encryptMessage(plaintext, deviceKeys);
+        await sendText(token, targetUsername, ciphertext, {
+          encryptedKey: JSON.stringify(encryptedKeys), iv, decoyContent: generateDecoy(),
+          forwardedFromMessageId: target.id,
+        });
+      }
       setForwardTarget(null);
-      setForwardUsername('');
     } catch (err: any) {
       setForwardError(userMessage(err, "Couldn't forward that message. Please try again."));
+    } finally {
+      setForwardBusy(false);
     }
   }
 
@@ -1121,7 +1149,7 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
                 replyToMsg={msg.reply_to_message_id ? messages.find(m => m.id === msg.reply_to_message_id) ?? null : null}
                 onReact={emoji => handleReact(msg.id, emoji)}
                 onReply={() => { setReplyTarget(msg); setEditingMessage(null); }}
-                onForward={() => { setForwardTarget(msg); setForwardUsername(''); setForwardError(null); }}
+                onForward={() => { setForwardTarget(msg); setForwardError(null); }}
                 onPinToggle={() => handlePinToggle(msg)}
                 onStarToggle={() => handleStarToggle(msg)}
                 onEdit={() => handleEditStart(msg)}
@@ -1224,23 +1252,13 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
       )}
 
       {forwardTarget && (
-        <div className="responsive-overlay" style={{ position: 'fixed', inset: 0, zIndex: 900, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div className="responsive-dialog" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 12, padding: 20, width: 320 }}>
-            <h3 style={{ margin: 0, marginBottom: 12, fontSize: '0.95rem' }}>Forward message</h3>
-            <input
-              autoFocus
-              value={forwardUsername}
-              onChange={e => setForwardUsername(e.target.value)}
-              placeholder="Recipient username"
-              style={{ width: '100%', background: 'var(--input-field-bg)', border: '1px solid var(--border-color)', borderRadius: 8, color: 'var(--text-primary)', fontSize: '0.85rem', padding: '8px 10px', marginBottom: 10 }}
-            />
-            {forwardError && <p style={{ color: '#ef4444', fontSize: '0.75rem', marginBottom: 10 }}>{forwardError}</p>}
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-              <button onClick={() => setForwardTarget(null)} style={{ background: 'transparent', border: '1px solid var(--border-color)', borderRadius: 8, color: 'var(--text-primary)', padding: '7px 14px', cursor: 'pointer', fontSize: '0.8rem' }}>Cancel</button>
-              <button onClick={handleForwardConfirm} disabled={!forwardUsername.trim()} style={{ background: 'var(--accent)', border: 'none', borderRadius: 8, color: '#fff', padding: '7px 14px', cursor: 'pointer', fontSize: '0.8rem' }}>Forward</button>
-            </div>
-          </div>
-        </div>
+        <ForwardRecipientPicker
+          token={token}
+          onCancel={() => setForwardTarget(null)}
+          onConfirm={handleForwardConfirm}
+          busy={forwardBusy}
+          error={forwardError}
+        />
       )}
 
       {sendError && (

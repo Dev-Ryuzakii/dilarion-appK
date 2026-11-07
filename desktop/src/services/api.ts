@@ -357,12 +357,14 @@ export async function uploadMedia(
   contentType: string,
   filename: string,
   decoyKind?: DecoyKind,
+  forwardedFromMessageId?: number,
 ): Promise<{ media_id: string }> {
   const form = new FormData();
   form.append('username', recipient);
   form.append('file', file, filename);
   form.append('content_type', contentType);
   if (decoyKind) form.append('decoy_kind', decoyKind);
+  if (forwardedFromMessageId != null) form.append('forwarded_from_message_id', String(forwardedFromMessageId));
   const res = await apiFetch(`${BASE}/media/upload_raw`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
@@ -379,12 +381,14 @@ export async function uploadGroupMedia(
   contentType: string,
   filename: string,
   decoyKind?: DecoyKind,
+  forwardedFromMessageId?: number,
 ): Promise<{ media_id: string }> {
   const form = new FormData();
   form.append('group_id', String(groupId));
   form.append('file', file, filename);
   form.append('content_type', contentType);
   if (decoyKind) form.append('decoy_kind', decoyKind);
+  if (forwardedFromMessageId != null) form.append('forwarded_from_message_id', String(forwardedFromMessageId));
   const res = await apiFetch(`${BASE}/media/upload_raw_group`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
