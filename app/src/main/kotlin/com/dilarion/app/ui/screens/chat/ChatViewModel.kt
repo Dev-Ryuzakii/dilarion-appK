@@ -326,6 +326,18 @@ class ChatViewModel @Inject constructor(
         if (targetKey.startsWith("msg_")) {
             decryptOne(targetKey.removePrefix("msg_").toIntOrNull())
         }
+        // Auto-relock after 30s, like desktop's EncryptedBubble/MediaBubble —
+        // reopening this exact item within that window needs no re-entry,
+        // past it the master token is required again, not silently reused.
+        viewModelScope.launch {
+            kotlinx.coroutines.delay(30_000)
+            _uiState.value = _uiState.value.copy(unlockedIds = _uiState.value.unlockedIds - targetKey)
+            if (targetKey.startsWith("msg_")) {
+                targetKey.removePrefix("msg_").toIntOrNull()?.let { id ->
+                    _uiState.value = _uiState.value.copy(decryptedTexts = _uiState.value.decryptedTexts - id)
+                }
+            }
+        }
         return true
     }
 

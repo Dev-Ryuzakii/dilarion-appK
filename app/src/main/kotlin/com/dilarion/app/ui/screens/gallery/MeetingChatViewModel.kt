@@ -83,6 +83,15 @@ class MeetingChatViewModel @Inject constructor(
         if (saved == null || enteredToken != saved) return false
         _uiState.value = _uiState.value.copy(unlockedIds = _uiState.value.unlockedIds + messageId)
         decryptOne(messageId)
+        // Auto-relock after 30s — reopening this exact message within that
+        // window needs no re-entry, past it the master token is required again.
+        viewModelScope.launch {
+            kotlinx.coroutines.delay(30_000)
+            _uiState.value = _uiState.value.copy(
+                unlockedIds = _uiState.value.unlockedIds - messageId,
+                decryptedTexts = _uiState.value.decryptedTexts - messageId,
+            )
+        }
         return true
     }
 
