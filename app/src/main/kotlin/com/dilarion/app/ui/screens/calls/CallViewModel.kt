@@ -92,6 +92,26 @@ class CallViewModel @Inject constructor(
     private var timerJob: kotlinx.coroutines.Job? = null
     private var answerPollJob: kotlinx.coroutines.Job? = null
     private var wsObserverJob: kotlinx.coroutines.Job? = null
+    private var iceConnectedJob: kotlinx.coroutines.Job? = null
+
+    // The only honest "call connected" signal — the PeerConnection's own ICE
+    // state, not "the SDP answer arrived" (caller) or "the HTTP accept
+    // succeeded" (callee). Either of those can fire well before media is
+    // actually flowing, showing a running timer on one side while the other
+    // is still negotiating. Started once per call right after the
+    // PeerConnection is created.
+    private fun observeIceConnected() {
+        iceConnectedJob?.cancel()
+        iceConnectedJob = viewModelScope.launch {
+            webRtcManager.iceConnected.collect { connected ->
+                if (connected && _uiState.value.state != CallState.CONNECTED) {
+                    _uiState.value = _uiState.value.copy(state = CallState.CONNECTED)
+                    rememberSession()
+                    startTimer()
+                }
+            }
+        }
+    }
     private var pendingCandidates = mutableListOf<IceCandidate>()
     private var storedOfferSdp: String? = null
     // Answer kept so a rejected master token can be retried without rebuilding it.
@@ -122,6 +142,7 @@ class CallViewModel @Inject constructor(
                 webRtcManager.createPeerConnection(onIce = { candidate ->
                     viewModelScope.launch { sendIceCandidate(peerUsername, candidate) }
                 })
+                observeIceConnected()
                 val offerSdp = webRtcManager.createOffer()
                 val resp = apiService.initiateCall(
                     "Bearer $token",
@@ -169,6 +190,7 @@ class CallViewModel @Inject constructor(
                 webRtcManager.createPeerConnection(onIce = { candidate ->
                     viewModelScope.launch { sendIceCandidate(incoming.callerUsername, candidate) }
                 })
+                observeIceConnected()
             }.onFailure { e ->
                 _uiState.value = _uiState.value.copy(error = e.toUserMessage("Couldn't connect to the call. Check your connection and retry."))
             }
@@ -232,12 +254,12 @@ class CallViewModel @Inject constructor(
                     )
                 }
                 flushPendingCandidates(token, peerUsername, callId)
-                _uiState.value = _uiState.value.copy(
-                    state = CallState.CONNECTED,
-                    masterTokenRejected = false,
-                )
+                // state stays as-is here (not yet CONNECTED) — observeIceConnected()
+                // is the only place that flips it, once ICE actually finishes.
+                // Flipping here on a successful accept response showed "Connected"
+                // with a running timer before media had actually negotiated.
+                _uiState.value = _uiState.value.copy(masterTokenRejected = false)
                 rememberSession()
-                startTimer()
             }.onFailure { e ->
                 // Unrecoverable — the caller was never told, so do not sit in a
                 // half-open state pretending to be connected.
@@ -326,9 +348,9 @@ class CallViewModel @Inject constructor(
                             webRtcManager.addIceCandidate(mid, idx, cand)
                         }
                         pendingRemoteCandidates.clear()
-                        _uiState.value = _uiState.value.copy(state = CallState.CONNECTED)
+                        // Not CONNECTED yet — observeIceConnected() flips it once ICE
+                        // actually finishes, not as soon as the answer SDP arrives.
                         rememberSession()
-                        startTimer()
                         return@launch
                     }
                     "decline", "declined", "end", "busy" -> {
@@ -460,9 +482,9 @@ class CallViewModel @Inject constructor(
                                     webRtcManager.addIceCandidate(mid, idx, cand)
                                 }
                                 pendingRemoteCandidates.clear()
-                                _uiState.value = _uiState.value.copy(state = CallState.CONNECTED)
+                                // Not CONNECTED yet — observeIceConnected() flips it once ICE
+                                // actually finishes, not as soon as the answer SDP arrives.
                                 rememberSession()
-                                startTimer()
                             }
                             "calling" -> _uiState.value = _uiState.value.copy(state = CallState.RINGING)
                             "ringing" -> _uiState.value = _uiState.value.copy(state = CallState.RINGING)

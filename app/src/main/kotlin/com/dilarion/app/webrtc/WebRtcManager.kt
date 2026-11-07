@@ -48,6 +48,13 @@ class WebRtcManager @Inject constructor(
     private val _remoteVideo = MutableStateFlow<VideoTrack?>(null)
     val remoteVideo: StateFlow<VideoTrack?> = _remoteVideo
 
+    // True once the 1:1 call's PeerConnection actually finishes ICE — the only
+    // honest "connected" signal. A caller that flips its own UI to Connected
+    // as soon as the answer SDP arrives (before ICE negotiation finishes) can
+    // show a running timer for a call the other side is still negotiating.
+    private val _iceConnected = MutableStateFlow(false)
+    val iceConnected: StateFlow<Boolean> = _iceConnected
+
     // Set to true while a call is active; AudioMonitor checks this
     @Volatile var callActive: Boolean = false
     // Track user's speaker preference so ICE reconnect doesn't override it
@@ -203,6 +210,7 @@ class WebRtcManager @Inject constructor(
                 Log.i(TAG, "iceConnectionState=$s")
                 if (s == PeerConnection.IceConnectionState.CONNECTED ||
                     s == PeerConnection.IceConnectionState.COMPLETED) {
+                    _iceConnected.value = true
                     logSelectedCandidatePair()
                     applyAudioOutput(userSpeakerOn)
                     Log.i(TAG, "audio output re-applied on ICE connect, speaker=$userSpeakerOn")
@@ -623,6 +631,7 @@ class WebRtcManager @Inject constructor(
         localAudioSource = null
         _localVideo.value = null
         _remoteVideo.value = null
+        _iceConnected.value = false
         val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             am.clearCommunicationDevice()
