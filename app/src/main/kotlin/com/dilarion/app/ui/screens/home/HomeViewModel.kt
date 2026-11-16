@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.dilarion.app.data.api.ApiService
 import com.dilarion.app.data.model.CallHistoryItem
+import com.dilarion.app.data.model.Channel
 import com.dilarion.app.data.model.Group
 import com.dilarion.app.data.model.Message
 import com.dilarion.app.security.SessionManager
@@ -21,6 +22,7 @@ data class HomeUiState(
     val isLoading: Boolean = true,
     val messages: List<Message> = emptyList(),
     val groups: List<Group> = emptyList(),
+    val channels: List<Channel> = emptyList(),
     val callHistory: List<CallHistoryItem> = emptyList(),
     val isCallHistoryLoading: Boolean = false,
     val currentUsername: String = "",
@@ -57,10 +59,12 @@ class HomeViewModel @Inject constructor(
                 val bearer = "Bearer $token"
                 val messagesResp = apiService.getInbox(bearer)
                 val groupsResp   = apiService.getMyGroups(bearer)
+                val channelsResp = runCatching { apiService.listChannels(bearer) }.getOrNull()
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,
                     messages  = messagesResp.body()?.messages ?: emptyList(),
                     groups    = groupsResp.body() ?: emptyList(),
+                    channels  = channelsResp?.body() ?: emptyList(),
                 )
             }.onFailure { e ->
                 _uiState.value = _uiState.value.copy(isLoading = false, error = e.toUserMessage("Couldn't load your chats. Check your connection and try again."))

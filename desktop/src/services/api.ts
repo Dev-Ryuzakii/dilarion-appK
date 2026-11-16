@@ -31,6 +31,9 @@ export interface ChatMessage {
   iv?: string | null;
   reactions?: MessageReaction[];
   reply_to_message_id?: number | null;
+  thread_root_id?: number | null;
+  thread_reply_count?: number;
+  thread_last_reply_at?: string | null;
   forwarded_from_message_id?: number | null;
   is_edited?: boolean;
   is_deleted?: boolean;
@@ -51,8 +54,14 @@ export interface Group {
   created_by?: number;
   /** Group-wide disappearing-message timer in hours; null = off. */
   disappear_after_hours?: number | null;
-  /** The viewer's role in this group ('admin' | 'member'). */
+  /** The viewer's role in this group ('owner' | 'admin' | 'member'). */
   my_role?: string | null;
+  kind?: string | null;
+  topic?: string | null;
+  visibility?: string | null;
+  posting_policy?: string | null;
+  is_archived?: boolean;
+  unread_count?: number;
 }
 
 // ── Auth ───────────────────────────────────────────────────────────────────────
@@ -610,7 +619,7 @@ export async function sendGroupMessage(
   token: string,
   groupId: number,
   message: string,
-  opts: { encryptedKey: string; iv: string; decoyContent: string; replyToMessageId?: number; forwardedFromMessageId?: number; mentions?: string[]; contentType?: 'gif' | 'sticker' },
+  opts: { encryptedKey: string; iv: string; decoyContent: string; replyToMessageId?: number; threadRootId?: number; forwardedFromMessageId?: number; mentions?: string[]; contentType?: 'gif' | 'sticker' },
   addressedToUsername?: string,
 ): Promise<void> {
   const body: Record<string, unknown> = {
@@ -620,6 +629,7 @@ export async function sendGroupMessage(
     iv: opts.iv,
     decoy_content: opts.decoyContent,
     reply_to_message_id: opts.replyToMessageId ?? null,
+    thread_root_id: opts.threadRootId ?? null,
     forwarded_from_message_id: opts.forwardedFromMessageId ?? null,
     mentions: opts.mentions ?? null,
     content_type: opts.contentType ?? null,
@@ -1267,12 +1277,13 @@ export async function denyFromWaitingRoom(token: string, conferenceId: number, u
 // client — it lands directly on the VPS, visible only via the superadmin
 // Drive site.
 
-export async function startConferenceRecording(token: string, conferenceId: number): Promise<void> {
+export async function startConferenceRecording(token: string, conferenceId: number): Promise<{ recording_id: number }> {
   const res = await apiFetch(`${BASE}/calls/conference/${conferenceId}/recording/start`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) throw new Error((await res.json().catch(() => null))?.detail || `Failed to start recording (${res.status})`);
+  return res.json();
 }
 
 export async function stopConferenceRecording(token: string, conferenceId: number): Promise<void> {
@@ -1569,6 +1580,14 @@ export async function createMasterToken(token: string, masterToken: string, twoF
 // decoy voice note in the user's own voice for every real one sent. The
 // sample itself never comes back down — see media/decoy-voice.
 
+async function voiceDetail(res: Response, fallback: string): Promise<string> {
+  try {
+    const body = await res.json();
+    if (typeof body?.detail === 'string' && body.detail) return body.detail;
+  } catch { /* the fallback is the message the screen shows */ }
+  return fallback;
+}
+
 export async function uploadVoiceIdentity(token: string, blob: Blob, filename = 'voice_identity.webm'): Promise<void> {
   const form = new FormData();
   form.append('file', blob, filename);
@@ -1577,7 +1596,7 @@ export async function uploadVoiceIdentity(token: string, blob: Blob, filename = 
     headers: { Authorization: `Bearer ${token}` },
     body: form,
   });
-  if (!res.ok) throw new Error('Failed to save voice sample');
+  if (!res.ok) throw new Error(await voiceDetail(res, 'Failed to save voice sample'));
 }
 
 export async function hasVoiceIdentity(token: string, username: string): Promise<boolean> {
@@ -1585,6 +1604,51 @@ export async function hasVoiceIdentity(token: string, username: string): Promise
     headers: { Authorization: `Bearer ${token}` },
   });
   return res.ok;
+}
+
+export type VoiceSpeechClip = { id: string; text: string; created_at: string };
+
+export async function listVoiceSpeech(token: string): Promise<VoiceSpeechClip[]> {
+  const res = await apiFetch(`${BASE}/users/me/voice-speech`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error(await voiceDetail(res, "Couldn't load generated speech"));
+  const body = await res.json();
+  return Array.isArray(body.clips) ? body.clips : [];
+}
+
+export async function createVoiceSpeech(token: string, text: string): Promise<VoiceSpeechClip> {
+  const res = await apiFetch(`${BASE}/users/me/voice-speech`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ text }),
+  });
+  if (!res.ok) throw new Error(await voiceDetail(res, "Couldn't generate speech"));
+  return res.json();
+}
+
+export async function fetchVoiceSpeech(token: string, clipId: string): Promise<Blob> {
+  const res = await apiFetch(`${BASE}/users/me/voice-speech/${encodeURIComponent(clipId)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error(await voiceDetail(res, "Couldn't play that clip"));
+  return res.blob();
+}
+
+export async function deleteVoiceSpeech(token: string, clipId: string): Promise<void> {
+  const res = await apiFetch(`${BASE}/users/me/voice-speech/${encodeURIComponent(clipId)}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error(await voiceDetail(res, "Couldn't delete that clip"));
+}
+
+export async function deleteVoiceIdentity(token: string): Promise<void> {
+  const res = await apiFetch(`${BASE}/users/me/voice-identity`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error(await voiceDetail(res, "Couldn't delete your voice enrollment"));
 }
 
 export async function getMasterTokenStatus(token: string): Promise<{ exists: boolean; twofa_enabled: boolean }> {
@@ -2516,7 +2580,143 @@ export interface SearchResults {
   query: string;
   people: { username: string; full_name: string | null; department: string | null; availability_status: string | null }[];
   groups: { id: number; name: string; description: string | null; member_count: number }[];
+  channels?: { id: number; name: string; topic: string | null; description: string | null; visibility: string; member_count: number }[];
   files: { media_id: string; filename: string; media_type: string; content_type: string; file_size: number; group_id: number | null; created_at: string | null }[];
+}
+
+export interface ChannelSummary {
+  id: number;
+  name: string;
+  slug?: string | null;
+  topic?: string | null;
+  description?: string | null;
+  visibility: string;
+  posting_policy: string;
+  is_archived: boolean;
+  member_count: number;
+  my_role?: string | null;
+  unread_count?: number;
+  kind?: string;
+}
+
+async function channelJson<T>(res: Response): Promise<T> {
+  if (!res.ok) {
+    let detail = `Request failed (${res.status})`;
+    try { detail = (await res.json()).detail || detail; } catch { /* keep status */ }
+    throw new Error(typeof detail === 'string' ? detail : 'Request failed');
+  }
+  return res.json();
+}
+
+export async function listChannels(token: string): Promise<ChannelSummary[]> {
+  const res = await apiFetch(`${BASE}/channels`, { headers: { Authorization: `Bearer ${token}` } });
+  return channelJson(res);
+}
+
+export async function browseChannels(token: string, q = ''): Promise<ChannelSummary[]> {
+  const res = await apiFetch(`${BASE}/channels/browse?q=${encodeURIComponent(q)}`, { headers: { Authorization: `Bearer ${token}` } });
+  return channelJson(res);
+}
+
+export async function createChannel(token: string, body: { name: string; topic?: string; description?: string; visibility: string; posting_policy: string; members?: string[] }): Promise<ChannelSummary> {
+  const res = await apiFetch(`${BASE}/channels`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return channelJson(res);
+}
+
+export async function joinChannel(token: string, id: number): Promise<ChannelSummary> {
+  const res = await apiFetch(`${BASE}/channels/${id}/join`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+  return channelJson(res);
+}
+
+export async function patchChannel(token: string, id: number, body: Record<string, unknown>): Promise<ChannelSummary> {
+  const res = await apiFetch(`${BASE}/channels/${id}`, {
+    method: 'PATCH',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return channelJson(res);
+}
+
+export async function archiveChannel(token: string, id: number, archived: boolean): Promise<ChannelSummary> {
+  const res = await apiFetch(`${BASE}/channels/${id}/${archived ? 'archive' : 'unarchive'}`, {
+    method: 'POST', headers: { Authorization: `Bearer ${token}` },
+  });
+  return channelJson(res);
+}
+
+export async function transferChannel(token: string, id: number, username: string): Promise<ChannelSummary> {
+  const res = await apiFetch(`${BASE}/channels/${id}/transfer-ownership`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username }),
+  });
+  return channelJson(res);
+}
+
+export interface ThreadPage {
+  root_id: number;
+  thread_reply_count: number;
+  following: boolean;
+  replies: ChatMessage[];
+}
+
+export async function getThread(token: string, channelId: number, rootId: number): Promise<ThreadPage> {
+  const res = await apiFetch(`${BASE}/channels/${channelId}/threads/${rootId}`, { headers: { Authorization: `Bearer ${token}` } });
+  return channelJson(res);
+}
+
+export async function setThreadFollow(token: string, channelId: number, rootId: number, follow: boolean): Promise<void> {
+  const res = await apiFetch(`${BASE}/channels/${channelId}/threads/${rootId}/follow`, {
+    method: follow ? 'POST' : 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error('Could not update thread follow');
+}
+
+export interface MeetingNotes {
+  recording_id: number;
+  ai_status: string | null;
+  ai_error: string | null;
+  providers: string | null;
+  notes: { summary?: string; key_points?: string[]; decisions?: string[]; action_items?: { task: string; owner: string; due: string }[] } | null;
+  transcript?: string | null;
+  segments?: { speaker: string | null; start: number | null; end: number | null; text: string }[] | null;
+}
+
+export async function getMeetingNotes(token: string, recordingId: number): Promise<MeetingNotes> {
+  const res = await apiFetch(`${BASE}/meetings/recordings/${recordingId}/notes?include_transcript=true`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return channelJson(res);
+}
+
+export async function startMeetingNotes(token: string, recordingId: number): Promise<void> {
+  const res = await apiFetch(`${BASE}/meetings/recordings/${recordingId}/notes`, {
+    method: 'POST', headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok && res.status !== 202) {
+    let detail = 'Could not start notes';
+    try { detail = (await res.json()).detail || detail; } catch { /* status */ }
+    throw new Error(detail);
+  }
+}
+
+export async function createActionTask(token: string, recordingId: number, index: number): Promise<{ task_id: number }> {
+  const res = await apiFetch(`${BASE}/meetings/recordings/${recordingId}/notes/action-items/${index}/task`, {
+    method: 'POST', headers: { Authorization: `Bearer ${token}` },
+  });
+  return channelJson(res);
+}
+
+export async function shareNotesText(token: string, recordingId: number): Promise<{ group_id: number | null; text: string }> {
+  const res = await apiFetch(`${BASE}/meetings/recordings/${recordingId}/notes/share`, {
+    method: 'POST', headers: { Authorization: `Bearer ${token}` },
+  });
+  return channelJson(res);
 }
 
 export async function searchAll(token: string, q: string): Promise<SearchResults> {

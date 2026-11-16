@@ -9,7 +9,7 @@ import SwiftUI
 // - Empty states
 // - Call history rows
 
-enum HomeTab { case chats, groups, tasks, calls }
+enum HomeTab { case chats, groups, channels, tasks, calls }
 
 struct HomeView: View {
     let onLogout: () -> Void
@@ -34,6 +34,8 @@ struct HomeView: View {
                             ChatsTab(state: vm.state, onOpenChat: { peer in navigateTo = peer })
                         case .groups:
                             GroupsTab(state: vm.state, onOpenGroup: { group in navigateToGroup = group })
+                        case .channels:
+                            ChannelsTab(onOpen: { group in navigateToGroup = group })
                         case .tasks:
                             TasksTab()
                         case .calls:
@@ -195,6 +197,41 @@ struct ChatsTab: View {
                 .background(Color.backgroundGrey)
             }
         }
+    }
+}
+
+struct ChannelsTab: View {
+    let onOpen: (Group) -> Void
+    @State private var channels: [ChannelItem] = []
+    @State private var error: String?
+
+    var body: some View {
+        List(channels) { channel in
+            Button {
+                onOpen(Group(id: channel.id, name: channel.name, description: channel.description, createdAt: nil, createdBy: nil, memberCount: channel.member_count))
+            } label: {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("#\(channel.name)").foregroundColor(Color.textPrimary)
+                    if let topic = channel.topic, !topic.isEmpty {
+                        Text(topic).font(.caption).foregroundColor(Color.textSecondary)
+                    }
+                    if channel.is_archived {
+                        Text("Archived").font(.caption).foregroundColor(.orange)
+                    }
+                }
+            }
+        }
+        .listStyle(.plain)
+        .overlay {
+            if channels.isEmpty { Text(error ?? "No channels yet").foregroundColor(Color.textSecondary) }
+        }
+        .task { await reload() }
+        .refreshable { await reload() }
+    }
+
+    private func reload() async {
+        do { channels = try await APIClient.shared.listChannels(); error = nil }
+        catch { self.error = error.localizedDescription }
     }
 }
 
@@ -658,6 +695,7 @@ struct BottomNavBar: View {
         HStack(spacing: 0) {
             TabBarItem(icon: "bubble.left.and.bubble.right.fill", label: "Chats", tab: .chats, selected: $selected)
             TabBarItem(icon: "person.3.fill", label: "Groups", tab: .groups, selected: $selected)
+            TabBarItem(icon: "number", label: "Channels", tab: .channels, selected: $selected)
             TabBarItem(icon: "checklist", label: "Tasks", tab: .tasks, selected: $selected)
             TabBarItem(icon: "phone.fill", label: "Calls", tab: .calls, selected: $selected)
         }

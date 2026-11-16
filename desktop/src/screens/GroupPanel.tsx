@@ -25,6 +25,11 @@ import {
   getStarredMessages,
   GifResult,
   formatDisappear,
+  getThread,
+  setThreadFollow,
+  patchChannel,
+  archiveChannel,
+  transferChannel,
 } from '../services/api';
 import { encryptMessage } from '../services/crypto';
 import { generateDecoy } from '../services/decoy';
@@ -614,6 +619,12 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
   const [showMembers, setShowMembers] = useState(false);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [replyTarget, setReplyTarget] = useState<ChatMessage | null>(null);
+  const [threadRoot, setThreadRoot] = useState<number | null>(null);
+  const [threadReplies, setThreadReplies] = useState<ChatMessage[]>([]);
+  const [threadFollowing, setThreadFollowing] = useState(false);
+  const [showChannelSettings, setShowChannelSettings] = useState(false);
+  const [channelTopic, setChannelTopic] = useState(group.topic || '');
+  const [channelError, setChannelError] = useState<string | null>(null);
   const [starredIds, setStarredIds] = useState<Set<number>>(new Set());
   const [editingMessage, setEditingMessage] = useState<ChatMessage | null>(null);
   const [forwardTarget, setForwardTarget] = useState<ChatMessage | null>(null);
@@ -928,7 +939,7 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
           token,
           group.id,
           ciphertext,
-          { encryptedKey: JSON.stringify(encryptedKeys), iv, decoyContent: generateDecoy(), replyToMessageId: replyId, mentions: mentioned.length ? mentioned : undefined },
+          { encryptedKey: JSON.stringify(encryptedKeys), iv, decoyContent: generateDecoy(), replyToMessageId: replyId, threadRootId: threadRoot ?? undefined, mentions: mentioned.length ? mentioned : undefined },
           savedTagged ?? undefined,
         );
       }
@@ -1046,9 +1057,25 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
   // Avatar color by group id (consistent)
   const avatarColors = ['#7c3aed', '#0891b2', '#059669', '#d97706', '#c0392b', '#db2777'];
   const avatarBg = avatarColors[group.id % avatarColors.length];
+  const isChannel = group.kind === 'channel';
+  const canManageChannel = isChannel && (group.my_role === 'owner' || group.my_role === 'admin');
+  const channelLocked = isChannel && (
+    !!group.is_archived || (group.posting_policy === 'admins' && group.my_role !== 'owner' && group.my_role !== 'admin')
+  );
+  const lockHint = group.is_archived ? 'This channel is archived' : 'Only channel admins can post';
+  const timeline = isChannel ? messages.filter(m => !m.thread_root_id) : messages;
+
+  useEffect(() => {
+    if (!isChannel || threadRoot == null) return;
+    getThread(token, group.id, threadRoot).then(page => {
+      setThreadReplies(page.replies);
+      setThreadFollowing(page.following);
+    }).catch(() => setThreadReplies([]));
+  }, [isChannel, threadRoot, token, group.id, messages.length]);
 
   return (
-    <div className="chat-panel" style={gs.root}>
+      <div className="chat-panel" style={{ ...gs.root, display: 'flex', flexDirection: 'row' }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
       {/* Header */}
       <div className="chat-header" style={{ ...gs.header, justifyContent: 'space-between' }}>
         <div className="chat-header-identity" style={gs.headerLeft}>
@@ -1061,8 +1088,9 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
           )}
           <div style={{ ...gs.avatar, background: avatarBg }}>{initials(group.name)}</div>
           <div>
-            <div style={gs.groupName}>{group.name}</div>
+            <div style={gs.groupName}>{isChannel ? `#${group.name}` : group.name}</div>
             <div style={gs.groupMeta}>
+              {group.topic ? `${group.topic} · ` : ''}
               {members.length || group.member_count} members
               {group.disappear_after_hours ? ` · Disappearing: ${formatDisappear(group.disappear_after_hours)}` : ''}
             </div>
@@ -1082,6 +1110,11 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
               </svg>
             </button>
           </>
+        )}
+        {canManageChannel && (
+          <button onClick={() => { setChannelTopic(group.topic || ''); setShowChannelSettings(true); }} style={gs.iconBtn} title="Channel settings">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          </button>
         )}
         <button onClick={() => setShowMembers(true)} style={gs.iconBtn} title="Group info">
           <UsersIcon size={18} color="#9ca3af" />
@@ -1118,7 +1151,7 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
       <div className="chat-messages" style={gs.messagesArea}>
         {loading ? (
           <MessageSkeleton />
-        ) : messages.length === 0 ? (
+        ) : timeline.length === 0 ? (
           <div style={gs.emptyChat}>
             <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
@@ -1129,9 +1162,9 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
             <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: 8 }}>No messages yet.</p>
           </div>
         ) : (
-          messages.reduce<React.ReactNode[]>((acc, msg, i) => {
+          timeline.reduce<React.ReactNode[]>((acc, msg, i) => {
             const dateKey = msgDateKey(msg.timestamp);
-            const prevKey = i > 0 ? msgDateKey(messages[i - 1].timestamp) : null;
+            const prevKey = i > 0 ? msgDateKey(timeline[i - 1].timestamp) : null;
             if (dateKey !== prevKey) {
               acc.push(<DateSeparator key={`sep-${dateKey}`} label={fmtDateLabel(msg.timestamp)} />);
             }
@@ -1158,6 +1191,13 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
                 isStarred={starredIds.has(msg.id)}
               />
             );
+            if (isChannel && (msg.thread_reply_count || 0) > 0) {
+              acc.push(
+                <button key={`thread-${msg.id}`} onClick={() => setThreadRoot(msg.id)} style={{ margin: '0 12px 8px', background: 'transparent', border: 'none', color: 'var(--accent)', fontSize: '0.75rem', cursor: 'pointer', textAlign: 'left' }}>
+                  {msg.thread_reply_count} {msg.thread_reply_count === 1 ? 'reply' : 'replies'}
+                </button>
+              );
+            }
             return acc;
           }, [])
         )}
@@ -1374,11 +1414,12 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
           <textarea
             ref={inputRef}
             style={gs.textInput}
-            placeholder={taggedUser ? `Private message to @${taggedUser}…` : 'Type a message or @ to tag someone'}
+            placeholder={channelLocked ? lockHint : threadRoot ? 'Reply in thread' : taggedUser ? `Private message to @${taggedUser}…` : 'Type a message or @ to tag someone'}
             value={text}
             onChange={handleTextChange}
             onKeyDown={handleKeyDown}
             rows={1}
+            disabled={channelLocked}
           />
           {text.trim() && (
             <button style={gs.sendBtn} onClick={handleSend} disabled={sending} title="Send">
@@ -1387,6 +1428,71 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
           )}
         </div>
       </div>
+
+      {isChannel && group.is_archived && (
+        <div style={{ margin: '8px 16px 0', padding: '8px 12px', borderRadius: 8, background: 'rgba(245,158,11,0.12)', color: '#fbbf24', fontSize: '0.78rem' }}>
+          This channel is archived. It is read-only.
+        </div>
+      )}
+      </div>
+      {isChannel && threadRoot != null && (
+        <aside style={{ width: 320, borderLeft: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', background: 'var(--bg-panel)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 12 }}>
+            <strong style={{ fontSize: '0.85rem' }}>Thread</strong>
+            <button onClick={() => setThreadRoot(null)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}>Close</button>
+          </div>
+          <div style={{ flex: 1, overflowY: 'auto', padding: '0 12px 12px' }}>
+            {threadReplies.map(reply => (
+              <div key={reply.id} style={{ marginBottom: 10, fontSize: '0.8rem' }}>
+                <div style={{ color: 'var(--text-muted)' }}>{reply.sender}</div>
+                <div>{reply.decoy_content || 'Encrypted reply'}</div>
+              </div>
+            ))}
+            {threadReplies.length === 0 && <div style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>No replies yet.</div>}
+          </div>
+          <button
+            onClick={() => setThreadFollow(token, group.id, threadRoot, !threadFollowing).then(() => setThreadFollowing(v => !v)).catch(() => {})}
+            style={{ margin: 12, background: 'transparent', border: '1px solid var(--border-color)', borderRadius: 8, padding: 8, color: 'var(--text-primary)', cursor: 'pointer' }}
+          >{threadFollowing ? 'Unfollow thread' : 'Follow thread'}</button>
+        </aside>
+      )}
+      {showChannelSettings && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 40 }}>
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault();
+              setChannelError(null);
+              try {
+                const updated = await patchChannel(token, group.id, { topic: channelTopic });
+                onGroupChanged?.({ ...group, ...updated });
+                setShowChannelSettings(false);
+              } catch (err: any) {
+                setChannelError(err?.message || 'Could not save');
+              }
+            }}
+            style={{ width: 360, background: 'var(--bg-panel)', borderRadius: 12, padding: 16, display: 'flex', flexDirection: 'column', gap: 8 }}
+          >
+            <strong>Channel settings</strong>
+            <input value={channelTopic} onChange={e => setChannelTopic(e.target.value)} placeholder="Topic" style={{ padding: 8, borderRadius: 8, border: '1px solid var(--border-color)', background: 'var(--bg-card)', color: 'var(--text-primary)' }} />
+            {channelError && <div style={{ color: '#fca5a5', fontSize: '0.75rem' }}>{channelError}</div>}
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button type="submit" style={{ background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 12px', cursor: 'pointer' }}>Save topic</button>
+              <button type="button" onClick={async () => { const updated = await archiveChannel(token, group.id, !group.is_archived); onGroupChanged?.({ ...group, ...updated }); setShowChannelSettings(false); }} style={{ background: 'transparent', border: '1px solid var(--border-color)', borderRadius: 8, padding: '8px 12px', color: 'var(--text-primary)', cursor: 'pointer' }}>{group.is_archived ? 'Unarchive' : 'Archive'}</button>
+              <button type="button" onClick={() => setShowChannelSettings(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}>Close</button>
+            </div>
+            {group.my_role === 'owner' && (
+              <input placeholder="Transfer to username" onKeyDown={async (e) => {
+                if (e.key !== 'Enter') return;
+                e.preventDefault();
+                const username = (e.target as HTMLInputElement).value.trim();
+                if (!username) return;
+                const updated = await transferChannel(token, group.id, username);
+                onGroupChanged?.({ ...group, ...updated });
+              }} style={{ padding: 8, borderRadius: 8, border: '1px solid var(--border-color)', background: 'var(--bg-card)', color: 'var(--text-primary)' }} />
+            )}
+          </form>
+        </div>
+      )}
 
       {tokenGateOpen && (
         <MasterTokenPromptModal

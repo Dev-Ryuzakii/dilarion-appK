@@ -83,3 +83,41 @@ extension APIClient {
         try await postVoid("/meetings/\(meetingId)/cancel", body: EmptyBody())
     }
 }
+
+struct ChannelItem: Decodable, Identifiable {
+    let id: Int
+    let name: String
+    let topic: String?
+    let description: String?
+    let visibility: String
+    let posting_policy: String
+    let is_archived: Bool
+    let member_count: Int
+    let my_role: String?
+    let unread_count: Int?
+}
+
+private struct ChannelCreateBody: Encodable {
+    let name: String
+    let visibility: String
+    let posting_policy: String
+}
+
+extension APIClient {
+    func listChannels() async throws -> [ChannelItem] {
+        try await get("/channels")
+    }
+
+    func browseChannels(query: String) async throws -> [ChannelItem] {
+        let q = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        return try await get("/channels/browse?q=\(q)")
+    }
+
+    func createChannel(name: String) async throws -> ChannelItem {
+        try await post("/channels", body: ChannelCreateBody(name: name, visibility: "public", posting_policy: "everyone"))
+    }
+
+    func joinChannel(id: Int) async throws -> ChannelItem {
+        try await post("/channels/\(id)/join", body: EmptyBody())
+    }
+}

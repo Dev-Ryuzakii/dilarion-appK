@@ -156,6 +156,8 @@ data class Message(
     @SerializedName("is_deleted") val isDeleted: Boolean = false,
     @SerializedName("is_pinned")  val isPinned: Boolean = false,
     val mentions: List<String>? = null,
+    @SerializedName("thread_root_id") val threadRootId: Int? = null,
+    @SerializedName("thread_reply_count") val threadReplyCount: Int = 0,
 )
 
 data class ReactionRequest(val emoji: String)
@@ -234,6 +236,7 @@ data class SendGroupMessageRequest(
     @SerializedName("forwarded_from_message_id") val forwardedFromMessageId: Int? = null,
     val mentions: List<String>? = null,
     @SerializedName("content_type") val contentType: String? = null,
+    @SerializedName("thread_root_id") val threadRootId: Int? = null,
 )
 
 // ─── GIF (GIPHY proxy) ──────────────────────────────────────────────────────
@@ -402,6 +405,34 @@ data class Group(
     @SerializedName("disappear_after_hours") val disappearAfterHours: Int? = null,
     /** The viewer's role in this group ("admin" / "member"). */
     @SerializedName("my_role") val myRole: String? = null,
+    val kind: String? = null,
+    val topic: String? = null,
+    val visibility: String? = null,
+    @SerializedName("posting_policy") val postingPolicy: String? = null,
+    @SerializedName("is_archived") val isArchived: Boolean = false,
+    @SerializedName("unread_count") val unreadCount: Int = 0,
+)
+
+data class Channel(
+    val id: Int,
+    val name: String,
+    val topic: String? = null,
+    val description: String? = null,
+    val visibility: String = "private",
+    @SerializedName("posting_policy") val postingPolicy: String = "everyone",
+    @SerializedName("is_archived") val isArchived: Boolean = false,
+    @SerializedName("member_count") val memberCount: Int = 0,
+    @SerializedName("my_role") val myRole: String? = null,
+    @SerializedName("unread_count") val unreadCount: Int = 0,
+)
+
+data class CreateChannelRequest(
+    val name: String,
+    val topic: String? = null,
+    val description: String? = null,
+    val visibility: String = "public",
+    @SerializedName("posting_policy") val postingPolicy: String = "everyone",
+    val members: List<String> = emptyList(),
 )
 
 data class CreateGroupRequest(
@@ -895,4 +926,18 @@ data class LocationPoint(
 
 data class LocationBatch(
     val points: List<LocationPoint>,
+)
+
+data class VoiceSpeechRequest(
+    val text: String,
+)
+
+data class VoiceSpeechClip(
+    val id: String,
+    val text: String,
+    @SerializedName("created_at") val createdAt: String = "",
+)
+
+data class VoiceSpeechList(
+    val clips: List<VoiceSpeechClip> = emptyList(),
 )

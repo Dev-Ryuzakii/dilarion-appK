@@ -30,7 +30,7 @@ import com.dilarion.app.ui.theme.*
 import java.text.SimpleDateFormat
 import java.util.Locale
 
-private enum class HomeTab { CHATS, GROUPS, MEETINGS, CALENDAR, TASKS, CALLS }
+private enum class HomeTab { CHATS, GROUPS, CHANNELS, MEETINGS, CALENDAR, TASKS, CALLS }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -112,6 +112,13 @@ fun HomeScreen(
                     colors = NavigationBarItemDefaults.colors(indicatorColor = DilarionRed.copy(alpha = 0.12f), selectedIconColor = DilarionRed, selectedTextColor = DilarionRed),
                 )
                 NavigationBarItem(
+                    selected = selectedTab == HomeTab.CHANNELS,
+                    onClick = { selectedTab = HomeTab.CHANNELS },
+                    icon = { Icon(Icons.Default.Tag, "Channels") },
+                    label = { Text("Channels") },
+                    colors = NavigationBarItemDefaults.colors(indicatorColor = DilarionRed.copy(alpha = 0.12f), selectedIconColor = DilarionRed, selectedTextColor = DilarionRed),
+                )
+                NavigationBarItem(
                     selected = selectedTab == HomeTab.MEETINGS,
                     onClick = { selectedTab = HomeTab.MEETINGS },
                     icon = { Icon(Icons.Default.Videocam, "Meetings") },
@@ -177,6 +184,7 @@ fun HomeScreen(
             when (selectedTab) {
                 HomeTab.CHATS    -> ChatsTab(uiState, onOpenChat)
                 HomeTab.GROUPS   -> GroupsTab(uiState, onOpenGroupChat)
+                HomeTab.CHANNELS -> ChannelsTab(uiState, onOpenGroupChat)
                 HomeTab.MEETINGS -> MeetingsTab(onNewMeeting, onMeetings)
                 HomeTab.CALENDAR -> com.dilarion.app.ui.screens.calendar.CalendarScreen(onJoinMeeting = onJoinMeeting)
                 HomeTab.TASKS    -> com.dilarion.app.ui.screens.tasks.TasksScreen()
@@ -266,6 +274,26 @@ private fun ChatsTab(uiState: HomeUiState, onOpenChat: (String) -> Unit) {
                 unread   = unread,
                 isGroup  = false,
                 onClick  = { onOpenChat(peer) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun ChannelsTab(uiState: HomeUiState, onOpen: (Int, String) -> Unit) {
+    if (uiState.channels.isEmpty()) {
+        EmptyState(Icons.Default.Tag, "No channels yet", "Public channels in your organization show up here")
+        return
+    }
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = 8.dp)) {
+        items(uiState.channels, key = { "channel_${it.id}" }) { channel ->
+            ConversationRow(
+                title = "#${channel.name}",
+                subtitle = channel.topic ?: if (channel.isArchived) "Archived" else "",
+                time = "",
+                unread = channel.unreadCount,
+                isGroup = true,
+                onClick = { onOpen(channel.id, channel.name) },
             )
         }
     }

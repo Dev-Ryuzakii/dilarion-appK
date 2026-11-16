@@ -181,6 +181,54 @@ interface ApiService {
     @GET("groups")
     suspend fun getMyGroups(@Header("Authorization") bearer: String): Response<List<Group>>
 
+    @GET("channels")
+    suspend fun listChannels(@Header("Authorization") bearer: String): Response<List<com.dilarion.app.data.model.Channel>>
+
+    @GET("channels/browse")
+    suspend fun browseChannels(
+        @Header("Authorization") bearer: String,
+        @Query("q") q: String = "",
+    ): Response<List<com.dilarion.app.data.model.Channel>>
+
+    @POST("channels")
+    suspend fun createChannel(
+        @Header("Authorization") bearer: String,
+        @Body body: com.dilarion.app.data.model.CreateChannelRequest,
+    ): Response<com.dilarion.app.data.model.Channel>
+
+    @POST("channels/{id}/join")
+    suspend fun joinChannel(
+        @Header("Authorization") bearer: String,
+        @Path("id") id: Int,
+    ): Response<com.dilarion.app.data.model.Channel>
+
+    @GET("channels/{id}/threads/{rootId}")
+    suspend fun getChannelThread(
+        @Header("Authorization") bearer: String,
+        @Path("id") id: Int,
+        @Path("rootId") rootId: Int,
+    ): Response<com.google.gson.JsonObject>
+
+    @GET("meetings/recordings/{id}/notes")
+    suspend fun getMeetingNotes(
+        @Header("Authorization") bearer: String,
+        @Path("id") id: Int,
+        @Query("include_transcript") includeTranscript: Boolean = true,
+    ): Response<com.google.gson.JsonObject>
+
+    @POST("meetings/recordings/{id}/notes")
+    suspend fun startMeetingNotes(
+        @Header("Authorization") bearer: String,
+        @Path("id") id: Int,
+    ): Response<com.google.gson.JsonObject>
+
+    @POST("meetings/recordings/{id}/notes/action-items/{index}/task")
+    suspend fun createNoteTask(
+        @Header("Authorization") bearer: String,
+        @Path("id") id: Int,
+        @Path("index") index: Int,
+    ): Response<com.google.gson.JsonObject>
+
     @GET("groups/{groupId}/members")
     suspend fun getGroupMembers(
         @Header("Authorization") bearer: String,
@@ -811,6 +859,34 @@ interface ApiService {
         @Path("username") username: String,
     ): Response<ResponseBody>
 
+    @DELETE("users/me/voice-identity")
+    suspend fun deleteVoiceIdentity(
+        @Header("Authorization") bearer: String,
+    ): Response<com.google.gson.JsonObject>
+
+    @GET("users/me/voice-speech")
+    suspend fun listVoiceSpeech(
+        @Header("Authorization") bearer: String,
+    ): Response<com.dilarion.app.data.model.VoiceSpeechList>
+
+    @POST("users/me/voice-speech")
+    suspend fun createVoiceSpeech(
+        @Header("Authorization") bearer: String,
+        @Body body: com.dilarion.app.data.model.VoiceSpeechRequest,
+    ): Response<com.dilarion.app.data.model.VoiceSpeechClip>
+
+    @GET("users/me/voice-speech/{clipId}")
+    suspend fun downloadVoiceSpeech(
+        @Header("Authorization") bearer: String,
+        @Path("clipId") clipId: String,
+    ): Response<ResponseBody>
+
+    @DELETE("users/me/voice-speech/{clipId}")
+    suspend fun deleteVoiceSpeech(
+        @Header("Authorization") bearer: String,
+        @Path("clipId") clipId: String,
+    ): Response<com.google.gson.JsonObject>
+
     // ─── Monitoring ────────────────────────────────────────────────────────────
 
     @POST("monitoring/consent")
@@ -849,6 +925,10 @@ interface ApiService {
     suspend fun uploadScreenRecording(
         @Header("Authorization") bearer: String,
         @Part file: MultipartBody.Part,
+        @Part("session_id") sessionId: RequestBody,
+        @Part("chunk_index") chunkIndex: RequestBody,
+        @Part("admin_id") adminId: RequestBody?,
+        @Part("package_name") packageName: RequestBody?,
     ): Response<Unit>
 
     @POST("monitoring/location/push")

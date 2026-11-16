@@ -8,6 +8,11 @@ import {
   getConversations,
   getPendingDeviceCommands,
   getGroups,
+  listChannels,
+  browseChannels,
+  createChannel,
+  joinChannel,
+  ChannelSummary,
   getCallHistory,
   getCallStatus,
   redialGroupCall,
@@ -19,6 +24,12 @@ import {
   disableMasterToken2FA,
   uploadVoiceIdentity,
   hasVoiceIdentity,
+  listVoiceSpeech,
+  createVoiceSpeech,
+  fetchVoiceSpeech,
+  deleteVoiceSpeech,
+  deleteVoiceIdentity,
+  VoiceSpeechClip,
   requestAccountDeletion,
   getMyAccountDeletionStatus,
   AccountDeletionStatus,
@@ -100,7 +111,7 @@ interface Props {
   onLogout: () => void;
 }
 
-type Tab = 'chats' | 'groups' | 'meetings' | 'calendar' | 'tasks' | 'calls' | 'settings';
+type Tab = 'chats' | 'groups' | 'channels' | 'meetings' | 'calendar' | 'tasks' | 'calls' | 'settings';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -980,7 +991,7 @@ function SearchModal({ token, onClose, onPickPerson, onPickGroup }: {
     return () => clearTimeout(id);
   }, [q, token]);
 
-  const empty = res && !res.people.length && !res.groups.length && !res.files.length;
+  const empty = res && !res.people.length && !res.groups.length && !(res.channels || []).length && !res.files.length;
   const rowStyle: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 8, cursor: 'pointer', color: 'var(--text-primary)' };
   const sectionLabel: React.CSSProperties = { fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '12px 4px 4px' };
 
@@ -1013,8 +1024,21 @@ function SearchModal({ token, onClose, onPickPerson, onPickGroup }: {
               </div>
             ))}
           </>}
+          {res && (res.channels || []).length > 0 && <>
+            <div style={sectionLabel}>Channels</div>
+            {(res.channels || []).map(c => (
+              <div key={c.id} style={rowStyle} onClick={() => onPickGroup(c.id)}
+                onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-card)')} onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
+                <span style={{ width: 32, height: 32, borderRadius: 8, background: 'var(--bg-card)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>#</span>
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ fontWeight: 600, fontSize: '0.86rem' }}>#{c.name}</span>
+                  <span style={{ display: 'block', fontSize: '0.72rem', color: 'var(--text-muted)' }}>{c.topic || c.description || `${c.member_count} members`}</span>
+                </span>
+              </div>
+            ))}
+          </>}
           {res && res.groups.length > 0 && <>
-            <div style={sectionLabel}>Channels & groups</div>
+            <div style={sectionLabel}>Groups</div>
             {res.groups.map(g => (
               <div key={g.id} style={rowStyle} onClick={() => onPickGroup(g.id)}
                 onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-card)')} onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
@@ -1085,9 +1109,15 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
   const [voiceIdentityError, setVoiceIdentityError] = useState<string | null>(null);
   const [isRecordingVoiceIdentity, setIsRecordingVoiceIdentity] = useState(false);
   const [voiceIdentitySeconds, setVoiceIdentitySeconds] = useState(0);
+  const [voiceSpeechText, setVoiceSpeechText] = useState('');
+  const [voiceClips, setVoiceClips] = useState<VoiceSpeechClip[]>([]);
+  const [voiceSpeechBusy, setVoiceSpeechBusy] = useState(false);
+  const [voiceSpeechError, setVoiceSpeechError] = useState<string | null>(null);
+  const [voicePreviewUrl, setVoicePreviewUrl] = useState<string | null>(null);
   const voiceRecorderRef = useRef<MediaRecorder | null>(null);
   const voiceChunksRef = useRef<Blob[]>([]);
   const voiceTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const voicePreviewRef = useRef<string | null>(null);
 
   const [deletionStatus, setDeletionStatus] = useState<AccountDeletionStatus | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -1173,6 +1203,14 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
     hasVoiceIdentity(token, username).then(setVoiceIdentityEnrolled).finally(() => setVoiceIdentityLoading(false));
   }, [token, username]);
 
+  useEffect(() => {
+    if (!voiceIdentityEnrolled) {
+      setVoiceClips([]);
+      return;
+    }
+    listVoiceSpeech(token).then(setVoiceClips).catch(() => setVoiceClips([]));
+  }, [token, voiceIdentityEnrolled]);
+
   const MIN_VOICE_IDENTITY_SECONDS = 8;
 
   async function startVoiceIdentityRecording() {
@@ -1219,7 +1257,67 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
       await uploadVoiceIdentity(token, blob);
       setVoiceIdentityEnrolled(true);
     } catch (err: any) {
-      setVoiceIdentityError(userMessage(err, "Couldn't save your voice sample. Please try again."));
+      setVoiceIdentityError(userMessage(err, err?.message || "Couldn't save your voice sample. Please try again."));
+    } finally {
+      setVoiceIdentityUploading(false);
+    }
+  }
+
+  function replaceVoicePreview(url: string | null) {
+    if (voicePreviewRef.current) URL.revokeObjectURL(voicePreviewRef.current);
+    voicePreviewRef.current = url;
+    setVoicePreviewUrl(url);
+  }
+
+  async function generateOwnedSpeech() {
+    const spoken = voiceSpeechText.trim();
+    if (!spoken) {
+      setVoiceSpeechError('Enter the words to speak');
+      return;
+    }
+    setVoiceSpeechBusy(true);
+    setVoiceSpeechError(null);
+    try {
+      await createVoiceSpeech(token, spoken);
+      setVoiceSpeechText('');
+      setVoiceClips(await listVoiceSpeech(token));
+    } catch (err: any) {
+      setVoiceSpeechError(userMessage(err, err?.message || "Couldn't generate speech. Please try again."));
+    } finally {
+      setVoiceSpeechBusy(false);
+    }
+  }
+
+  async function previewOwnedSpeech(clipId: string) {
+    setVoiceSpeechError(null);
+    try {
+      const blob = await fetchVoiceSpeech(token, clipId);
+      replaceVoicePreview(URL.createObjectURL(blob));
+    } catch (err: any) {
+      setVoiceSpeechError(userMessage(err, err?.message || "Couldn't play that clip."));
+    }
+  }
+
+  async function removeOwnedSpeech(clipId: string) {
+    setVoiceSpeechError(null);
+    try {
+      await deleteVoiceSpeech(token, clipId);
+      setVoiceClips(clips => clips.filter(clip => clip.id !== clipId));
+    } catch (err: any) {
+      setVoiceSpeechError(userMessage(err, err?.message || "Couldn't delete that clip."));
+    }
+  }
+
+  async function deleteOwnedEnrollment() {
+    setVoiceIdentityUploading(true);
+    setVoiceIdentityError(null);
+    try {
+      await deleteVoiceIdentity(token);
+      setVoiceIdentityEnrolled(false);
+      setVoiceClips([]);
+      replaceVoicePreview(null);
+    } catch (err: any) {
+      setVoiceIdentityError(userMessage(err, err?.message || "Couldn't delete your voice enrollment."));
     } finally {
       setVoiceIdentityUploading(false);
     }
@@ -1770,7 +1868,7 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
         <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>AI Voice Decoy</div>
         <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 8, padding: '10px 14px' }}>
           <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-            Record a short sample of your own voice once; it's only ever used to generate a decoy voice note in your voice for every real one you send.
+            Record a short sample of your own voice. Decoy voice notes use it, and you can type English text to preview speech in that voice. Another account cannot download the sample or the clips.
           </span>
         </div>
 
@@ -1807,6 +1905,44 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
         )}
 
         {voiceIdentityError && <span style={{ fontSize: '0.75rem', color: '#ef4444' }}>{voiceIdentityError}</span>}
+
+        {voiceIdentityEnrolled && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <textarea
+              value={voiceSpeechText}
+              onChange={e => setVoiceSpeechText(e.target.value)}
+              placeholder="Type what your voice should say"
+              maxLength={400}
+              rows={3}
+              style={{ width: '100%', resize: 'vertical', background: 'var(--bg-card)', color: 'inherit', border: '1px solid var(--border-color)', borderRadius: 8, padding: '8px 10px', fontFamily: 'inherit', fontSize: '0.85rem' }}
+            />
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button
+                onClick={generateOwnedSpeech}
+                disabled={voiceSpeechBusy}
+                style={{ background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 16px', fontSize: '0.82rem', fontWeight: 600, cursor: voiceSpeechBusy ? 'wait' : 'pointer', fontFamily: 'inherit' }}
+              >
+                {voiceSpeechBusy ? 'Generating…' : 'Generate speech'}
+              </button>
+              <button
+                onClick={deleteOwnedEnrollment}
+                disabled={voiceIdentityUploading}
+                style={{ background: 'transparent', color: '#ef4444', border: '1px solid #ef4444', borderRadius: 8, padding: '8px 16px', fontSize: '0.82rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}
+              >
+                Delete enrollment and clips
+              </button>
+            </div>
+            {voiceSpeechError && <span style={{ fontSize: '0.75rem', color: '#ef4444' }}>{voiceSpeechError}</span>}
+            {voicePreviewUrl && <audio src={voicePreviewUrl} controls autoPlay style={{ width: '100%' }} />}
+            {voiceClips.map(clip => (
+              <div key={clip.id} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ flex: 1, fontSize: '0.82rem' }}>{clip.text}</span>
+                <button onClick={() => previewOwnedSpeech(clip.id)} style={{ background: 'transparent', border: '1px solid var(--border-color)', borderRadius: 8, padding: '6px 10px', fontSize: '0.78rem', cursor: 'pointer', fontFamily: 'inherit', color: 'inherit' }}>Play</button>
+                <button onClick={() => removeOwnedSpeech(clip.id)} style={{ background: 'transparent', border: '1px solid var(--border-color)', borderRadius: 8, padding: '6px 10px', fontSize: '0.78rem', cursor: 'pointer', fontFamily: 'inherit', color: 'inherit' }}>Delete</button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Username + recovery code */}
@@ -2123,6 +2259,32 @@ function stopRinging() {
 // Voice/video calls need the desktop or phone app (the web build has no call window).
 const CALLS_UNAVAILABLE = 'Calling is not available on this version. Use the Dilarion phone or desktop app to make and receive calls.';
 
+function ChannelBrowse({ token, onClose, onJoined }: { token: string; onClose: () => void; onJoined: () => void }) {
+  const [q, setQ] = useState('');
+  const [rows, setRows] = useState<ChannelSummary[]>([]);
+  const [name, setName] = useState('');
+  const [error, setError] = useState('');
+  useEffect(() => { browseChannels(token, q).then(setRows).catch(() => setRows([])); }, [token, q]);
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 30, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div style={{ width: 420, maxHeight: '80vh', overflow: 'auto', background: 'var(--bg-panel)', borderRadius: 12, padding: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between' }}><strong>Channels</strong><button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}>Close</button></div>
+        <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search public channels" style={{ width: '100%', marginTop: 8, padding: 8, borderRadius: 8, border: '1px solid var(--border-color)', background: 'var(--bg-card)', color: 'var(--text-primary)' }} />
+        {rows.map(row => (
+          <button key={row.id} onClick={() => joinChannel(token, row.id).then(onJoined).catch(err => setError(err.message))} style={{ display: 'block', width: '100%', textAlign: 'left', marginTop: 8, padding: 8, background: 'transparent', border: '1px solid var(--border-color)', borderRadius: 8, color: 'var(--text-primary)', cursor: 'pointer' }}>
+            #{row.name}<span style={{ display: 'block', color: 'var(--text-muted)', fontSize: '0.75rem' }}>{row.topic || row.description || 'Public'}</span>
+          </button>
+        ))}
+        <form onSubmit={e => { e.preventDefault(); createChannel(token, { name, visibility: 'public', posting_policy: 'everyone' }).then(onJoined).catch(err => setError(err.message)); }} style={{ marginTop: 12, display: 'flex', gap: 8 }}>
+          <input value={name} onChange={e => setName(e.target.value)} placeholder="New channel name" style={{ flex: 1, padding: 8, borderRadius: 8, border: '1px solid var(--border-color)', background: 'var(--bg-card)', color: 'var(--text-primary)' }} />
+          <button type="submit" style={{ background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 12px', cursor: 'pointer' }}>Create</button>
+        </form>
+        {error && <div style={{ color: '#fca5a5', fontSize: '0.75rem', marginTop: 8 }}>{error}</div>}
+      </div>
+    </div>
+  );
+}
+
 export default function HomeScreen({ token, username, onLogout }: Props) {
   // Calls work in the desktop app (own OS window) and now on the web build too
   // (rendered in-page via InPageCallHost over WebRTC/LiveKit). Only block when
@@ -2156,6 +2318,9 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
   const [masterToken, setMasterToken] = useState<string | null>(null);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
+  const [channels, setChannels] = useState<ChannelSummary[]>([]);
+  const [selectedChannel, setSelectedChannel] = useState<number | null>(null);
+  const [showChannelBrowse, setShowChannelBrowse] = useState(false);
   const [calls, setCalls] = useState<CallRecord[]>([]);
   const [loadingContacts, setLoadingContacts] = useState(true);
   const [loadingGroups, setLoadingGroups] = useState(true);
@@ -2626,6 +2791,12 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
   const [showCreateGroup, setShowCreateGroup] = useState(false);
   const [showJoinGroup, setShowJoinGroup] = useState(false);
 
+  const refreshChannels = useCallback(() => {
+    return listChannels(token).then(setChannels).catch(() => setChannels([]));
+  }, [token]);
+
+  useEffect(() => { refreshChannels(); }, [refreshChannels]);
+
   const refreshGroups = useCallback(() => {
     return getGroups(token)
       .then(gs => setGroups(gs))
@@ -2691,6 +2862,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
     setMobilePane(tab === 'calendar' || tab === 'tasks' ? 'main' : 'list');
     if (tab !== 'chats') setSelectedChat(null);
     if (tab !== 'groups') setSelectedGroup(null);
+    if (tab !== 'channels') setSelectedChannel(null);
     if (tab !== 'calls') setSelectedCallId(null);
     if (tab === 'meetings' && upcomingMeetings.length === 0 && !loadingMeetings) {
       loadUpcomingMeetings();
@@ -3080,6 +3252,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
     const titles: Record<Tab, string> = {
       chats: 'Chats',
       groups: 'Groups',
+      channels: 'Channels',
       meetings: 'Meetings',
       calendar: 'Calendar',
       tasks: 'Tasks',
@@ -3238,6 +3411,28 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
               })
             )}
           </div>
+        </>
+      );
+    }
+
+    if (activeTab === 'channels') {
+      return (
+        <>
+          <div style={{ display: 'flex', gap: 8, padding: '8px 12px' }}>
+            <button onClick={() => setShowChannelBrowse(true)} style={{ flex: 1, background: 'transparent', border: '1px solid var(--border-color)', borderRadius: 8, padding: 8, color: 'var(--text-primary)', cursor: 'pointer' }}>Browse</button>
+          </div>
+          {channels.map(c => (
+            <button key={c.id} onClick={() => { setSelectedChannel(c.id); setMobilePane('main'); }} style={{ display: 'flex', width: '100%', textAlign: 'left', gap: 8, padding: '10px 12px', background: selectedChannel === c.id ? 'var(--bg-card)' : 'transparent', border: 'none', color: 'var(--text-primary)', cursor: 'pointer' }}>
+              <span>#</span>
+              <span style={{ flex: 1 }}>
+                <span style={{ display: 'block', fontWeight: 600 }}>{c.name}</span>
+                <span style={{ display: 'block', fontSize: '0.72rem', color: 'var(--text-muted)' }}>{c.topic || `${c.member_count} members`}</span>
+              </span>
+              {(c.unread_count || 0) > 0 && <span style={{ fontSize: '0.7rem' }}>{c.unread_count}</span>}
+            </button>
+          ))}
+          {channels.length === 0 && <div style={{ padding: 16, color: 'var(--text-muted)', fontSize: '0.8rem' }}>No channels yet.</div>}
+          {showChannelBrowse && <ChannelBrowse token={token} onClose={() => setShowChannelBrowse(false)} onJoined={() => { setShowChannelBrowse(false); refreshChannels(); }} />}
         </>
       );
     }
@@ -3468,6 +3663,40 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
       );
     }
 
+    if (activeTab === 'channels') {
+      const channel = channels.find(c => c.id === selectedChannel);
+      if (channel) {
+        const asGroup: Group = {
+          id: channel.id,
+          name: channel.name,
+          description: channel.description,
+          member_count: channel.member_count,
+          my_role: channel.my_role,
+          kind: 'channel',
+          topic: channel.topic,
+          visibility: channel.visibility,
+          posting_policy: channel.posting_policy,
+          is_archived: channel.is_archived,
+          unread_count: channel.unread_count,
+        };
+        return (
+          <GroupPanel
+            token={token}
+            myUsername={username}
+            group={asGroup}
+            masterToken={null}
+            onMasterTokenSaved={() => {}}
+            onJoinMeeting={handleJoinMeetingFromChat}
+            onBack={() => { setSelectedChannel(null); setMobilePane('list'); }}
+            onGroupChanged={g => setChannels(prev => prev.map(c => c.id === g.id ? { ...c, name: g.name, topic: g.topic, description: g.description, is_archived: !!g.is_archived, my_role: g.my_role, member_count: g.member_count, visibility: g.visibility || c.visibility, posting_policy: g.posting_policy || c.posting_policy } : c))}
+            onGroupGone={() => { setSelectedChannel(null); refreshChannels(); }}
+            onStartGroupCall={handleStartGroupCall}
+          />
+        );
+      }
+      return <WelcomePlaceholder title="Channels" subtitle="Select a channel or browse public ones" />;
+    }
+
     if (activeTab === 'groups') {
       if (selectedGroup !== null) {
         const group = groups.find(g => g.id === selectedGroup);
@@ -3646,7 +3875,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
           token={token}
           onClose={() => setShowSearch(false)}
           onPickPerson={(u) => { setShowSearch(false); openContact(u); }}
-          onPickGroup={(id) => { setShowSearch(false); openGroup(id); }}
+          onPickGroup={(id) => { setShowSearch(false); if (channels.some(c => c.id === id)) { setSelectedChannel(id); switchTab('channels'); setSelectedChannel(id); } else openGroup(id); }}
         />
       )}
 
@@ -3690,6 +3919,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
       <nav className="app-tab-bar" aria-label="Primary navigation" style={{ ...hs.tabBar, width: layout.nav }}>
         <NavRow icon={<ChatTabIcon active={activeTab === 'chats'} />} label="Chats" active={activeTab === 'chats'} badge={unread.size} onClick={() => switchTab('chats')} />
         <NavRow icon={<GroupTabIcon active={activeTab === 'groups'} />} label="Groups" active={activeTab === 'groups'} onClick={() => switchTab('groups')} />
+        <NavRow icon={<GroupTabIcon active={activeTab === 'channels'} />} label="Channels" active={activeTab === 'channels'} onClick={() => switchTab('channels')} />
         <NavRow icon={<MeetingsTabIcon active={activeTab === 'meetings'} />} label="Meetings" active={activeTab === 'meetings'} onClick={() => switchTab('meetings')} />
         <NavRow icon={<CalendarTabIcon active={activeTab === 'calendar'} />} label="Calendar" active={activeTab === 'calendar'} onClick={() => switchTab('calendar')} />
         <NavRow icon={<TasksTabIcon active={activeTab === 'tasks'} />} label="Tasks" active={activeTab === 'tasks'} onClick={() => switchTab('tasks')} />

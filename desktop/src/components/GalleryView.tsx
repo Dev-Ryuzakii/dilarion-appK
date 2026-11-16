@@ -15,6 +15,7 @@ import { presenceService, WsMessage } from '../services/presence';
 import WhiteboardModal from './WhiteboardModal';
 import MeetingChatPanel from './MeetingChatPanel';
 import { userMessage } from '../services/errors';
+import MeetingNotesPanel from './MeetingNotesPanel';
 
 // Group video via self-hosted LiveKit — the SFU room every group call (2+
 // people) now renders through, replacing the old mesh-WebRTC conference path
@@ -154,6 +155,9 @@ export default function GalleryView({
   // Toast shown when a host/moderator mutes this client remotely.
   const [forceMutedNote, setForceMutedNote] = useState<string | null>(null);
   const [recording, setRecording] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
+  const [notesRecordingId, setNotesRecordingId] = useState<number | null>(null);
+  const [notesOpen, setNotesOpen] = useState(false);
   const [recordingBusy, setRecordingBusy] = useState(false);
   const [recordingError, setRecordingError] = useState<string | null>(null);
 
@@ -396,8 +400,11 @@ export default function GalleryView({
           setForceMutedNote(`${data.by || 'The host'} unmuted you`);
           setTimeout(() => setForceMutedNote(null), 4000);
         }
-      } else if (msg.type === 'conference_recording_started') {
-        if (msg.data?.conference_id === conferenceId) setRecording(true);
+      } else if (msg.type === 'conference_recording_started' || msg.type === 'meeting_transcription') {
+        if (msg.data?.conference_id === conferenceId) {
+          setRecording(true);
+          setTranscribing(true);
+        }
       } else if (msg.type === 'conference_recording_stopped') {
         if (msg.data?.conference_id === conferenceId) setRecording(false);
       } else if (msg.type === 'whiteboard_opened') {
@@ -461,8 +468,10 @@ export default function GalleryView({
         await stopConferenceRecording(token, conferenceId);
         setRecording(false);
       } else {
-        await startConferenceRecording(token, conferenceId);
+        const started = await startConferenceRecording(token, conferenceId);
+        setNotesRecordingId(started.recording_id);
         setRecording(true);
+        setTranscribing(true);
       }
     } catch (err: any) {
       setRecordingError(userMessage(err, "Couldn't start recording. Please try again."));
@@ -745,6 +754,9 @@ export default function GalleryView({
       background: '#0b0b10',
       display: 'flex', flexDirection: 'column',
     }}>
+      {notesOpen && notesRecordingId != null && (
+        <MeetingNotesPanel token={token} recordingId={notesRecordingId} onClose={() => setNotesOpen(false)} />
+      )}
       <div className="gallery-toolbar" style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         padding: '14px 20px', flexShrink: 0,
@@ -763,8 +775,11 @@ export default function GalleryView({
           {recording && (
             <span style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.4)', borderRadius: 20, padding: '2px 10px', fontSize: '0.7rem', color: '#ef4444', fontWeight: 700 }}>
               <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#ef4444' }} />
-              REC
+              {transcribing ? 'Recording and transcribing' : 'REC'}
             </span>
+          )}
+          {notesRecordingId != null && (
+            <button onClick={() => setNotesOpen(true)} style={{ marginLeft: 8, background: 'rgba(255,255,255,0.1)', border: 'none', color: '#fff', borderRadius: 20, padding: '2px 10px', fontSize: '0.7rem', cursor: 'pointer' }}>Notes</button>
           )}
         </span>
         <div style={{ display: 'flex', gap: 8 }}>
