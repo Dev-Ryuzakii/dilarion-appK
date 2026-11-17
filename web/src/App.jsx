@@ -21,6 +21,13 @@ const Icon = ({ name, size = 20 }) => {
     download: <><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M5 21h14"/></>,
     search: <><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></>,
     menu: <path d="M4 7h16M4 12h16M4 17h16"/>,
+    chat: <path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12Z"/>,
+    video: <><rect x="2" y="6" width="14" height="12" rx="3"/><path d="m16 10 6-3v10l-6-3"/></>,
+    calendar: <><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18M8 3v4M16 3v4"/></>,
+    key: <><circle cx="8" cy="15" r="4"/><path d="m11 12 9-9M17 6l3 3"/></>,
+    mic: <><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v4"/></>,
+    globe: <><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></>,
+    tasks: <><path d="m4 7 2 2 4-4M4 17l2 2 4-4M13 8h7M13 18h7"/></>,
     close: <path d="M6 6l12 12M18 6 6 18"/>,
     plus: <path d="M12 5v14M5 12h14"/>,
     send: <><path d="M22 2 11 13"/><path d="m22 2-7 20-4-9-9-4 20-7Z"/></>,
@@ -30,24 +37,98 @@ const Icon = ({ name, size = 20 }) => {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>
 }
 
+// Staff use the Dilarion web app; organizations use the portal on this site.
+const WEB_APP_URL = 'https://web-dilarion.eibstratoc.com/'
+
 function Header({ navigate, authenticated }) {
   const [open, setOpen] = useState(false)
+  const [scrolled, setScrolled] = useState(false)
+  useEffect(() => { const on = () => setScrolled(scrollY > 12); on(); addEventListener('scroll', on, { passive: true }); return () => removeEventListener('scroll', on) }, [])
   const go = (next) => { setOpen(false); navigate(next) }
-  return <header className="site-header">
+  const jump = (id) => { setOpen(false); const run = () => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' }); if (document.getElementById(id)) run(); else { navigate('home'); setTimeout(run, 80) } }
+  return <header className={`site-header${scrolled ? ' scrolled' : ''}`}>
     <button className="brand" onClick={() => go(authenticated ? 'dashboard' : 'home')}><img src={logoUrl} alt=""/><span>Dilarion</span></button>
-    <button className="mobile-menu" onClick={() => setOpen(!open)} aria-label="Open navigation"><Icon name={open ? 'close' : 'menu'}/></button>
+    {!authenticated && <div className="header-right">
+      <a className="nav-login mobile-only" href={WEB_APP_URL}>Open web app <Icon name="arrow" size={15}/></a>
+      <button className="mobile-menu" onClick={() => setOpen(!open)} aria-label="Open navigation"><Icon name={open ? 'close' : 'menu'}/></button>
+    </div>}
     <nav className={open ? 'nav-open' : ''}>
-      {!authenticated && <><button onClick={() => go('home')}>Overview</button><button onClick={() => go('request')}>Request account</button><button onClick={() => go('login')} className="nav-login">Organization login <Icon name="arrow" size={16}/></button></>}
+      {!authenticated && <>
+        <button onClick={() => jump('features')}>Features</button>
+        <button onClick={() => jump('how')}>How it works</button>
+        <button onClick={() => jump('security')}>Security</button>
+        <button onClick={() => jump('download')}>Download</button>
+        <span className="nav-sep"/>
+        <button className="nav-portal" onClick={() => go('login')}>Admin portal</button>
+        <a className="nav-login" href={WEB_APP_URL}>Open web app <Icon name="arrow" size={16}/></a>
+      </>}
       {authenticated && <span className="access-pill"><Icon name="users" size={15}/> Organization portal</span>}
     </nav>
   </header>
 }
 
+/** Glossy tubes drawn in SVG: a dark core, a warm rim and a moving highlight
+ * fake a chrome wire without any image asset. Each path draws itself in. */
+function WireArt({ variant = 'hero' }) {
+  const id = variant
+  const wires = variant === 'hero' ? [
+    { d: 'M-60 700 C 110 590, 290 600, 400 720 S 610 900, 740 790', w: 30, delay: 0 },
+    { d: 'M-80 770 C 130 660, 320 690, 420 790 S 590 900, 690 860', w: 24, delay: .18 },
+    { d: 'M980 -40 C 1040 120, 1180 210, 1320 170', w: 26, delay: .3 },
+    { d: 'M1020 -60 C 1100 140, 1250 260, 1360 250', w: 20, delay: .42 },
+  ] : [
+    { d: 'M-40 420 C 120 300, 260 320, 360 440 S 520 620, 640 520', w: 26, delay: 0 },
+    { d: 'M380 -40 C 430 120, 560 200, 700 160', w: 20, delay: .25 },
+  ]
+  const spikes = variant === 'hero'
+    ? [['M560 780 L 680 600 L 574 792 Z', .7], ['M24 700 L 6 540 L 40 700 Z', .8], ['M1090 120 L 880 250 L 1100 134 Z', .9]]
+    : [['M300 470 L 380 340 L 312 480 Z', .6]]
+  return <svg className={`wire-art wire-${variant}`} viewBox={variant === 'hero' ? '0 0 1300 760' : '0 0 640 560'} preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+    <defs>
+      <linearGradient id={`rim-${id}`} x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#ffd2a6"/><stop offset=".35" stopColor="#ff6a3d"/><stop offset=".7" stopColor="#d83428"/><stop offset="1" stopColor="#7a1410"/></linearGradient>
+      <linearGradient id={`shine-${id}`} x1="0" y1="0" x2="1" y2="0"><stop offset="0" stopColor="#fff" stopOpacity="0"/><stop offset=".5" stopColor="#fff" stopOpacity=".95"/><stop offset="1" stopColor="#fff" stopOpacity="0"/></linearGradient>
+      <linearGradient id={`spike-${id}`} x1="0" y1="1" x2="1" y2="0"><stop offset="0" stopColor="#1a0c0a"/><stop offset=".55" stopColor="#ff8a5c"/><stop offset=".8" stopColor="#fff"/><stop offset="1" stopColor="#d83428"/></linearGradient>
+      <filter id={`soft-${id}`} x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="2.2"/></filter>
+      <filter id={`glow-${id}`} x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="14"/></filter>
+    </defs>
+    {wires.map((w, i) => <g key={i} className="wire" style={{ '--d': `${w.delay}s` }}>
+      <path d={w.d} pathLength="1" stroke="#d83428" strokeWidth={w.w + 18} opacity=".18" filter={`url(#glow-${id})`}/>
+      <path d={w.d} pathLength="1" stroke={`url(#rim-${id})`} strokeWidth={w.w}/>
+      <path d={w.d} pathLength="1" stroke="#0a0708" strokeWidth={w.w - 7} transform="translate(1.5 2.5)"/>
+      <path d={w.d} pathLength="1" stroke="#3a2a2a" strokeWidth={w.w * .34} transform="translate(-2 -5)" filter={`url(#soft-${id})`}/>
+      <path d={w.d} pathLength="1" stroke="#fff" strokeWidth={Math.max(2, w.w * .1)} transform="translate(-3 -7)" opacity=".85" filter={`url(#soft-${id})`}/>
+      <path className="wire-shine" d={w.d} pathLength="1" stroke={`url(#shine-${id})`} strokeWidth={w.w * .55} transform="translate(-2 -4)"/>
+    </g>)}
+    {spikes.map(([d, delay], i) => <path key={i} className="spike" d={d} fill={`url(#spike-${id})`} style={{ '--d': `${delay}s` }}/>)}
+  </svg>
+}
+
+/** Splits a headline into lines that slide up from behind a mask. */
+function RevealTitle({ lines, className = '' }) {
+  return <h1 className={`reveal-title ${className}`}>{lines.map((line, i) => <span className="line" key={i}><span style={{ '--i': i }}>{line}</span></span>)}</h1>
+}
+
+function useReveal() {
+  useEffect(() => {
+    const items = document.querySelectorAll('.reveal')
+    if (!('IntersectionObserver' in window)) { items.forEach(el => el.classList.add('in')); return }
+    const io = new IntersectionObserver((entries) => entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target) } }), { threshold: .14, rootMargin: '0px 0px -40px 0px' })
+    items.forEach(el => io.observe(el))
+    return () => io.disconnect()
+  }, [])
+}
+
 function Footer() {
   return <footer className="site-footer">
-    <div className="footer-brand"><img src={logoUrl} alt=""/><div><strong>Dilarion</strong><span>Secure communication for organizations</span></div></div>
-    <nav aria-label="Legal"><a href="/privacy">Privacy Policy</a><a href="/terms">Terms of Service</a><a href="mailto:support@dilarion.xyz">Contact</a></nav>
-    <p>© {new Date().getFullYear()} Dilarion. All rights reserved.</p>
+    <div className="footer-top">
+      <div className="footer-brand"><img src={logoUrl} alt=""/><div><strong>Dilarion</strong><span>Secure communication for modern organizations.</span></div></div>
+      <div className="footer-cols">
+        <div><small>Product</small><a href="/#features">Features</a><a href="/#security">Security</a><a href="/#download">Download</a></div>
+        <div><small>Access</small><a href="/#/request">Request account</a><a href="/#/login">Admin portal</a><a href={WEB_APP_URL}>Open web app</a></div>
+        <div><small>Company</small><a href="/privacy">Privacy Policy</a><a href="/terms">Terms of Service</a><a href="mailto:support@dilarion.xyz">Contact</a></div>
+      </div>
+    </div>
+    <div className="footer-bottom"><p>© {new Date().getFullYear()} Dilarion. All rights reserved.</p><a className="footer-web" href={WEB_APP_URL}><Icon name="globe" size={14}/> web-dilarion.eibstratoc.com</a></div>
   </footer>
 }
 
@@ -82,20 +163,117 @@ function LegalPage({ type }) {
   </main>
 }
 
-function Home({ navigate }) {
-  return <main>
-    <section className="hero">
-      <div className="hero-copy">
-        <div className="eyebrow"><span/> Private communication for serious teams</div>
-        <h1>Your organization,<br/><em>securely connected.</em></h1>
-        <p>Dilarion gives approved organizations a protected space for messaging, calling, and collaboration—without sacrificing control or privacy.</p>
-        <div className="hero-actions"><button className="button primary" onClick={() => navigate('request')}>Request an organization account <Icon name="arrow"/></button><button className="button ghost" onClick={() => navigate('login')}>Sign in to your portal</button></div>
-        <div className="trust-line"><span><Icon name="check" size={15}/> Admin reviewed</span><span><Icon name="check" size={15}/> Organization isolated</span><span><Icon name="check" size={15}/> Encrypted by design</span></div>
+const FEATURES = [
+  { icon: 'chat', title: 'Private team messaging', text: 'Chats, groups and channels your team will actually use — encrypted from the moment you hit send.', big: 'chat' },
+  { icon: 'video', title: 'HD calls & meetings', text: 'Crystal-clear voice and video, scheduled meetings and instant join links. Meet in seconds, not minutes.' },
+  { icon: 'calendar', title: 'Shared calendar', text: 'Every meeting and deadline in one view, synced with Google Calendar.' },
+  { icon: 'tasks', title: 'Tasks that get done', text: 'Assign work, track progress and collect reports without leaving the conversation.' },
+  { icon: 'megaphone', title: 'Company announcements', text: 'Reach every employee at once with official updates they won’t miss.' },
+  { icon: 'shield', title: 'Protected sign-in', text: 'Two-factor authentication and a personal security key keep every account safe.' },
+  { icon: 'users', title: 'Your company, your rules', text: 'Add staff in bulk, choose who can manage what, and approve changes from one simple admin portal.', big: 'admin' },
+]
+
+function PhoneMock() {
+  return <div className="phone">
+    <div className="phone-top"><div className="phone-brand"><img src={logoUrl} alt=""/> Dilarion</div><span className="phone-pill"><Icon name="lock" size={11}/> Secure</span></div>
+    <div className="phone-body">
+      <h3>What does your team<br/>need today?</h3>
+      <div className="phone-chips"><span><Icon name="chat" size={14}/>Message<br/>a channel</span><span><Icon name="video" size={14}/>Start a<br/>meeting</span><span><Icon name="tasks" size={14}/>Assign<br/>a task</span></div>
+      <div className="phone-thread">
+        <div className="bubble in"><b>Finance</b>Q3 numbers are in the channel.</div>
+        <div className="bubble out">Thanks — reviewing now.</div>
       </div>
-      <div className="hero-visual"><div className="glow"/><div className="portal-card"><div className="portal-top"><div className="mini-brand"><img src={logoUrl} alt=""/> Dilarion</div><span>Protected</span></div><div className="portal-body"><div className="org-mark"><Icon name="building" size={30}/></div><div><small>ORGANIZATION PORTAL</small><h3>Northstar Group</h3><p>Approved workspace</p></div></div><div className="member-stack">{['AO','KM','TN','RJ'].map((x,i)=><span key={x} style={{'--i':i}}>{x}</span>)}<div><strong>42 staff</strong><small>Securely provisioned</small></div></div><div className="security-row"><Icon name="shield"/><div><strong>Organization boundary active</strong><small>Members only see people in their organization</small></div></div></div><div className="floating-note"><Icon name="lock"/><div><strong>End-to-end protected</strong><small>Private by default</small></div></div></div>
+    </div>
+    <div className="phone-composer"><span>Write a message…</span><i><Icon name="send" size={14}/></i></div>
+  </div>
+}
+
+function Home({ navigate }) {
+  useReveal()
+  return <main className="landing">
+    <section className="hero-shell">
+      <div className="hero-frame">
+        <div className="hero-card">
+          <WireArt variant="hero"/>
+          <div className="hero-grain"/>
+          <div className="hero-copy">
+            <span className="mono hero-tag">Secure workplace communication</span>
+            <RevealTitle lines={['Own Your', 'Organization’s', 'Conversations']}/>
+            <p className="hero-sub">The secure workspace for messaging, calls and meetings — built for teams that take privacy seriously.</p>
+            <div className="hero-actions">
+              <button className="button primary" onClick={() => navigate('request')}>Get started <Icon name="arrow" size={18}/></button>
+              <a className="button glass" href={WEB_APP_URL}><Icon name="globe" size={17}/> Open web app</a>
+            </div>
+          </div>
+          <span className="mono hero-label l1">Encrypted</span>
+          <span className="mono hero-label l2">Private</span>
+          <span className="mono hero-label l3">Verified</span>
+          <div className="hero-phone"><PhoneMock/></div>
+        </div>
+      </div>
     </section>
-    <section className="principles"><div className="section-heading"><div><span className="kicker">BUILT FOR ORGANIZATIONS</span><h2>Control without complexity.</h2></div><p>A clear approval process, secure staff onboarding, and strict separation between organizations.</p></div><div className="principle-grid"><article><span>01</span><Icon name="building" size={28}/><h3>Request access</h3><p>Submit organization details and choose credentials for your organization portal.</p></article><article><span>02</span><Icon name="shield" size={28}/><h3>Admin approval</h3><p>A Dilarion platform admin reviews the request and creates the organization.</p></article><article><span>03</span><Icon name="users" size={28}/><h3>Staff provisioning</h3><p>Invite your staff from your portal. Each person gets a private activation code to set up the Dilarion app.</p></article></div></section>
-    <section className="download-strip"><div><span className="kicker">DILARION APPS</span><h2>Work securely from every device.</h2><p>Use the organization portal on the web and the Dilarion app on Windows, Mac and Android for protected day-to-day communication.</p></div><div className="download-actions"><a className="button light" href={downloadUrl('dilarion-windows.msi')} download><Icon name="download"/> Download for Windows</a><a className="button light" href={downloadUrl('dilarion-mac.dmg')} download><Icon name="download"/> Download for Mac</a><a className="button light" href={downloadUrl('dilarion.apk')} download><Icon name="download"/> Download for Android</a></div></section>
+
+    <section className="web-access">
+      <a className="web-access-card" href={WEB_APP_URL}>
+        <span className="web-access-icon"><Icon name="globe" size={22}/></span>
+        <span className="web-access-text"><strong>Already on Dilarion? Sign in on the web.</strong><small>No download needed — open your workspace in any browser.</small></span>
+        <span className="web-access-url">web-dilarion.eibstratoc.com</span>
+        <span className="button primary">Open web app <Icon name="arrow" size={17}/></span>
+      </a>
+    </section>
+
+    <section className="marquee" aria-label="What Dilarion includes"><div className="marquee-track">{[0, 1].map(k => <div key={k} aria-hidden={k === 1}>{['Team chat', 'HD calls', 'Meetings', 'Shared calendar', 'Tasks', 'Announcements', 'Admin portal', 'Works on every device'].map(t => <span key={t}>{t}<i/></span>)}</div>)}</div></section>
+
+    <section className="section" id="features">
+      <div className="section-head reveal"><span className="mono">Features</span><h2>One app for how<br/><em>your team works.</em></h2><p>Replace scattered chats, calls and spreadsheets with a single secure workspace your whole organization can trust.</p></div>
+      <div className="bento">{FEATURES.map((f, i) => <article key={f.title} className={`bento-card reveal${f.big ? ' big' : ''}`} style={{ '--i': i }}>
+        <div className="bento-icon"><Icon name={f.icon} size={22}/></div><h3>{f.title}</h3><p>{f.text}</p>
+        {f.big === 'chat' && <div className="bento-visual chat-visual"><span className="b1">Board meeting moved to 3pm.</span><span className="b2">Noted. Sending the deck.</span><span className="b3"><Icon name="lock" size={12}/> Encrypted</span></div>}
+        {f.big === 'admin' && <div className="bento-visual admin-visual">{[['AO', 'Amaka Obi', 'Admin'], ['KM', 'Kunle Martins', 'Active'], ['TN', 'Tolu Nwosu', 'Invited']].map(([ini, name, tag]) => <div key={ini}><span>{ini}</span><strong>{name}</strong><em className={tag.toLowerCase()}>{tag}</em></div>)}</div>}
+      </article>)}</div>
+    </section>
+
+    <section className="section how" id="how">
+      <div className="section-head reveal"><span className="mono">How it works</span><h2>Up and running<br/><em>in three simple steps.</em></h2></div>
+      <div className="steps">{[
+        ['01', 'building', 'Tell us about your team', 'Fill in a short form with your organization’s details. It takes about two minutes.'],
+        ['02', 'shield', 'Get approved', 'We verify your organization and set up your private workspace.'],
+        ['03', 'users', 'Bring everyone in', 'Invite staff one by one or upload a spreadsheet. They’re chatting the same day.'],
+      ].map(([n, icon, t, d], i) => <article className="step reveal" key={n} style={{ '--i': i }}><span className="step-num">{n}</span><div className="step-icon"><Icon name={icon} size={22}/></div><h3>{t}</h3><p>{d}</p></article>)}</div>
+      <div className="how-cta reveal"><button className="button primary" onClick={() => navigate('request')}>Get started <Icon name="arrow" size={18}/></button><button className="button glass" onClick={() => navigate('login')}>Admin portal</button></div>
+    </section>
+
+    <section className="section security" id="security">
+      <div className="security-card reveal">
+        <WireArt variant="side"/>
+        <div className="security-copy"><span className="mono">Security</span><h2>Private by default.<br/><em>Trusted by design.</em></h2><p>Your conversations belong to your organization — nobody else. Every company gets its own private space, and every account is verified before it goes live.</p></div>
+        <ul className="security-list">{[
+          ['lock', 'End-to-end encryption', 'Messages are locked on your device before they’re sent. Only the people in the chat can read them.'],
+          ['shield', 'Your own private space', 'Your staff, chats and calls are never visible to another company.'],
+          ['key', 'Extra protection for sensitive actions', 'A personal security key guards the actions that matter most.'],
+          ['eye', 'Full admin control', 'Decide who joins, who manages what, and when accounts are removed.'],
+        ].map(([icon, t, d]) => <li key={t}><span><Icon name={icon} size={18}/></span><div><strong>{t}</strong><small>{d}</small></div></li>)}</ul>
+      </div>
+    </section>
+
+    <section className="section" id="download">
+      <div className="section-head reveal"><span className="mono">Get the app</span><h2>Work from anywhere.</h2><p>Download Dilarion for your computer and phone, or open it instantly in your browser.</p></div>
+      <div className="downloads">
+        <a className="download-card reveal" href={downloadUrl('dilarion-windows.msi')} download><Icon name="download"/><strong>Windows</strong><small>.msi installer</small></a>
+        <a className="download-card reveal" href={downloadUrl('dilarion-mac.dmg')} download><Icon name="download"/><strong>macOS</strong><small>.dmg disk image</small></a>
+        <a className="download-card reveal" href={downloadUrl('dilarion.apk')} download><Icon name="download"/><strong>Android</strong><small>.apk package</small></a>
+        <a className="download-card web reveal" href={WEB_APP_URL}><Icon name="globe"/><strong>Web app</strong><small>Sign in from a browser</small></a>
+      </div>
+    </section>
+
+    <section className="section final">
+      <div className="final-card reveal">
+        <div className="final-glow"/>
+        <h2>Ready to give your team<br/>a safer place to talk?</h2>
+        <p>Set up your organization in minutes. Your team can be chatting, calling and meeting on Dilarion the same day.</p>
+        <div className="hero-actions center"><button className="button primary" onClick={() => navigate('request')}>Get started <Icon name="arrow" size={18}/></button><a className="button glass" href={WEB_APP_URL}><Icon name="globe" size={17}/> Open web app</a></div>
+      </div>
+    </section>
   </main>
 }
 
@@ -107,13 +285,13 @@ function RequestPage({ navigate }) {
   const update = (key) => (e) => setForm({...form,[key]:e.target.value})
   const submit = async (e) => { e.preventDefault(); if(form.password!==form.confirm)return setState({...state,error:'Passwords do not match.'}); setState({loading:true,error:'',success:false,id:null}); try{const data=await submitOrganization({organization_name:form.organization_name,contact_name:form.contact_name,contact_email:form.contact_email,contact_phone:form.contact_phone,username:form.username,password:form.password});setState({loading:false,error:'',success:true,id:data.request_id})}catch(error){setState({loading:false,error:error.message,success:false,id:null})} }
   if(state.success)return <main className="form-page"><div className="success-card"><div className="success-icon"><Icon name="check" size={30}/></div><span className="kicker">REQUEST RECEIVED</span><h1>Your organization is in review.</h1><p>A platform administrator will review your request before the organization portal becomes available.</p><div className="reference">Request reference <strong>#{state.id}</strong></div><button className="button primary" onClick={()=>navigate('home')}>Return to overview</button></div></main>
-  return <main className="form-page"><div className="form-intro"><span className="kicker">ORGANIZATION ACCESS</span><h1>Request your<br/>Dilarion workspace.</h1><p>Create the credentials your organization will use to open its staff portal after approval.</p><div className="info-card"><Icon name="users"/><div><strong>View and invite your staff</strong><p>Your portal shows your staff list and lets you invite new staff. Editing or suspending accounts is handled by Dilarion administrators.</p></div></div></div><form className="request-form" onSubmit={submit}><div className="form-head"><span>01</span><div><h2>Organization details</h2><p>Tell us who is requesting access.</p></div></div><Field label="Organization name" value={form.organization_name} onChange={update('organization_name')} placeholder="e.g. Northstar Group" required/><div className="field-row"><Field label="Contact person" value={form.contact_name} onChange={update('contact_name')} placeholder="Full name" required/><Field label="Phone number" value={form.contact_phone} onChange={update('contact_phone')} placeholder="+234…" required/></div><Field label="Work email" type="email" value={form.contact_email} onChange={update('contact_email')} placeholder="name@organization.com" required/><div className="form-divider"/><div className="form-head"><span>02</span><div><h2>Portal credentials</h2><p>Use these to sign in after approval.</p></div></div><Field label="Organization username" value={form.username} onChange={update('username')} placeholder="northstar-portal" minLength="3" required hint="This identifies your organization account."/><div className="field-row"><Field label="Password" type="password" value={form.password} onChange={update('password')} placeholder="Minimum 8 characters" minLength="8" required/><Field label="Confirm password" type="password" value={form.confirm} onChange={update('confirm')} placeholder="Repeat password" minLength="8" required/></div>{state.error&&<div className="form-error">{state.error}</div>}<button className="button primary submit" disabled={state.loading}>{state.loading?'Submitting request…':'Submit for approval'} <Icon name="arrow"/></button><p className="form-foot">By submitting, you confirm that you are authorized to request access for this organization.</p></form></main>
+  return <main className="form-page"><div className="form-intro"><WireArt variant="side"/><span className="kicker">ORGANIZATION ACCESS</span><h1>Request your<br/>Dilarion workspace.</h1><p>Create the credentials your organization will use to open its staff portal after approval.</p><div className="info-card"><Icon name="users"/><div><strong>View and invite your staff</strong><p>Your portal shows your staff list and lets you invite new staff. Editing or suspending accounts is handled by Dilarion administrators.</p></div></div></div><form className="request-form" onSubmit={submit}><div className="form-head"><span>01</span><div><h2>Organization details</h2><p>Tell us who is requesting access.</p></div></div><Field label="Organization name" value={form.organization_name} onChange={update('organization_name')} placeholder="e.g. Northstar Group" required/><div className="field-row"><Field label="Contact person" value={form.contact_name} onChange={update('contact_name')} placeholder="Full name" required/><Field label="Phone number" value={form.contact_phone} onChange={update('contact_phone')} placeholder="+234…" required/></div><Field label="Work email" type="email" value={form.contact_email} onChange={update('contact_email')} placeholder="name@organization.com" required/><div className="form-divider"/><div className="form-head"><span>02</span><div><h2>Portal credentials</h2><p>Use these to sign in after approval.</p></div></div><Field label="Organization username" value={form.username} onChange={update('username')} placeholder="northstar-portal" minLength="3" required hint="This identifies your organization account."/><div className="field-row"><Field label="Password" type="password" value={form.password} onChange={update('password')} placeholder="Minimum 8 characters" minLength="8" required/><Field label="Confirm password" type="password" value={form.confirm} onChange={update('confirm')} placeholder="Repeat password" minLength="8" required/></div>{state.error&&<div className="form-error">{state.error}</div>}<button className="button primary submit" disabled={state.loading}>{state.loading?'Submitting request…':'Submit for approval'} <Icon name="arrow"/></button><p className="form-foot">By submitting, you confirm that you are authorized to request access for this organization.</p></form></main>
 }
 
 function LoginPage({ navigate,onLogin }) {
   const [form,setForm]=useState({username:'',password:''}); const [state,setState]=useState({loading:false,error:''})
   const submit=async(e)=>{e.preventDefault();setState({loading:true,error:''});try{const data=await loginOrganization(form);onLogin(data.token);navigate('dashboard')}catch(error){setState({loading:false,error:error.message})}}
-  return <main className="login-page"><div className="login-aside"><div className="login-quote"><Icon name="shield" size={34}/><blockquote>“A clear view of your people, inside a workspace built around organizational privacy.”</blockquote><p>Dilarion organization portal</p></div></div><div className="login-panel"><div className="login-box"><span className="kicker">ORGANIZATION PORTAL</span><h1>Welcome back.</h1><p>Sign in with the credentials submitted in your approved request.</p><form onSubmit={submit}><Field label="Organization username" value={form.username} onChange={(e)=>setForm({...form,username:e.target.value})} placeholder="Your organization username" required/><Field label="Password" type="password" value={form.password} onChange={(e)=>setForm({...form,password:e.target.value})} placeholder="Your password" required/>{state.error&&<div className="form-error">{state.error}</div>}<button className="button primary submit" disabled={state.loading}>{state.loading?'Signing in…':'Open organization portal'} <Icon name="arrow"/></button></form><button className="text-button" onClick={()=>navigate('forgot')}>Forgot your password?</button><button className="text-button" onClick={()=>navigate('request')}>Don’t have an account? Request access</button></div></div></main>
+  return <main className="login-page"><div className="login-aside"><WireArt variant="side"/><div className="login-quote"><Icon name="shield" size={34}/><blockquote>“A clear view of your people, inside a workspace built around organizational privacy.”</blockquote><p>Dilarion organization portal</p></div></div><div className="login-panel"><div className="login-box"><span className="kicker">ORGANIZATION PORTAL</span><h1>Welcome back.</h1><p>Sign in with the credentials submitted in your approved request.</p><form onSubmit={submit}><Field label="Organization username" value={form.username} onChange={(e)=>setForm({...form,username:e.target.value})} placeholder="Your organization username" required/><Field label="Password" type="password" value={form.password} onChange={(e)=>setForm({...form,password:e.target.value})} placeholder="Your password" required/>{state.error&&<div className="form-error">{state.error}</div>}<button className="button primary submit" disabled={state.loading}>{state.loading?'Signing in…':'Open organization portal'} <Icon name="arrow"/></button></form><button className="text-button" onClick={()=>navigate('forgot')}>Forgot your password?</button><button className="text-button" onClick={()=>navigate('request')}>Don’t have an account? Request access</button><a className="staff-link" href={WEB_APP_URL}><Icon name="users" size={16}/><span><strong>Are you a staff member?</strong><small>Sign in to the Dilarion web app instead</small></span><Icon name="arrow" size={16}/></a></div></div></main>
 }
 
 const EMPTY_INVITE={full_name:'',email:'',phone_number:'',department:''}
@@ -239,7 +417,7 @@ function ForgotPasswordPage({ navigate }){
   const set=(k)=>(e)=>setForm({...form,[k]:e.target.value})
   const requestCode=async(e)=>{e.preventDefault();setState({loading:true,error:'',notice:''});try{const data=await forgotOrganizationPassword({identifier:form.identifier.trim()});setState({loading:false,error:'',notice:data.message||'If the account exists, a reset code was emailed to your organization contact address.'});setStep('reset')}catch(error){setState({loading:false,error:error.message,notice:''})}}
   const doReset=async(e)=>{e.preventDefault();if(form.new_password!==form.confirm)return setState({...state,error:'Passwords do not match.'});setState({loading:true,error:'',notice:''});try{const data=await resetOrganizationPassword({identifier:form.identifier.trim(),code:form.code.trim(),new_password:form.new_password});setState({loading:false,error:'',notice:data.message||'Password reset. You can sign in now.'});setTimeout(()=>navigate('login'),1500)}catch(error){setState({loading:false,error:error.message,notice:''})}}
-  return <main className="login-page"><div className="login-aside"><div className="login-quote"><Icon name="shield" size={34}/><blockquote>“Reset your organization portal password securely with a one-time code.”</blockquote><p>Dilarion organization portal</p></div></div><div className="login-panel"><div className="login-box"><span className="kicker">PASSWORD RESET</span><h1>{step==='request'?'Forgot password':'Enter reset code'}</h1><p>{step==='request'?'Enter your organization username or contact email. We’ll send a 6-digit reset code to your organization’s contact email.':'We emailed a 6-digit code to your organization’s contact email. Enter it with your new password. The code is valid for 1 hour.'}</p>{step==='request'?<form onSubmit={requestCode}><Field label="Organization username or email" value={form.identifier} onChange={set('identifier')} placeholder="northstar-portal or name@organization.com" required/>{state.error&&<div className="form-error">{state.error}</div>}<button className="button primary submit" disabled={state.loading}>{state.loading?'Sending code…':'Send reset code'} <Icon name="arrow"/></button></form>:<form onSubmit={doReset}><Field label="Reset code" value={form.code} onChange={set('code')} placeholder="6-digit code" required/><div className="field-row"><Field label="New password" type="password" value={form.new_password} onChange={set('new_password')} placeholder="Minimum 8 characters" minLength="8" required/><Field label="Confirm password" type="password" value={form.confirm} onChange={set('confirm')} placeholder="Repeat password" minLength="8" required/></div>{state.notice&&<div className="notice-bar">{state.notice}</div>}{state.error&&<div className="form-error">{state.error}</div>}<button className="button primary submit" disabled={state.loading}>{state.loading?'Resetting…':'Reset password'} <Icon name="arrow"/></button></form>}{step==='request'&&state.notice&&<div className="notice-bar" style={{marginTop:'12px'}}>{state.notice}</div>}<button className="text-button" onClick={()=>navigate('login')}>Back to sign in</button></div></div></main>
+  return <main className="login-page"><div className="login-aside"><WireArt variant="side"/><div className="login-quote"><Icon name="shield" size={34}/><blockquote>“Reset your organization portal password securely with a one-time code.”</blockquote><p>Dilarion organization portal</p></div></div><div className="login-panel"><div className="login-box"><span className="kicker">PASSWORD RESET</span><h1>{step==='request'?'Forgot password':'Enter reset code'}</h1><p>{step==='request'?'Enter your organization username or contact email. We’ll send a 6-digit reset code to your organization’s contact email.':'We emailed a 6-digit code to your organization’s contact email. Enter it with your new password. The code is valid for 1 hour.'}</p>{step==='request'?<form onSubmit={requestCode}><Field label="Organization username or email" value={form.identifier} onChange={set('identifier')} placeholder="northstar-portal or name@organization.com" required/>{state.error&&<div className="form-error">{state.error}</div>}<button className="button primary submit" disabled={state.loading}>{state.loading?'Sending code…':'Send reset code'} <Icon name="arrow"/></button></form>:<form onSubmit={doReset}><Field label="Reset code" value={form.code} onChange={set('code')} placeholder="6-digit code" required/><div className="field-row"><Field label="New password" type="password" value={form.new_password} onChange={set('new_password')} placeholder="Minimum 8 characters" minLength="8" required/><Field label="Confirm password" type="password" value={form.confirm} onChange={set('confirm')} placeholder="Repeat password" minLength="8" required/></div>{state.notice&&<div className="notice-bar">{state.notice}</div>}{state.error&&<div className="form-error">{state.error}</div>}<button className="button primary submit" disabled={state.loading}>{state.loading?'Resetting…':'Reset password'} <Icon name="arrow"/></button></form>}{step==='request'&&state.notice&&<div className="notice-bar" style={{marginTop:'12px'}}>{state.notice}</div>}<button className="text-button" onClick={()=>navigate('login')}>Back to sign in</button></div></div></main>
 }
 
 export default function App(){
