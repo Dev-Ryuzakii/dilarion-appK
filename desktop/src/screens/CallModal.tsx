@@ -112,8 +112,11 @@ function MasterTokenPrompt({ rejected, onCancel, onConfirm }: {
   return (
     <div style={mt.backdrop} onClick={onCancel}>
       <div style={mt.card} onClick={e => e.stopPropagation()}>
+        <div style={{ width: 44, height: 44, borderRadius: 14, background: 'rgba(216,52,40,0.10)', color: '#d83428', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="11" width="16" height="10" rx="2.5" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg>
+        </div>
         <h3 style={mt.title}>Enter master token</h3>
-        <p style={{ ...mt.hint, color: rejected ? '#ef4444' : '#9ca3af' }}>
+        <p style={{ ...mt.hint, color: rejected ? '#d83428' : '#6b7280' }}>
           {rejected
             ? 'That token was rejected. The call is still ringing — try again.'
             : 'Required to answer an encrypted call.'}
@@ -127,7 +130,7 @@ function MasterTokenPrompt({ rejected, onCancel, onConfirm }: {
           onKeyDown={e => { if (e.key === 'Enter' && value.trim()) onConfirm(value.trim()); }}
           placeholder="Master token"
         />
-        <p style={{ ...mt.hint, marginTop: 6, fontSize: '0.72rem' }}>Press Enter to answer</p>
+        <p style={{ ...mt.hint, marginTop: -4, fontSize: '0.72rem', color: '#9ca3af' }}>Press Enter to answer</p>
         <div style={mt.row}>
           <button style={mt.ghost} onClick={onCancel}>Cancel</button>
           <button
@@ -145,27 +148,27 @@ function MasterTokenPrompt({ rejected, onCancel, onConfirm }: {
 
 const mt: Record<string, React.CSSProperties> = {
   backdrop: {
-    position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 1000,
+    position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.40)', backdropFilter: 'blur(3px)', zIndex: 1000,
     display: 'flex', alignItems: 'center', justifyContent: 'center',
   },
   card: {
-    background: '#141414', border: '1px solid #2a2a2a', borderRadius: 16,
-    padding: '1.5rem', width: 320, display: 'flex', flexDirection: 'column', gap: 12,
+    background: '#ffffff', border: '1px solid #e5e7eb', borderRadius: 20, boxShadow: '0 24px 60px rgba(15,23,42,0.22)',
+    padding: '24px', width: 340, display: 'flex', flexDirection: 'column', gap: 12,
   },
-  title: { margin: 0, color: '#fff', fontSize: '1.05rem' },
+  title: { margin: 0, color: '#111827', fontSize: '1.15rem', fontWeight: 800 },
   hint: { margin: 0, fontSize: '0.8rem', lineHeight: 1.45 },
   input: {
-    background: '#0c0c0c', border: '1px solid #2a2a2a', borderRadius: 10,
-    padding: '0.7rem 0.9rem', color: '#fff', fontSize: '0.9rem', outline: 'none',
+    background: '#f3f4f6', border: '1px solid #e5e7eb', borderRadius: 12,
+    padding: '0.75rem 0.95rem', color: '#111827', fontSize: '0.92rem', outline: 'none', fontFamily: 'inherit',
   },
-  row: { display: 'flex', gap: 8, justifyContent: 'flex-end' },
+  row: { display: 'flex', gap: 10, justifyContent: 'flex-end' },
   ghost: {
-    background: 'transparent', color: '#9ca3af', border: 'none',
-    padding: '0.6rem 0.9rem', cursor: 'pointer', fontSize: '0.85rem',
+    background: '#ffffff', color: '#111827', border: '1px solid #e5e7eb', borderRadius: 999,
+    padding: '0.6rem 1.1rem', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 600, fontFamily: 'inherit',
   },
   primary: {
-    background: '#25d366', color: '#062', border: 'none', borderRadius: 10,
-    padding: '0.6rem 1.1rem', fontWeight: 700, cursor: 'pointer', fontSize: '0.85rem',
+    background: '#16a34a', color: '#fff', border: 'none', borderRadius: 999,
+    padding: '0.6rem 1.3rem', fontWeight: 700, cursor: 'pointer', fontSize: '0.85rem', fontFamily: 'inherit',
   },
 };
 

@@ -500,7 +500,7 @@ function GroupMsgBubble({
           <span style={flat.senderName}>{sender}</span>
           <span style={flat.headerTime}>{fmtTime(msg.timestamp)}</span>
           {hasRecipient && !isPrivateTagged && (
-            <span style={{ fontSize: '0.75rem', color: '#7c3aed' }}>→ @{msg.recipient}</span>
+            <span style={{ fontSize: '0.75rem', color: 'var(--accent)' }}>→ @{msg.recipient}</span>
           )}
         </div>
       )}

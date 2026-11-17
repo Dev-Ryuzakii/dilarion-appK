@@ -429,21 +429,28 @@ function SettingsGlyph({ spec }: { spec: string }) {
 
 function SettingsListPanel({ selected, onSelect }: { selected: SettingsPage; onSelect: (p: SettingsPage) => void }) {
   return (
-    <section style={{ marginTop: 14 }}>
-      <div style={{ ...hs.sectionHeader, cursor: 'default' }}>Settings</div>
-      {SETTINGS_PAGES.map(p => {
-        const active = selected === p.id;
-        return (
-          <button
-            key={p.id}
-            onClick={() => onSelect(p.id)}
-            style={{ ...hs.sideRow, background: active ? 'var(--item-active-bg)' : 'transparent', color: active ? 'var(--text-primary)' : 'var(--text-secondary)', fontWeight: active ? 600 : 500 }}
-          >
-            <span style={{ display: 'inline-flex', color: active ? 'var(--accent)' : 'var(--text-muted)' }}><SettingsGlyph spec={p.icon} /></span>
-            <span style={hs.sideRowLabel}>{p.label}</span>
-          </button>
-        );
-      })}
+    <section className="settings-list" style={{ marginTop: 14 }}>
+      <div className="settings-list-title" style={{ ...hs.sectionHeader, cursor: 'default' }}>Settings</div>
+      <div className="settings-list-card">
+        {SETTINGS_PAGES.map(p => {
+          const active = selected === p.id;
+          return (
+            <button
+              key={p.id}
+              className="settings-row"
+              onClick={() => onSelect(p.id)}
+              style={{ ...hs.sideRow, background: active ? 'var(--item-active-bg)' : 'transparent', color: active ? 'var(--text-primary)' : 'var(--text-secondary)', fontWeight: active ? 600 : 500 }}
+            >
+              <span className="settings-row-icon" style={{ display: 'inline-flex', color: active ? 'var(--accent)' : 'var(--text-muted)' }}><SettingsGlyph spec={p.icon} /></span>
+              <span className="settings-row-text" style={hs.sideRowLabel}>
+                {p.label}
+                <span className="settings-row-hint">{p.hint}</span>
+              </span>
+              <span className="settings-row-chevron" aria-hidden="true">›</span>
+            </button>
+          );
+        })}
+      </div>
     </section>
   );
 }
@@ -1181,11 +1188,13 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
       return;
     }
 
-    const blob = new Blob(voiceChunksRef.current, { type: 'audio/webm' });
+    // WebKit (the macOS app) records MP4, Chromium records WebM.
+    const mimeType = rec.mimeType || 'audio/webm';
+    const blob = new Blob(voiceChunksRef.current, { type: mimeType });
     voiceChunksRef.current = [];
     setVoiceIdentityUploading(true);
     try {
-      await uploadVoiceIdentity(token, blob);
+      await uploadVoiceIdentity(token, blob, mimeType.includes('mp4') ? 'voice_identity.m4a' : 'voice_identity.webm');
       setVoiceIdentityEnrolled(true);
     } catch (err: any) {
       setVoiceIdentityError(userMessage(err, err?.message || "Couldn't save your voice sample. Please try again."));
@@ -2443,6 +2452,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
   // ── Scheduled meetings ───────────────────────────────────────────────────────
   const [showMeetings, setShowMeetings] = useState(false);
   const [upcomingMeetings, setUpcomingMeetings] = useState<MeetingSummary[]>([]);
+  const [joinCodeInput, setJoinCodeInput] = useState('');
   const [loadingMeetings, setLoadingMeetings] = useState(false);
   const [showScheduleForm, setShowScheduleForm] = useState(false);
   const [scheduleTitle, setScheduleTitle] = useState('');
@@ -2807,7 +2817,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
   // Tab changes: reset selections
   function switchTab(tab: Tab) {
     setActiveTab(tab);
-    setMobilePane(tab === 'calendar' || tab === 'tasks' ? 'main' : 'list');
+    setMobilePane(tab === 'calendar' || tab === 'tasks' || tab === 'meetings' ? 'main' : 'list');
     if (tab !== 'chats') setSelectedChat(null);
     if (tab !== 'groups') setSelectedGroup(null);
     if (tab !== 'channels') setSelectedChannel(null);
@@ -3040,6 +3050,30 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
   async function openMeetings() {
     setShowMeetings(true);
     await loadUpcomingMeetings();
+  }
+
+  /** Opens the Scheduled Meetings dialog straight on its "schedule" form. */
+  async function openScheduleForm() {
+    setShowMeetings(true);
+    setShowScheduleForm(true);
+    if (allUsers.length === 0) {
+      setLoadingUsers(true);
+      try {
+        const users = await getUsers(token);
+        setAllUsers(users.filter(u => u.username !== username));
+      } catch {}
+      finally { setLoadingUsers(false); }
+    }
+  }
+
+  /** Accepts a bare code or a pasted invite link and opens the join lobby. */
+  function joinWithCode() {
+    const raw = joinCodeInput.trim();
+    if (!raw) return;
+    const code = (raw.match(/([A-Za-z0-9-]{4,})\/?$/)?.[1] ?? raw);
+    if (callWindowOpen || activeGalleryCall) { setChatJoinError('You are already on a call'); return; }
+    setMeetingLobby({ kind: 'join', joinCode: code, title: null });
+    setJoinCodeInput('');
   }
 
   function toggleScheduleUser(u: string) {
@@ -3633,30 +3667,141 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
     }
 
     if (activeTab === 'meetings') {
+      const now = Date.now();
+      const sorted = [...upcomingMeetings].sort((x, y) => new Date(x.scheduled_at).getTime() - new Date(y.scheduled_at).getTime());
+      const isLive = (m: MeetingSummary) => m.status === 'live' || (new Date(m.scheduled_at).getTime() <= now && now < new Date(m.scheduled_at).getTime() + m.duration_minutes * 60000);
+      const dayKey = (iso: string) => {
+        const d = new Date(iso); const t = new Date();
+        const tm = new Date(t.getFullYear(), t.getMonth(), t.getDate()).getTime();
+        const dm = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+        if (dm === tm) return 'Today';
+        if (dm === tm + 86400000) return 'Tomorrow';
+        return d.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+      };
+      const groupsByDay: Array<[string, MeetingSummary[]]> = [];
+      for (const m of sorted) {
+        const k = dayKey(m.scheduled_at);
+        const last = groupsByDay[groupsByDay.length - 1];
+        if (last && last[0] === k) last[1].push(m); else groupsByDay.push([k, [m]]);
+      }
+      const card: React.CSSProperties = {
+        flex: '1 1 200px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 10, textAlign: 'left',
+        background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 18, padding: 18,
+        cursor: 'pointer', fontFamily: 'inherit', color: 'var(--text-primary)',
+      };
+      const tile = (bg: string, fg: string, icon: React.ReactNode) => (
+        <div style={{ width: 42, height: 42, borderRadius: 13, background: bg, color: fg, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{icon}</div>
+      );
       return (
-        <WelcomePlaceholder
-          title="Meetings"
-          subtitle="Start an instant group call, or open Scheduled Meetings to join by code or plan ahead."
-          action={
-            <button
-              onClick={openNewMeeting}
-              style={{
-                background: 'var(--accent)', color: '#fff', border: 'none',
-                borderRadius: 10, padding: '10px 20px', fontSize: '0.85rem', fontWeight: 700, cursor: 'pointer',
-              }}
-            >
-              Start Instant Meeting
-            </button>
-          }
-          art={
-            <img
-              src={meetingsArt}
-              alt=""
-              draggable={false}
-              style={{ width: 'min(340px, 60%)', height: 'auto', marginBottom: 10, userSelect: 'none' }}
-            />
-          }
-        />
+        <div style={{ flex: 1, height: '100%', overflowY: 'auto', background: 'var(--bg-base)' }}>
+          <div className="meetings-page" style={{ maxWidth: 920, margin: '0 auto', padding: '28px 28px 40px' }}>
+            <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 12, marginBottom: 22 }}>
+              <div>
+                <h1 style={{ margin: 0, fontSize: '1.6rem', fontWeight: 800, letterSpacing: '-0.03em', color: 'var(--text-primary)' }}>Meetings</h1>
+                <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: 4 }}>
+                  {new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}
+                </div>
+              </div>
+              <button onClick={() => switchTab('calendar')} style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 999, padding: '8px 14px', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)', cursor: 'pointer', fontFamily: 'inherit' }}>
+                Open calendar
+              </button>
+            </div>
+
+            {/* Quick actions */}
+            <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginBottom: 30 }}>
+              <button className="meeting-action" onClick={openNewMeeting} style={{ ...card, background: 'var(--accent)', border: '1px solid var(--accent)', color: '#fff', boxShadow: '0 10px 24px rgba(216,52,40,0.25)' }}>
+                {tile('rgba(255,255,255,0.18)', '#fff', <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 7l-7 5 7 5V7z" /><rect x="1" y="5" width="15" height="14" rx="2" /></svg>)}
+                <div>
+                  <div style={{ fontWeight: 800, fontSize: '0.98rem' }}>New meeting</div>
+                  <div style={{ fontSize: '0.78rem', opacity: 0.85, marginTop: 2 }}>Start an instant video call</div>
+                </div>
+              </button>
+              <button className="meeting-action" onClick={openScheduleForm} style={card}>
+                {tile('rgba(216,52,40,0.10)', 'var(--accent)', <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="3" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /><line x1="12" y1="14" x2="12" y2="18" /><line x1="10" y1="16" x2="14" y2="16" /></svg>)}
+                <div>
+                  <div style={{ fontWeight: 800, fontSize: '0.98rem' }}>Schedule</div>
+                  <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: 2 }}>Plan a meeting and invite people</div>
+                </div>
+              </button>
+              <div style={{ ...card, cursor: 'default' }}>
+                {tile('rgba(216,52,40,0.10)', 'var(--accent)', <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" /><polyline points="10 17 15 12 10 7" /><line x1="15" y1="12" x2="3" y2="12" /></svg>)}
+                <div style={{ fontWeight: 800, fontSize: '0.98rem' }}>Join with a code</div>
+                <form onSubmit={e => { e.preventDefault(); joinWithCode(); }} style={{ display: 'flex', gap: 6 }}>
+                  <input
+                    value={joinCodeInput}
+                    onChange={e => setJoinCodeInput(e.target.value)}
+                    placeholder="Code or link"
+                    style={{ flex: 1, minWidth: 0, background: 'var(--bg-base)', border: '1px solid var(--border-color)', borderRadius: 999, padding: '8px 12px', fontSize: '0.8rem', color: 'var(--text-primary)', outline: 'none', fontFamily: 'inherit' }}
+                  />
+                  <button type="submit" disabled={!joinCodeInput.trim()} style={{ background: joinCodeInput.trim() ? 'var(--accent)' : 'var(--bg-base)', color: joinCodeInput.trim() ? '#fff' : 'var(--text-muted)', border: '1px solid ' + (joinCodeInput.trim() ? 'var(--accent)' : 'var(--border-color)'), borderRadius: 999, padding: '0 14px', fontSize: '0.78rem', fontWeight: 700, cursor: joinCodeInput.trim() ? 'pointer' : 'default', fontFamily: 'inherit' }}>Join</button>
+                </form>
+              </div>
+            </div>
+
+            {/* Upcoming */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+              <h2 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 800, color: 'var(--text-primary)' }}>Upcoming</h2>
+              {sorted.length > 0 && <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>{sorted.length} scheduled</span>}
+            </div>
+            {loadingMeetings && sorted.length === 0 ? (
+              <ContactSkeleton />
+            ) : sorted.length === 0 ? (
+              <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 18, padding: '28px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', gap: 8 }}>
+                <img src={meetingsArt} alt="" draggable={false} style={{ width: 200, maxWidth: '60%', height: 'auto', userSelect: 'none', marginBottom: 6 }} />
+                <div style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--text-primary)' }}>No upcoming meetings</div>
+                <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Schedule one and it will show up here and in your calendar.</div>
+              </div>
+            ) : (
+              groupsByDay.map(([label, list]) => (
+                <div key={label} style={{ marginBottom: 18 }}>
+                  <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 4px 8px' }}>{label}</div>
+                  <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 18, overflow: 'hidden' }}>
+                    {list.map((m, i) => {
+                      const live = isLive(m);
+                      return (
+                        <div key={m.id} className="meeting-row" style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 16px', borderTop: i === 0 ? 'none' : '1px solid var(--border-color)' }}>
+                          <div style={{ width: 64, flexShrink: 0 }}>
+                            <div style={{ fontSize: '0.92rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+                              {new Date(m.scheduled_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </div>
+                            <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{m.duration_minutes} min</div>
+                          </div>
+                          <span style={{ width: 3, alignSelf: 'stretch', borderRadius: 2, background: live ? '#16a34a' : 'var(--accent)', flexShrink: 0 }} />
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <span style={{ fontSize: '0.92rem', fontWeight: 700, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.title || 'Untitled meeting'}</span>
+                              {live && <span style={{ fontSize: '0.64rem', fontWeight: 800, color: '#16a34a', background: 'rgba(22,163,74,0.12)', borderRadius: 999, padding: '2px 8px', flexShrink: 0 }}>LIVE</span>}
+                            </div>
+                            <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)', marginTop: 2 }}>
+                              {fmtRange(m.scheduled_at, m.duration_minutes)} · hosted by {m.creator_username === username ? 'you' : m.creator_username}
+                            </div>
+                          </div>
+                          <button
+                            className="meeting-code-chip"
+                            onClick={() => { navigator.clipboard?.writeText(m.join_code).catch(() => {}); }}
+                            title="Copy join code"
+                            style={{ background: 'var(--bg-base)', border: '1px solid var(--border-color)', borderRadius: 999, padding: '6px 12px', fontSize: '0.74rem', fontWeight: 600, color: 'var(--text-secondary)', cursor: 'pointer', flexShrink: 0, fontFamily: 'inherit' }}
+                          >{m.join_code}</button>
+                          <button
+                            onClick={() => joinScheduledMeeting(m)}
+                            style={{ background: live ? '#16a34a' : 'var(--accent)', color: '#fff', border: 'none', borderRadius: 999, padding: '8px 18px', fontSize: '0.8rem', fontWeight: 700, cursor: 'pointer', flexShrink: 0, fontFamily: 'inherit' }}
+                          >Join</button>
+                          {m.creator_username === username && (
+                            <button
+                              onClick={() => cancelScheduledMeeting(m.id)}
+                              title="Cancel meeting"
+                              style={{ background: 'transparent', border: 'none', cursor: 'pointer', flexShrink: 0, display: 'flex', padding: 4 }}
+                            ><CloseIcon size={15} color="var(--text-muted)" /></button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
       );
     }
 
@@ -3708,7 +3853,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
   // ── Render ───────────────────────────────────────────────────────────────────
 
   return (
-    <div className={`app-shell mobile-pane-${mobilePane}`} style={hs.root}>
+    <div className={`app-shell mobile-pane-${mobilePane} tab-${activeTab}`} style={hs.root}>
 
       {/* Global incoming-message toasts — visible on every page */}
       {toasts.length > 0 && (
@@ -3748,7 +3893,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
       {orgBroadcast && (
         <div style={{
           position: 'fixed', top: 0, left: 0, right: 0, zIndex: 3000,
-          background: 'linear-gradient(90deg,#4f2bb0,#7c3aed)', color: '#fff',
+          background: 'linear-gradient(90deg,var(--accent-dark,#b82a20),var(--accent,#d83428))', color: '#fff',
           padding: '10px 18px', display: 'flex', alignItems: 'flex-start', gap: 12,
           boxShadow: '0 4px 18px rgba(0,0,0,0.3)',
         }}>
@@ -3782,32 +3927,34 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
           onClick={(e) => { if (e.target === e.currentTarget) setShowBroadcastCompose(false); }}
           style={{ position: 'fixed', inset: 0, zIndex: 3100, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
         >
-          <div style={{ width: 'min(520px,100%)', background: '#15151c', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 14, padding: 20, color: '#e8e8ee' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-              <span style={{ fontSize: '1.2rem' }}>📢</span>
+          <div style={{ width: 'min(520px,100%)', background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 16, padding: 22, color: 'var(--text-primary)', boxShadow: '0 20px 50px rgba(0,0,0,0.18)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+              <div style={{ width: 38, height: 38, borderRadius: 11, background: 'var(--accent-soft, rgba(216,52,40,0.1))', color: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M3 11v2a1 1 0 0 0 1 1h2l5 4V6L6 10H4a1 1 0 0 0-1 1z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>
+              </div>
               <div>
-                <div style={{ fontWeight: 600 }}>Official broadcast</div>
-                <div style={{ fontSize: '0.78rem', opacity: 0.7 }}>Goes to everyone in your organization on Dilarion</div>
+                <div style={{ fontWeight: 700, fontSize: '1rem' }}>Official broadcast</div>
+                <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Goes to everyone in your organization on Dilarion</div>
               </div>
             </div>
             <input
               value={broadcastForm.title}
               onChange={(e) => setBroadcastForm(f => ({ ...f, title: e.target.value }))}
               placeholder="Title (optional)"
-              style={{ width: '100%', background: '#0f0f14', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 8, padding: '9px 11px', color: '#fff', fontSize: '0.85rem', marginBottom: 10 }}
+              style={{ width: '100%', boxSizing: 'border-box', background: 'var(--bg-input, var(--bg-card))', border: '1px solid var(--border-color)', borderRadius: 10, color: 'var(--text-primary)', outline: 'none', padding: '10px 12px', fontSize: '0.88rem', marginBottom: 10, fontFamily: 'inherit' }}
             />
             <textarea
               value={broadcastForm.message}
               onChange={(e) => setBroadcastForm(f => ({ ...f, message: e.target.value }))}
               placeholder="Write your official announcement…"
               rows={5}
-              style={{ width: '100%', background: '#0f0f14', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 8, padding: '10px 11px', color: '#fff', fontSize: '0.85rem', resize: 'vertical', fontFamily: 'inherit' }}
+              style={{ width: '100%', boxSizing: 'border-box', background: 'var(--bg-input, var(--bg-card))', border: '1px solid var(--border-color)', borderRadius: 10, color: 'var(--text-primary)', outline: 'none', padding: '10px 12px', fontSize: '0.88rem', resize: 'vertical', fontFamily: 'inherit' }}
             />
-            {broadcastState.error && <div style={{ color: '#ef9a9a', fontSize: '0.8rem', marginTop: 8 }}>{broadcastState.error}</div>}
-            {broadcastState.notice && <div style={{ color: '#7ee0a0', fontSize: '0.8rem', marginTop: 8 }}>{broadcastState.notice}</div>}
+            {broadcastState.error && <div style={{ color: 'var(--accent)', fontSize: '0.8rem', marginTop: 8 }}>{broadcastState.error}</div>}
+            {broadcastState.notice && <div style={{ color: '#16a34a', fontSize: '0.8rem', marginTop: 8 }}>{broadcastState.notice}</div>}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 16 }}>
-              <button onClick={() => setShowBroadcastCompose(false)} style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.18)', color: '#cfcfe0', borderRadius: 8, padding: '8px 14px', cursor: 'pointer', fontSize: '0.82rem' }}>Cancel</button>
-              <button onClick={submitBroadcast} disabled={broadcastState.sending || !broadcastForm.message.trim()} style={{ background: '#7c3aed', border: 'none', color: '#fff', borderRadius: 8, padding: '8px 16px', cursor: 'pointer', fontSize: '0.82rem', opacity: broadcastState.sending || !broadcastForm.message.trim() ? 0.6 : 1 }}>{broadcastState.sending ? 'Sending…' : 'Send broadcast'}</button>
+              <button onClick={() => setShowBroadcastCompose(false)} style={{ background: 'transparent', border: '1px solid var(--border-color)', color: 'var(--text-primary)', borderRadius: 999, padding: '9px 18px', cursor: 'pointer', fontSize: '0.84rem', fontWeight: 500, fontFamily: 'inherit' }}>Cancel</button>
+              <button onClick={submitBroadcast} disabled={broadcastState.sending || !broadcastForm.message.trim()} style={{ background: 'var(--accent)', border: 'none', color: '#fff', borderRadius: 999, padding: '9px 20px', cursor: 'pointer', fontSize: '0.84rem', fontWeight: 600, fontFamily: 'inherit', opacity: broadcastState.sending || !broadcastForm.message.trim() ? 0.6 : 1 }}>{broadcastState.sending ? 'Sending…' : 'Send broadcast'}</button>
             </div>
           </div>
         </div>
@@ -3815,20 +3962,21 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
 
       {/* ── RAIL: brand frame column, app-level actions only ────────────── */}
       <nav className="app-tab-bar" aria-label="App" style={hs.rail}>
-        <div style={hs.railLogo} title="Dilarion">
+        <div className="rail-hide-mobile" style={hs.railLogo} title="Dilarion">
           <img src="/logo.jpg" alt="Dilarion" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
         </div>
-        <button style={{ ...hs.railBtn, ...(activeTab !== 'settings' ? hs.railBtnActive : {}) }} title="Home" onClick={() => switchTab('chats')}>
+        <button className={`rail-btn${activeTab !== 'settings' && mobilePane === 'list' ? ' rail-btn-active' : ''}`} style={{ ...hs.railBtn, ...(activeTab !== 'settings' ? hs.railBtnActive : {}) }} title="Home" onClick={() => { switchTab('chats'); setMobilePane('list'); }}>
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>
         </button>
-        <button style={hs.railBtn} title="Search people, channels and files" onClick={() => setShowSearch(true)}>
+        <button className="rail-btn" style={hs.railBtn} title="Search people, channels and files" onClick={() => setShowSearch(true)}>
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>
         </button>
-        <button style={{ ...hs.railBtn, ...hs.railBtnAdd }} title="New chat" onClick={() => { switchTab('chats'); openNewChat(); }}>
+        <button className="rail-btn rail-btn-add" style={{ ...hs.railBtn, ...hs.railBtnAdd }} title="New chat" onClick={() => { switchTab('chats'); openNewChat(); }}>
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         </button>
         {canBroadcast && (
           <button
+            className="rail-btn"
             style={hs.railBtn}
             title="Send an official broadcast to all staff"
             onClick={() => { setBroadcastState({ sending: false, error: '', notice: '' }); setShowBroadcastCompose(true); }}
@@ -3836,18 +3984,19 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="m3 11 14-6v14L3 13z"/><path d="M3 11v2a2 2 0 0 0 2 2h1"/><path d="M11 18.5 9 19a2 2 0 0 1-2-2v-2"/></svg>
           </button>
         )}
-        <div style={{ flex: 1 }} />
-        <button style={{ ...hs.railBtn, ...(activeTab === 'settings' ? hs.railBtnActive : {}) }} title="Settings" onClick={() => switchTab('settings')}>
+        <div className="rail-hide-mobile" style={{ flex: 1 }} />
+        <button className={`rail-btn${activeTab === 'settings' ? ' rail-btn-active' : ''}`} style={{ ...hs.railBtn, ...(activeTab === 'settings' ? hs.railBtnActive : {}) }} title="Settings" onClick={() => switchTab('settings')}>
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
         </button>
         <button
+          className="rail-btn rail-hide-mobile"
           style={hs.railBtn}
           title="Log out"
           onClick={() => { if (window.confirm('Log out of Dilarion on this device?')) onLogout(); }}
         >
           <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
         </button>
-        <button style={hs.railAvatarBtn} title={username} onClick={() => switchTab('settings')}>
+        <button className="rail-hide-mobile" style={hs.railAvatarBtn} title={username} onClick={() => switchTab('settings')}>
           <span style={hs.railAvatar}>{initials(username)}</span>
           <span style={{ ...hs.railPresence, background: connected ? '#22c55e' : '#f59e0b' }} />
         </button>
@@ -3858,7 +4007,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
         <aside className="app-list-panel" style={{ ...hs.listPanel, width: layout.list }}>
           {renderListHeader()}
           <div style={hs.sidebarScroll}>
-            <div style={hs.navGroup}>
+            <div className="app-nav-group" style={hs.navGroup}>
               <NavRow icon={<ChatTabIcon active={activeTab === 'chats'} />} label="Direct messages" active={activeTab === 'chats'} badge={unread.size} onClick={() => switchTab('chats')} />
               <NavRow icon={<GroupTabIcon active={activeTab === 'groups'} />} label="Groups" active={activeTab === 'groups'} onClick={() => switchTab('groups')} />
               <NavRow icon={<HashIcon active={activeTab === 'channels'} />} label="Channels" active={activeTab === 'channels'} badge={channels.reduce((n, c) => n + (c.unread_count || 0), 0)} onClick={() => switchTab('channels')} />
@@ -3902,9 +4051,9 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
 
         {/* ── MAIN PANEL (flex 1) ─────────────────────────────────────────── */}
         <main className="app-main-panel" style={hs.mainPanel}>
-          {(activeTab === 'calls' || activeTab === 'settings') && mobilePane === 'main' && (
-            <button className="mobile-pane-back" onClick={() => setMobilePane('list')}>
-              <span aria-hidden="true">‹</span> {activeTab === 'calls' ? 'Calls' : 'Settings'}
+          {(['calls', 'settings', 'meetings', 'calendar', 'tasks'] as Tab[]).includes(activeTab) && mobilePane === 'main' && (
+            <button className="mobile-pane-back" onClick={() => { if (activeTab === 'calls' || activeTab === 'settings') setMobilePane('list'); else switchTab('chats'); }}>
+              <span aria-hidden="true">‹</span> {activeTab === 'calls' || activeTab === 'settings' ? (activeTab === 'calls' ? 'Calls' : 'Settings') : 'Home'}
             </button>
           )}
           {renderMainContent()}
@@ -3993,6 +4142,9 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
       {conferenceInvite && !callWindowOpen && !activeGalleryCall && (
         <div className="responsive-overlay" style={ci.backdrop}>
           <div className="responsive-dialog" style={ci.card}>
+<div style={{ width: 44, height: 44, borderRadius: 14, background: 'rgba(216,52,40,0.10)', color: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 6 }}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.8 19.8 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.12 4.18 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z" /></svg>
+            </div>
             <p style={ci.kicker}>
               {conferenceInvite.groupName
                 ? (conferenceInvite.callType === 'video' ? 'Group video call' : conferenceInvite.callType === 'voice' ? 'Group voice call' : 'Group call')
@@ -4009,7 +4161,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
                 Already on the call: {conferenceInvite.participants.join(', ')}
               </p>
             )}
-            <p style={{ ...ci.hint, color: confTokenRejected ? '#ef4444' : '#9ca3af' }}>
+            <p style={{ ...ci.hint, color: confTokenRejected ? 'var(--accent)' : 'var(--text-muted)' }}>
               {confTokenRejected
                 ? 'That token was rejected. The call is still ringing — try again.'
                 : 'Enter your master token to join.'}
@@ -4052,7 +4204,10 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
       {blockedLogin && (
         <div className="responsive-overlay" style={ci.backdrop}>
           <div className="responsive-dialog" style={ci.card}>
-            <p style={{ ...ci.kicker, color: '#ef4444' }}>Security alert</p>
+<div style={{ width: 44, height: 44, borderRadius: 14, background: 'rgba(216,52,40,0.10)', color: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 6 }}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
+            </div>
+            <p style={ci.kicker}>Security alert</p>
             <h3 style={ci.title}>Sign-in attempt blocked</h3>
             <p style={{ ...ci.hint, color: 'var(--text-secondary, #9ca3af)', lineHeight: 1.6 }}>
               Someone tried to sign in to your account on another device. It was blocked because you are signed in here.
@@ -4063,7 +4218,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
               {blockedLogin.ip && <div><strong>IP address:</strong> {blockedLogin.ip}</div>}
               <div><strong>Time:</strong> {blockedLogin.time ? new Date(blockedLogin.time).toLocaleString() : 'Just now'}</div>
             </div>
-            <p style={{ ...ci.hint, color: '#9ca3af' }}>If this wasn't you, change your login token now.</p>
+            <p style={{ ...ci.hint, color: 'var(--text-muted)' }}>If this wasn't you, change your login token now.</p>
             <div style={ci.row}>
               <button style={ci.join} onClick={() => setBlockedLogin(null)}>OK</button>
             </div>
@@ -4084,11 +4239,14 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
       {lockPrompt && (
         <div className="responsive-overlay" style={ci.backdrop}>
           <div className="responsive-dialog" style={ci.card}>
+<div style={{ width: 44, height: 44, borderRadius: 14, background: 'rgba(216,52,40,0.10)', color: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 6 }}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="11" width="16" height="10" rx="2.5" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg>
+            </div>
             <p style={ci.kicker}>Locked chat</p>
             <h3 style={ci.title}>
               {lockPrompt.kind === 'contact' ? lockPrompt.target : groups.find(g => g.id === lockPrompt.target)?.name || 'Group'}
             </h3>
-            <p style={{ ...ci.hint, color: lockPromptError ? '#ef4444' : '#9ca3af' }}>
+            <p style={{ ...ci.hint, color: lockPromptError ? 'var(--accent)' : 'var(--text-muted)' }}>
               {lockPromptError || 'Enter your master token to open this chat.'}
             </p>
             <input
@@ -4125,20 +4283,21 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
       {missedCall && !incomingCall && !callWindowOpen && !activeGalleryCall && (
         <div style={{
           position: 'fixed', right: 24, bottom: 24, zIndex: 900,
-          background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 16,
-          padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 10,
+          background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 18,
+          boxShadow: '0 18px 48px rgba(15,23,42,0.18)', minWidth: 260,
+          padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 10,
         }}>
-          <span style={{ fontSize: '0.8rem', color: '#9ca3af' }}>Missed call</span>
-          <span style={{ fontSize: '0.95rem', color: '#fff', fontWeight: 600 }}>{missedCall.from}</span>
+          <span style={{ fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--accent)' }}>Missed call</span>
+          <span style={{ fontSize: '1rem', color: 'var(--text-primary)', fontWeight: 700 }}>{missedCall.from}</span>
           <div style={{ display: 'flex', gap: 8 }}>
             <button
-              style={{ background: 'transparent', color: '#9ca3af', border: '1px solid #2a2a2a', borderRadius: 10, padding: '0.45rem 0.8rem', cursor: 'pointer', fontSize: '0.8rem' }}
+              style={{ background: 'var(--bg-panel)', color: 'var(--text-primary)', border: '1px solid var(--border-color)', borderRadius: 999, padding: '0.45rem 0.95rem', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600, fontFamily: 'inherit' }}
               onClick={() => setMissedCall(null)}
             >
               Dismiss
             </button>
             <button
-              style={{ background: '#25d366', color: '#062', border: 'none', borderRadius: 10, padding: '0.45rem 0.9rem', fontWeight: 700, cursor: 'pointer', fontSize: '0.8rem' }}
+              style={{ background: '#16a34a', color: '#fff', border: 'none', borderRadius: 999, padding: '0.45rem 1rem', fontWeight: 700, cursor: 'pointer', fontSize: '0.8rem', fontFamily: 'inherit' }}
               onClick={() => {
                 const to = missedCall.from;
                 const type = missedCall.callType;
@@ -4160,29 +4319,30 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
           padding: 24, pointerEvents: 'none',
         }}>
           <div className="incoming-call-card" style={{
-            background: '#1a1a1a',
-            border: '1px solid #2a2a2a',
-            borderRadius: 16,
-            padding: '20px 24px',
+            background: 'var(--bg-panel)',
+            border: '1px solid var(--border-color)',
+            borderRadius: 22,
+            padding: '20px 22px',
             display: 'flex',
             flexDirection: 'column',
             gap: 14,
-            minWidth: 300,
-            boxShadow: '0 20px 60px rgba(0,0,0,0.8)',
+            width: 330,
+            boxShadow: '0 24px 64px rgba(15,23,42,0.22)',
             pointerEvents: 'all',
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
               <div style={{
-                width: 46, height: 46, borderRadius: '50%',
-                background: '#2a2a2a', color: '#d1d5db',
+                width: 52, height: 52, borderRadius: 16,
+                background: 'var(--accent)', color: '#fff',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontWeight: 700, fontSize: '0.9rem', flexShrink: 0,
+                fontWeight: 800, fontSize: '1rem', flexShrink: 0,
+                boxShadow: '0 0 0 6px rgba(216,52,40,0.12)', animation: 'dl-ring-pulse 1.6s ease-out infinite',
               }}>
                 {initials(incomingCall.from)}
               </div>
               <div>
-                <div style={{ fontSize: '0.95rem', fontWeight: 700, color: '#f1f5f9' }}>{incomingCall.from}</div>
-                <div style={{ fontSize: '0.78rem', color: '#9ca3af', marginTop: 2 }}>
+                <div style={{ fontSize: '1.02rem', fontWeight: 800, color: 'var(--text-primary)' }}>{incomingCall.from}</div>
+                <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: 2 }}>
                   Incoming {incomingCall.callType} call…
                 </div>
               </div>
@@ -4191,7 +4351,10 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
             {/* Master token required to accept */}
             {!masterToken && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <span style={{ fontSize: '0.72rem', color: '#9ca3af' }}>Enter master token to accept</span>
+                <span style={{ fontSize: '0.74rem', fontWeight: 600, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="11" width="16" height="10" rx="2.5" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg>
+                  Enter master token to accept
+                </span>
                 <input
                   type="password"
                   placeholder="Master token"
@@ -4209,13 +4372,13 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
                     }
                   }}
                   style={{
-                    background: '#2a2a2a', border: '1px solid #3a3a3a', borderRadius: 8,
-                    color: '#f1f5f9', fontSize: '0.82rem', padding: '8px 12px',
+                    background: 'var(--bg-base)', border: '1px solid var(--border-color)', borderRadius: 12,
+                    color: 'var(--text-primary)', fontSize: '0.86rem', padding: '10px 12px', outline: 'none', fontFamily: 'inherit',
                   }}
                   autoFocus
                 />
-                {callTokenError && <span style={{ fontSize: '0.7rem', color: '#ef4444' }}>{callTokenError}</span>}
-                {callTokenLoading && <span style={{ fontSize: '0.7rem', color: '#9ca3af' }}>Verifying…</span>}
+                {callTokenError && <span style={{ fontSize: '0.72rem', color: 'var(--accent)' }}>{callTokenError}</span>}
+                {callTokenLoading && <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Verifying…</span>}
               </div>
             )}
 
@@ -4231,9 +4394,9 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
                   setIncomingCall(null);
                 }}
                 style={{
-                  flex: 1, background: '#ef4444', border: 'none', borderRadius: 10,
-                  color: '#fff', fontWeight: 700, fontSize: '0.85rem',
-                  padding: '10px 0', cursor: 'pointer',
+                  flex: 1, background: 'var(--accent)', border: 'none', borderRadius: 999,
+                  color: '#fff', fontWeight: 700, fontSize: '0.86rem', fontFamily: 'inherit',
+                  padding: '11px 0', cursor: 'pointer'
                 }}
               >
                 Decline
@@ -4257,9 +4420,9 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
                   setIncomingCall(null);
                 }}
                 style={{
-                  flex: 1, background: masterToken ? '#25d366' : '#1a3a2a', border: 'none', borderRadius: 10,
-                  color: masterToken ? '#fff' : '#6b7280', fontWeight: 700, fontSize: '0.85rem',
-                  padding: '10px 0', cursor: masterToken ? 'pointer' : 'not-allowed',
+                  flex: 1, background: masterToken ? '#16a34a' : 'var(--bg-base)', border: masterToken ? 'none' : '1px solid var(--border-color)', borderRadius: 999,
+                  color: masterToken ? '#fff' : 'var(--text-muted)', fontWeight: 700, fontSize: '0.86rem', fontFamily: 'inherit',
+                  padding: '11px 0', cursor: masterToken ? 'pointer' : 'not-allowed',
                 }}
               >
                 Accept
@@ -4717,17 +4880,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
             {!showScheduleForm && (
               <div style={{ padding: 14, borderTop: '1px solid var(--border-color)', flexShrink: 0 }}>
                 <button
-                  onClick={async () => {
-                    setShowScheduleForm(true);
-                    if (allUsers.length === 0) {
-                      setLoadingUsers(true);
-                      try {
-                        const users = await getUsers(token);
-                        setAllUsers(users.filter(u => u.username !== username));
-                      } catch {}
-                      finally { setLoadingUsers(false); }
-                    }
-                  }}
+                  onClick={openScheduleForm}
                   style={{
                     width: '100%', background: 'var(--accent)', color: '#fff', border: 'none',
                     borderRadius: 10, padding: '11px 0', fontSize: '0.85rem', fontWeight: 700, cursor: 'pointer',
@@ -4775,29 +4928,31 @@ function MuteBadge() {
 
 const ci: Record<string, React.CSSProperties> = {
   backdrop: {
-    position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', zIndex: 950,
+    position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.40)', backdropFilter: 'blur(3px)', zIndex: 950,
     display: 'flex', alignItems: 'center', justifyContent: 'center',
   },
   card: {
-    background: '#141414', border: '1px solid #2a2a2a', borderRadius: 18,
-    padding: '1.75rem', width: 360, display: 'flex', flexDirection: 'column', gap: 10,
+    background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 20,
+    boxShadow: '0 24px 60px rgba(15,23,42,0.18)',
+    padding: '26px 26px 22px', width: 380, display: 'flex', flexDirection: 'column', gap: 10,
   },
-  kicker: { margin: 0, fontSize: '0.75rem', letterSpacing: '0.08em', color: '#6b7280', textTransform: 'uppercase' },
-  title: { margin: 0, color: '#fff', fontSize: '1.15rem' },
-  people: { margin: 0, fontSize: '0.8rem', color: '#9ca3af' },
-  hint: { margin: '4px 0 0', fontSize: '0.78rem', lineHeight: 1.45 },
+  kicker: { margin: 0, fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.08em', color: 'var(--accent)', textTransform: 'uppercase' },
+  title: { margin: 0, color: 'var(--text-primary)', fontSize: '1.2rem', fontWeight: 800, letterSpacing: '-0.02em' },
+  people: { margin: 0, fontSize: '0.8rem', color: 'var(--text-secondary)' },
+  hint: { margin: '4px 0 0', fontSize: '0.8rem', lineHeight: 1.45 },
   input: {
-    background: '#0c0c0c', border: '1px solid #2a2a2a', borderRadius: 10,
-    padding: '0.7rem 0.9rem', color: '#fff', fontSize: '0.9rem', outline: 'none',
+    background: 'var(--bg-base)', border: '1px solid var(--border-color)', borderRadius: 12,
+    padding: '0.75rem 0.95rem', color: 'var(--text-primary)', fontSize: '0.92rem', outline: 'none', fontFamily: 'inherit',
   },
-  row: { display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 4 },
+  row: { display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 8 },
   decline: {
-    background: 'transparent', color: '#9ca3af', border: 'none',
-    padding: '0.6rem 0.9rem', cursor: 'pointer', fontSize: '0.85rem',
+    background: 'var(--bg-panel)', color: 'var(--text-primary)', border: '1px solid var(--border-color)', borderRadius: 999,
+    padding: '0.6rem 1.1rem', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 600, fontFamily: 'inherit',
   },
   join: {
-    background: '#25d366', color: '#062', border: 'none', borderRadius: 10,
-    padding: '0.6rem 1.2rem', fontWeight: 700, cursor: 'pointer', fontSize: '0.85rem',
+    background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 999,
+    padding: '0.6rem 1.4rem', fontWeight: 700, cursor: 'pointer', fontSize: '0.85rem', fontFamily: 'inherit',
+    boxShadow: '0 6px 16px rgba(216,52,40,0.25)',
   },
 };
 

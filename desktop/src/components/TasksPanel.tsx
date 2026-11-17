@@ -10,7 +10,7 @@ import { userMessage } from '../services/errors';
 type StatusFilter = 'all' | 'open' | 'in_progress' | 'completed' | 'cancelled';
 
 const STATUS_COLORS: Record<string, string> = {
-  open: '#6b7280', in_progress: '#0891b2', completed: '#25d366', cancelled: '#ef4444',
+  open: '#9ca3af', in_progress: '#0891b2', completed: '#16a34a', cancelled: '#d83428',
 };
 
 export default function TasksPanel({ token, myUsername, groups }: { token: string; myUsername: string; groups: Group[] }) {
@@ -27,73 +27,127 @@ export default function TasksPanel({ token, myUsername, groups }: { token: strin
 
   useEffect(() => { reload(); }, [token]);
 
-  const filtered = filter === 'all' ? tasks : tasks.filter(t => t.status === filter);
+  const [query, setQuery] = useState('');
+  const q = query.trim().toLowerCase();
+  const filtered = (filter === 'all' ? tasks : tasks.filter(t => t.status === filter))
+    .filter(t => !q || t.title.toLowerCase().includes(q) || (t.description || '').toLowerCase().includes(q) || t.created_by.toLowerCase().includes(q));
   const selected = tasks.find(t => t.task_id === selectedId) ?? null;
+  const countOf = (f: StatusFilter) => (f === 'all' ? tasks.length : tasks.filter(t => t.status === f).length);
+  const FILTERS: Array<[StatusFilter, string]> = [['all', 'All'], ['open', 'Open'], ['in_progress', 'In progress'], ['completed', 'Done'], ['cancelled', 'Cancelled']];
 
   return (
-    <div className="tasks-layout" style={{ display: 'flex', height: '100%' }}>
-      <div className="tasks-list" style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: 20, minWidth: 0, maxWidth: 420, borderRight: '1px solid var(--border-color)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-          <h2 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-primary)' }}>Tasks</h2>
-          <button onClick={() => setShowCreate(true)} style={{ background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 8, padding: '6px 14px', fontSize: '0.8rem', fontWeight: 700, cursor: 'pointer' }}>
-            + New Task
+    <div className="tasks-layout" style={{ display: 'flex', height: '100%', background: 'var(--bg-base)' }}>
+      <div className="tasks-list" style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '22px 18px 0', minWidth: 0, maxWidth: 440, borderRight: '1px solid var(--border-color)', background: 'var(--bg-panel)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, padding: '0 4px' }}>
+          <div>
+            <h2 style={{ margin: 0, fontSize: '1.45rem', fontWeight: 800, letterSpacing: '-0.03em', color: 'var(--text-primary)' }}>Tasks</h2>
+            <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: 2 }}>
+              {tasks.filter(t => t.status === 'open' || t.status === 'in_progress').length} active · {tasks.filter(t => t.status === 'completed').length} done
+            </div>
+          </div>
+          <button onClick={() => setShowCreate(true)} style={{ background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 999, padding: '9px 16px', fontSize: '0.82rem', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', boxShadow: '0 6px 16px rgba(216,52,40,0.22)' }}>
+            + New task
           </button>
         </div>
 
-        <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
-          {(['all', 'open', 'in_progress', 'completed', 'cancelled'] as StatusFilter[]).map(f => (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--bg-base)', border: '1px solid var(--border-color)', borderRadius: 12, padding: '0 12px', marginBottom: 12 }}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="7" /><line x1="21" y1="21" x2="16.5" y2="16.5" /></svg>
+          <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search tasks" style={{ flex: 1, border: 'none', background: 'transparent', outline: 'none', padding: '10px 0', fontSize: '0.84rem', color: 'var(--text-primary)', fontFamily: 'inherit' }} />
+        </div>
+
+        <div style={{ display: 'flex', gap: 2, marginBottom: 12, background: 'var(--bg-base)', border: '1px solid var(--border-color)', borderRadius: 12, padding: 3, overflowX: 'auto' }}>
+          {FILTERS.map(([f, label]) => (
             <button
               key={f}
               onClick={() => setFilter(f)}
               style={{
-                background: filter === f ? 'var(--accent)' : 'var(--bg-card)',
-                color: filter === f ? '#fff' : 'var(--text-primary)',
-                border: '1px solid var(--border-color)', borderRadius: 20, padding: '4px 10px',
-                fontSize: '0.72rem', fontWeight: 600, cursor: 'pointer',
+                flex: '1 0 auto', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+                background: filter === f ? 'var(--bg-panel)' : 'transparent',
+                color: filter === f ? 'var(--text-primary)' : 'var(--text-muted)',
+                boxShadow: filter === f ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
+                border: 'none', borderRadius: 9, padding: '6px 9px',
+                fontSize: '0.74rem', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap',
               }}
             >
-              {f === 'all' ? 'All' : f.replace('_', ' ')}
+              {label}
+              <span style={{ fontSize: '0.66rem', fontWeight: 700, color: filter === f ? 'var(--accent)' : 'var(--text-muted)' }}>{countOf(f)}</span>
             </button>
           ))}
         </div>
 
-        <div style={{ flex: 1, overflowY: 'auto' }}>
+        <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 16 }}>
           {loading ? (
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>Loading…</p>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', padding: '0 4px' }}>Loading…</p>
           ) : filtered.length === 0 ? (
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>No tasks.</p>
+            <div style={{ textAlign: 'center', padding: '40px 16px', color: 'var(--text-muted)' }}>
+              <div style={{ width: 52, height: 52, borderRadius: 16, margin: '0 auto 10px', background: 'rgba(216,52,40,0.08)', color: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 11 12 14 22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></svg>
+              </div>
+              <div style={{ fontWeight: 700, fontSize: '0.88rem', color: 'var(--text-primary)' }}>{q ? 'No matching tasks' : filter === 'all' ? 'No tasks yet' : 'Nothing here'}</div>
+              <div style={{ fontSize: '0.78rem', marginTop: 4 }}>{q ? 'Try a different search.' : 'Create a task and assign it to people or teams.'}</div>
+            </div>
           ) : (
-            filtered.map(t => (
-              <button
-                key={t.task_id}
-                onClick={() => setSelectedId(t.task_id)}
-                style={{
-                  display: 'block', width: '100%', textAlign: 'left', background: selectedId === t.task_id ? 'var(--item-active-bg)' : 'var(--bg-card)',
-                  border: selectedId === t.task_id ? '1px solid var(--accent)' : '1px solid var(--border-color)',
-                  borderRadius: 10, padding: 12, marginBottom: 8, cursor: 'pointer',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: STATUS_COLORS[t.status], flexShrink: 0 }} />
-                  <span style={{ fontWeight: 600, fontSize: '0.85rem', color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.title}</span>
-                  {t.is_breakout && <span style={{ fontSize: '0.62rem', background: '#7c3aed', color: '#fff', borderRadius: 4, padding: '1px 5px', flexShrink: 0 }}>breakout</span>}
-                </div>
-                <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: 4 }}>
-                  {t.due_at ? `Due ${new Date(t.due_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}` : 'No due date'}
-                  {t.recurrence && ` · repeats ${t.recurrence}`}
-                </div>
-                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 2 }}>By {t.created_by}</div>
-              </button>
-            ))
+            filtered.map(t => {
+              const isSel = selectedId === t.task_id;
+              const overdue = !!t.due_at && new Date(t.due_at).getTime() < Date.now() && t.status !== 'completed' && t.status !== 'cancelled';
+              const done = t.status === 'completed';
+              const people = t.assignees.map(a => a.username);
+              return (
+                <button
+                  key={t.task_id}
+                  onClick={() => setSelectedId(t.task_id)}
+                  style={{
+                    display: 'flex', gap: 12, width: '100%', textAlign: 'left', fontFamily: 'inherit',
+                    background: isSel ? 'rgba(216,52,40,0.06)' : 'var(--bg-panel)',
+                    border: isSel ? '1px solid var(--accent)' : '1px solid var(--border-color)',
+                    borderRadius: 14, padding: '12px 14px', marginBottom: 8, cursor: 'pointer',
+                  }}
+                >
+                  <span style={{
+                    width: 20, height: 20, borderRadius: 10, flexShrink: 0, marginTop: 1,
+                    border: `2px solid ${STATUS_COLORS[t.status]}`, background: done ? STATUS_COLORS[t.status] : 'transparent',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  }}>
+                    {done && <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}
+                  </span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontWeight: 700, fontSize: '0.88rem', color: done ? 'var(--text-muted)' : 'var(--text-primary)', textDecoration: done ? 'line-through' : 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{t.title}</span>
+                      {t.is_breakout && <span style={{ fontSize: '0.62rem', fontWeight: 700, background: 'rgba(124,58,237,0.10)', color: '#7c3aed', borderRadius: 999, padding: '2px 8px', flexShrink: 0 }}>Teams</span>}
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: '0.68rem', fontWeight: 700, borderRadius: 999, padding: '2px 8px', color: overdue ? 'var(--accent)' : 'var(--text-secondary)', background: overdue ? 'rgba(216,52,40,0.10)' : 'var(--bg-base)' }}>
+                        {t.due_at ? `${overdue ? 'Overdue · ' : 'Due '}${new Date(t.due_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}` : 'No due date'}
+                      </span>
+                      {t.recurrence && <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>↻ {t.recurrence}</span>}
+                      <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center' }}>
+                        {people.slice(0, 3).map((u, i) => (
+                          <span key={u} title={u} style={{ width: 22, height: 22, borderRadius: 11, marginLeft: i ? -6 : 0, border: '2px solid var(--bg-panel)', background: AVATAR_TINTS[(u.charCodeAt(0) + u.length) % AVATAR_TINTS.length], color: '#fff', fontSize: '0.6rem', fontWeight: 800, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                            {u.charAt(0).toUpperCase()}
+                          </span>
+                        ))}
+                        {people.length > 3 && <span style={{ fontSize: '0.66rem', color: 'var(--text-muted)', marginLeft: 4 }}>+{people.length - 3}</span>}
+                      </span>
+                    </div>
+                  </div>
+                </button>
+              );
+            })
           )}
         </div>
       </div>
 
-      <div className="tasks-detail" style={{ flex: 1, padding: 20, overflowY: 'auto' }}>
+      <div className={`tasks-detail${selected ? '' : ' tasks-detail-empty'}`} style={{ flex: 1, padding: '26px 30px', overflowY: 'auto' }}>
         {selected ? (
           <TaskDetail task={selected} myUsername={myUsername} token={token} onChanged={reload} />
         ) : (
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Select a task to view details.</p>
+          <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', gap: 8, color: 'var(--text-muted)' }}>
+            <div style={{ width: 64, height: 64, borderRadius: 20, background: 'var(--bg-panel)', border: '1px solid var(--border-color)', color: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 6 }}>
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="3" width="16" height="18" rx="3" /><line x1="8" y1="8" x2="16" y2="8" /><line x1="8" y1="12" x2="16" y2="12" /><line x1="8" y1="16" x2="12" y2="16" /></svg>
+            </div>
+            <div style={{ fontWeight: 800, fontSize: '1.05rem', color: 'var(--text-primary)' }}>Select a task</div>
+            <div style={{ fontSize: '0.82rem', maxWidth: 280 }}>Pick a task on the left to see details, reports and who it's assigned to.</div>
+          </div>
         )}
       </div>
 
@@ -109,6 +163,8 @@ export default function TasksPanel({ token, myUsername, groups }: { token: strin
     </div>
   );
 }
+
+const AVATAR_TINTS = ['#c0392b', '#b45309', '#0f766e', '#1d4ed8', '#7c3aed', '#be185d', '#4d7c0f', '#0369a1'];
 
 /** Task → team → staff → the compiled sections that cite that person's own
  *  report. A clearer, indented tree: rails connect each level, each staffer
@@ -356,15 +412,15 @@ function TaskDetail({ task, myUsername, token, onChanged }: { task: TaskItem; my
   return (
     <div style={{ maxWidth: 600 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
-        <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700, color: 'var(--text-primary)', flex: 1 }}>{task.title}</h3>
-        <span style={{ fontSize: '0.7rem', background: STATUS_COLORS[task.status], color: '#fff', borderRadius: 6, padding: '2px 8px', fontWeight: 700 }}>
+        <h3 style={{ margin: 0, fontSize: '1.35rem', fontWeight: 800, letterSpacing: '-0.02em', color: 'var(--text-primary)', flex: 1 }}>{task.title}</h3>
+        <span style={{ fontSize: '0.7rem', background: STATUS_COLORS[task.status], color: '#fff', borderRadius: 999, padding: '3px 10px', fontWeight: 700, textTransform: 'capitalize' }}>
           {task.status.replace('_', ' ')}
         </span>
         <button
           onClick={handleDelete}
           disabled={busy}
           title="Delete task"
-          style={{ background: 'transparent', color: '#ef4444', border: '1px solid #ef4444', borderRadius: 8, padding: '3px 10px', fontSize: '0.72rem', fontWeight: 700, cursor: busy ? 'wait' : 'pointer' }}
+          style={{ background: 'transparent', color: 'var(--accent)', border: '1px solid var(--border-color)', borderRadius: 999, padding: '5px 12px', fontSize: '0.74rem', fontWeight: 700, cursor: busy ? 'wait' : 'pointer', fontFamily: 'inherit' }}
         >
           Delete
         </button>
@@ -388,8 +444,8 @@ function TaskDetail({ task, myUsername, token, onChanged }: { task: TaskItem; my
             style={{
               background: task.status === s ? STATUS_COLORS[s] : 'var(--bg-card)',
               color: task.status === s ? '#fff' : 'var(--text-primary)',
-              border: '1px solid var(--border-color)', borderRadius: 8, padding: '5px 10px',
-              fontSize: '0.75rem', cursor: busy ? 'wait' : 'pointer', opacity: task.status === s ? 1 : 0.85,
+              border: task.status === s ? `1px solid ${STATUS_COLORS[s]}` : '1px solid var(--border-color)', borderRadius: 999, padding: '6px 12px',
+              fontSize: '0.75rem', fontWeight: 600, cursor: busy ? 'wait' : 'pointer', fontFamily: 'inherit',
             }}
           >
             Mark {s.replace('_', ' ')}
@@ -402,7 +458,7 @@ function TaskDetail({ task, myUsername, token, onChanged }: { task: TaskItem; my
         {!showAdd ? (
           <button
             onClick={() => setShowAdd(true)}
-            style={{ background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px dashed var(--border-color)', borderRadius: 8, padding: '6px 12px', fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer' }}
+            style={{ background: 'var(--bg-panel)', color: 'var(--text-primary)', border: '1px dashed var(--border-color)', borderRadius: 999, padding: '7px 14px', fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}
           >
             + Add people
           </button>
@@ -608,7 +664,7 @@ function TaskDetail({ task, myUsername, token, onChanged }: { task: TaskItem; my
             <button
               onClick={handleCompile}
               disabled={busy || task.breakout_groups.every(g => !g.has_report)}
-              style={{ background: '#7c3aed', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 14px', fontSize: '0.8rem', fontWeight: 700, cursor: busy ? 'wait' : 'pointer', opacity: task.breakout_groups.every(g => !g.has_report) ? 0.5 : 1 }}
+              style={{ background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 999, padding: '8px 16px', fontSize: '0.8rem', fontWeight: 700, cursor: busy ? 'wait' : 'pointer', opacity: task.breakout_groups.every(g => !g.has_report) ? 0.5 : 1 }}
             >
               Compile reports with AI
             </button>

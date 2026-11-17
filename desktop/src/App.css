@@ -62,40 +62,14 @@ input  { font-family: inherit; outline: none; }
 }
 
 .mobile-settings-tab,
-.mobile-pane-back {
+.mobile-pane-back,
+.settings-row-hint,
+.settings-row-chevron {
   display: none;
 }
 
 /* Keep medium-size browser windows usable before the phone layout takes over. */
 @media (max-width: 1100px) {
-  .app-tab-bar {
-    width: 76px !important;
-    min-width: 76px !important;
-  }
-
-  .app-nav-row {
-    width: calc(100% - 12px) !important;
-    margin-inline: 6px !important;
-    justify-content: center !important;
-    gap: 0 !important;
-    padding-inline: 8px !important;
-  }
-
-  /* The rail is 60px of usable width once it collapses, so the avatar, the
-     username and the settings glyph cannot all fit — drop the name and keep
-     the two icons. Without this the profile row overflows the rail. */
-  .app-nav-label,
-  .profile-username,
-  .desktop-profile-actions button > span:last-child,
-  .desktop-profile-actions > button:last-child {
-    display: none !important;
-  }
-
-  .desktop-profile-actions button {
-    justify-content: center !important;
-    gap: 0 !important;
-  }
-
   .app-list-panel {
     width: min(320px, 34vw) !important;
     min-width: 240px !important;
@@ -119,65 +93,74 @@ input  { font-family: inherit; outline: none; }
     font-size: 16px;
   }
 
+  /* Full-bleed shell: no brand frame around the card on a phone. */
   .app-shell {
     position: relative !important;
     width: 100% !important;
     height: 100dvh !important;
-    padding-bottom: calc(62px + env(safe-area-inset-bottom)) !important;
+    padding: 0 !important;
     overflow: hidden !important;
   }
 
+  .app-card {
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+  }
+
+  /* The desktop rail becomes a floating brand-red pill at the bottom. It only
+     shows on the list pane; full-screen pages (a chat, calendar…) have a back
+     button instead, so nothing covers the composer. */
   .app-tab-bar {
     position: fixed !important;
     z-index: 800 !important;
-    left: 0 !important;
-    right: 0 !important;
-    bottom: 0 !important;
-    width: 100% !important;
+    left: 14px !important;
+    right: 14px !important;
+    bottom: calc(12px + env(safe-area-inset-bottom)) !important;
+    width: auto !important;
     min-width: 0 !important;
-    height: calc(62px + env(safe-area-inset-bottom)) !important;
-    padding: 4px 4px env(safe-area-inset-bottom) !important;
+    height: 62px !important;
+    padding: 8px 12px !important;
     flex-direction: row !important;
-    align-items: stretch !important;
-    gap: 2px !important;
-    overflow-x: auto !important;
-    overflow-y: hidden !important;
-    border: 0 !important;
-    border-top: 1px solid var(--border-color) !important;
-    background: var(--bg-panel) !important;
-    scrollbar-width: none;
+    align-items: center !important;
+    justify-content: space-around !important;
+    gap: 4px !important;
+    border-radius: 31px !important;
+    background: var(--accent) !important;
+    box-shadow: 0 12px 30px rgba(216, 52, 40, 0.35) !important;
+    color: #fff !important;
   }
 
-  .app-tab-bar::-webkit-scrollbar { display: none; }
+  .mobile-pane-main .app-tab-bar,
+  .rail-hide-mobile {
+    display: none !important;
+  }
 
+  .rail-btn {
+    width: 46px !important;
+    height: 46px !important;
+    border-radius: 23px !important;
+    background: transparent !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    color: rgba(255, 255, 255, 0.85) !important;
+  }
+
+  .rail-btn-active {
+    background: #fff !important;
+    color: var(--accent) !important;
+  }
+
+  /* Sidebar navigation reads as a Slack-style home list with big touch rows. */
   .app-nav-row {
-    flex: 1 0 48px !important;
-    min-width: 48px !important;
-    width: auto !important;
-    height: 54px !important;
-    margin: 0 !important;
-    padding: 5px 4px !important;
-    border-radius: 10px !important;
-    flex-direction: column !important;
-    justify-content: center !important;
-    gap: 2px !important;
-    font-size: 0.62rem !important;
-    text-align: center !important;
+    min-height: 46px !important;
+    padding: 10px 12px !important;
+    font-size: 0.95rem !important;
+    border-radius: 12px !important;
   }
 
   .app-nav-label {
-    display: block !important;
-    flex: 0 !important;
-    width: 100% !important;
-    max-width: 56px !important;
-    font-size: 0.58rem !important;
-    line-height: 1.1 !important;
-    text-align: center !important;
-  }
-
-  .app-nav-badge {
-    position: absolute;
-    transform: translate(12px, -13px);
+    font-size: 0.95rem !important;
   }
 
   .mobile-settings-tab {
@@ -192,7 +175,7 @@ input  { font-family: inherit; outline: none; }
   .app-list-panel,
   .app-main-panel {
     position: absolute !important;
-    inset: 0 0 calc(62px + env(safe-area-inset-bottom)) 0 !important;
+    inset: 0 !important;
     width: 100% !important;
     min-width: 0 !important;
     max-width: none !important;
@@ -208,6 +191,96 @@ input  { font-family: inherit; outline: none; }
   .mobile-pane-list .app-list-panel,
   .mobile-pane-main .app-main-panel {
     display: flex !important;
+  }
+
+  /* Room under the list for the floating bar. */
+  .mobile-pane-list .app-list-panel {
+    padding-bottom: calc(86px + env(safe-area-inset-bottom)) !important;
+  }
+
+  .meetings-page { padding: 18px 14px 28px !important; }
+  .meeting-action {
+    flex-direction: row !important;
+    align-items: center !important;
+    gap: 14px !important;
+    padding: 14px 16px !important;
+    flex-basis: 100% !important;
+  }
+  .meeting-code-chip { display: none !important; }
+  .meeting-row { gap: 10px !important; padding: 12px !important; }
+
+  .tasks-detail-empty { display: none !important; }
+
+  /* Settings opens from the bottom bar as its own page: show just its menu,
+     with a title, not the whole workspace nav above it. */
+  .tab-settings .app-nav-group { display: none !important; }
+
+  /* Settings menu on a phone: large rows on a card, each with its hint. */
+  .settings-list-title {
+    font-size: 1.6rem !important;
+    font-weight: 800 !important;
+    color: var(--text-primary) !important;
+    text-transform: none !important;
+    letter-spacing: -0.02em !important;
+    padding: 4px 8px 10px !important;
+  }
+  .settings-list-card {
+    background: var(--bg-panel);
+    border: 1px solid var(--border-color);
+    border-radius: 18px;
+    overflow: hidden;
+    margin: 0 4px;
+  }
+  .settings-row {
+    min-height: 62px !important;
+    padding: 12px 14px !important;
+    gap: 14px !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    border-bottom: 1px solid var(--border-color) !important;
+  }
+  .settings-row:last-child { border-bottom: 0 !important; }
+  .settings-row-icon {
+    width: 38px; height: 38px; border-radius: 12px; flex-shrink: 0;
+    align-items: center; justify-content: center;
+    background: rgba(216, 52, 40, 0.08);
+    color: var(--accent) !important;
+  }
+  .settings-row-text {
+    display: flex !important;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 0.98rem !important;
+    font-weight: 600 !important;
+    color: var(--text-primary) !important;
+    white-space: normal !important;
+  }
+  .settings-row-hint {
+    display: block;
+    font-size: 0.78rem;
+    font-weight: 400;
+    color: var(--text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .settings-row-chevron {
+    display: block;
+    font-size: 1.4rem;
+    color: var(--text-muted);
+    line-height: 1;
+  }
+
+  /* Copilot button sits above the floating bar instead of on top of it. */
+  .copilot-fab {
+    right: 18px !important;
+    bottom: calc(88px + env(safe-area-inset-bottom)) !important;
+    width: 48px !important;
+    height: 48px !important;
+  }
+
+  .mobile-pane-main .copilot-fab {
+    bottom: calc(112px + env(safe-area-inset-bottom)) !important;
   }
 
   .mobile-pane-back {
@@ -304,7 +377,12 @@ input  { font-family: inherit; outline: none; }
   }
 
   .calendar-grid {
-    min-height: 430px !important;
+    min-height: 330px !important;
+  }
+
+  .calendar-detail {
+    border-left: 0 !important;
+    border-top: 1px solid var(--border-color) !important;
   }
 
   .settings-scroll-page {
@@ -543,7 +621,7 @@ input  { font-family: inherit; outline: none; }
   .app-toast {
     left: 12px !important;
     right: 12px !important;
-    bottom: calc(74px + env(safe-area-inset-bottom)) !important;
+    bottom: calc(90px + env(safe-area-inset-bottom)) !important;
   }
 
   /* The message actions menu drops below its chevron, so on the last message
@@ -564,11 +642,13 @@ input  { font-family: inherit; outline: none; }
 }
 
 @media (max-width: 390px) {
-  .app-nav-row {
-    flex-basis: 44px !important;
-    min-width: 44px !important;
-  }
-
-  .app-nav-label { display: none !important; }
+  .rail-btn { width: 42px !important; height: 42px !important; }
   .calendar-grid { min-height: 360px !important; }
+}
+
+/* Incoming-call avatar: soft brand-red pulse while ringing */
+@keyframes dl-ring-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(216, 52, 40, 0.35); }
+  70%  { box-shadow: 0 0 0 12px rgba(216, 52, 40, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(216, 52, 40, 0); }
 }

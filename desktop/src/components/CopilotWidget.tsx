@@ -250,6 +250,7 @@ export default function CopilotWidget({ token, onScheduleDraft }: {
       )}
 
       <button
+        className="copilot-fab"
         onPointerDown={startDrag}
         onClick={() => { if (movedRef.current) { movedRef.current = false; return; } setOpen(v => !v); }}
         title="Copilot — drag to move"
