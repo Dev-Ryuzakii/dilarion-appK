@@ -240,7 +240,7 @@ private fun CallTile(room: Room, tile: GroupCallTile, modifier: Modifier) {
             VideoTrackView(
                 videoTrack = track,
                 modifier = Modifier.fillMaxSize(),
-                room = room,
+                passedRoom = room,
                 mirror = tile.isLocal,
             )
         } else {
