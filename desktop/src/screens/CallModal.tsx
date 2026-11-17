@@ -64,21 +64,15 @@ async function addIceCandidateLogged(pc: RTCPeerConnection, candidate: RTCIceCan
 // ── ICE servers ───────────────────────────────────────────────────────────────
 //
 // Preferred source is GET /webrtc/ice-servers, which hands out TURN credentials
-// that expire. FALLBACK_ICE_SERVERS below is only used when that call fails —
-// its static credential is public (it ships in released builds), so treat it as
-// an availability net, not as security.
+// that expire. Our own TURN server is only reachable with those credentials, so
+// none are compiled in. FALLBACK_ICE_SERVERS below is used when that call fails:
+// public STUN and public relays only.
 
 const FALLBACK_ICE_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
   { urls: 'stun:stun2.l.google.com:19302' },
   { urls: 'stun:stun3.l.google.com:19302' },
-  // Own VPS TURN — by hostname (add DNS A record: turndilarion.eibstratoc.com → 41.242.60.238, grey cloud)
-  { urls: 'turn:turndilarion.eibstratoc.com:3478',              username: 'dilarion', credential: 'dilarion2026' },
-  { urls: 'turn:turndilarion.eibstratoc.com:3478?transport=tcp', username: 'dilarion', credential: 'dilarion2026' },
-  // Own VPS TURN — raw IP fallback (works before DNS is set)
-  { urls: 'turn:41.242.60.238:3478',              username: 'dilarion', credential: 'dilarion2026' },
-  { urls: 'turn:41.242.60.238:3478?transport=tcp', username: 'dilarion', credential: 'dilarion2026' },
   // Public fallbacks
   { urls: 'turn:a.relay.metered.ca:80',               username: 'openrelayproject', credential: 'openrelayproject' },
   { urls: 'turn:a.relay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },

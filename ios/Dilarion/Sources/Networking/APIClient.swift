@@ -41,9 +41,6 @@ class APIClient {
     static let shared = APIClient()
     private init() {}
 
-    static let turnHost = "turn.dilarion.eibstratoc.com"
-    static let turnUser = "dilarion"
-    static let turnPass = "dilarion2026"
 
     // Set via API_BASE_URL in Config-Production.xcconfig / Config-Staging.xcconfig,
     // injected into Info.plist at build time. Falls back to production so a

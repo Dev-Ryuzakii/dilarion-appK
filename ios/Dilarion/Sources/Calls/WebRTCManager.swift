@@ -21,10 +21,10 @@ class WebRTCManager: NSObject, ObservableObject {
         RTCIceServer(urlStrings: ["stun:stun2.l.google.com:19302"]),
         RTCIceServer(urlStrings: ["stun:stun3.l.google.com:19302"]),
         RTCIceServer(urlStrings: ["stun:stun4.l.google.com:19302"]),
-        RTCIceServer(urlStrings: ["turn:turn.dilarion.eibstratoc.com:3478"], username: "dilarion", credential: "dilarion2026"),
-        RTCIceServer(urlStrings: ["turn:turn.dilarion.eibstratoc.com:3478?transport=tcp"], username: "dilarion", credential: "dilarion2026"),
-        RTCIceServer(urlStrings: ["turn:41.242.54.66:3478"], username: "dilarion", credential: "dilarion2026"),
-        RTCIceServer(urlStrings: ["turn:41.242.54.66:3478?transport=tcp"], username: "dilarion", credential: "dilarion2026")
+        // Our own TURN server needs credentials from /webrtc/ice-servers; none
+        // are compiled in. Public relays only:
+        RTCIceServer(urlStrings: ["turn:a.relay.metered.ca:80"], username: "openrelayproject", credential: "openrelayproject"),
+        RTCIceServer(urlStrings: ["turn:a.relay.metered.ca:443?transport=tcp"], username: "openrelayproject", credential: "openrelayproject")
     ]
     
     private override init() {

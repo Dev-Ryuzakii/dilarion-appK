@@ -113,17 +113,8 @@ class WebRtcManager @Inject constructor(
         PeerConnection.IceServer.builder("stun:stun2.l.google.com:19302").createIceServer(),
         PeerConnection.IceServer.builder("stun:stun3.l.google.com:19302").createIceServer(),
         PeerConnection.IceServer.builder("stun:stun4.l.google.com:19302").createIceServer(),
-        // Own VPS TURN — by hostname (DNS: turndilarion.eibstratoc.com → 41.242.60.238, grey cloud)
-        PeerConnection.IceServer.builder("turn:turndilarion.eibstratoc.com:3478")
-            .setUsername("dilarion").setPassword("dilarion2026").createIceServer(),
-        PeerConnection.IceServer.builder("turn:turndilarion.eibstratoc.com:3478?transport=tcp")
-            .setUsername("dilarion").setPassword("dilarion2026").createIceServer(),
-        // Own VPS TURN — raw IP fallback (works before DNS is set)
-        PeerConnection.IceServer.builder("turn:41.242.60.238:3478")
-            .setUsername("dilarion").setPassword("dilarion2026").createIceServer(),
-        PeerConnection.IceServer.builder("turn:41.242.60.238:3478?transport=tcp")
-            .setUsername("dilarion").setPassword("dilarion2026").createIceServer(),
-        // Public fallbacks
+        // Our own TURN server comes from GET /webrtc/ice-servers with credentials
+        // that expire; none are compiled in. Public fallbacks only:
         PeerConnection.IceServer.builder("turn:a.relay.metered.ca:80")
             .setUsername("openrelayproject").setPassword("openrelayproject").createIceServer(),
         PeerConnection.IceServer.builder("turn:a.relay.metered.ca:443?transport=tcp")
