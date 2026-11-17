@@ -1,23 +1,27 @@
 import SwiftUI
 
-// AI Voice Decoy enrollment — record a short sample of your own voice once;
-// the server clones it (XTTS-v2) to generate a decoy voice note in your
-// voice every time you send a real one, sitting behind the same tap-to-reveal
-// gate as everything else. See VoiceIdentityAPI.swift for the wire contract
-// and backend voice_scrambler.py for the generation pipeline.
+// Voice enrollment for decoy notes and speech the account owner types.
+// See VoiceIdentityAPI.swift and the backend voice_clone.py.
 @MainActor
 final class VoiceIdentitySettingsViewModel: ObservableObject {
     @Published var isEnrolled = false
     @Published var isLoading = true
     @Published var isUploading = false
     @Published var error: String? = nil
+    @Published var clips: [VoiceSpeechClip] = []
+    @Published var speechText = ""
+    @Published var isGenerating = false
+    @Published var speechError: String? = nil
+    @Published var playingId: String? = nil
 
     private var username: String { KeychainHelper.shared.read(key: "username") ?? "" }
 
     func refresh() {
         isLoading = true
         Task {
-            isEnrolled = await APIClient.shared.hasVoiceIdentity(username: username)
+            let enrolled = await APIClient.shared.hasVoiceIdentity(username: username)
+            isEnrolled = enrolled
+            clips = enrolled ? ((try? await APIClient.shared.listVoiceSpeech()) ?? []) : []
             isLoading = false
         }
     }
@@ -34,6 +38,70 @@ final class VoiceIdentitySettingsViewModel: ObservableObject {
             self.error = error.localizedDescription
             isUploading = false
             return false
+        }
+    }
+
+    func generate() async {
+        let spoken = speechText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !spoken.isEmpty else {
+            speechError = "Enter the words to speak"
+            return
+        }
+        isGenerating = true
+        speechError = nil
+        do {
+            _ = try await APIClient.shared.createVoiceSpeech(text: spoken)
+            speechText = ""
+            clips = try await APIClient.shared.listVoiceSpeech()
+            isGenerating = false
+        } catch {
+            speechError = error.localizedDescription
+            isGenerating = false
+        }
+    }
+
+    func preview(id: String) async {
+        speechError = nil
+        do {
+            let data = try await APIClient.shared.downloadVoiceSpeech(id: id)
+            let url = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("voice_speech_\(id).m4a")
+            try data.write(to: url, options: .atomic)
+            playingId = id
+            AudioManager.shared.startPlaying(fileURL: url, mediaId: id) { [weak self] in
+                Task { @MainActor in self?.playingId = nil }
+            }
+        } catch {
+            speechError = error.localizedDescription
+        }
+    }
+
+    func deleteClip(id: String) async {
+        speechError = nil
+        do {
+            try await APIClient.shared.deleteVoiceSpeech(id: id)
+            clips.removeAll { $0.id == id }
+            if playingId == id {
+                AudioManager.shared.stopPlaying()
+                playingId = nil
+            }
+        } catch {
+            speechError = error.localizedDescription
+        }
+    }
+
+    func deleteEnrollment() async {
+        isUploading = true
+        error = nil
+        do {
+            try await APIClient.shared.deleteVoiceIdentity()
+            AudioManager.shared.stopPlaying()
+            isEnrolled = false
+            clips = []
+            playingId = nil
+            isUploading = false
+        } catch {
+            self.error = error.localizedDescription
+            isUploading = false
         }
     }
 }
@@ -100,8 +168,9 @@ private struct VoiceIdentityEnrollSheet: View {
 
     var body: some View {
         NavigationStack {
+            ScrollView {
             VStack(spacing: 24) {
-                Text("Read a sentence or two out loud — at least \(Int(Self.minSeconds))s. This sample is only ever used to generate decoy voice notes in your own voice; it's never used for anything else.")
+                Text("Read a sentence or two out loud — at least \(Int(Self.minSeconds))s. Decoy voice notes use this sample, and you can type English text below to preview speech in your own voice.")
                     .font(.system(size: 13))
                     .foregroundColor(.textSecondary)
                     .padding(.horizontal, 24)
@@ -137,10 +206,50 @@ private struct VoiceIdentityEnrollSheet: View {
                     Text(error).foregroundColor(.red).font(.system(size: 12))
                 }
 
+                if vm.isEnrolled {
+                    TextField("Text to speak", text: $vm.speechText, axis: .vertical)
+                        .lineLimit(2...4)
+                        .textFieldStyle(.roundedBorder)
+                        .padding(.horizontal, 24)
+
+                    Button {
+                        Task { await vm.generate() }
+                    } label: {
+                        if vm.isGenerating { ProgressView() } else { Text("Generate speech").bold() }
+                    }
+                    .disabled(vm.isGenerating || vm.speechText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                    if let speechError = vm.speechError {
+                        Text(speechError).foregroundColor(.red).font(.system(size: 12)).padding(.horizontal, 24)
+                    }
+
+                    ForEach(vm.clips) { clip in
+                        HStack {
+                            Text(clip.text)
+                                .font(.system(size: 13))
+                                .lineLimit(2)
+                            Spacer()
+                            Button(vm.playingId == clip.id ? "Playing" : "Play") {
+                                Task { await vm.preview(id: clip.id) }
+                            }
+                            Button("Delete") {
+                                Task { await vm.deleteClip(id: clip.id) }
+                            }
+                        }
+                        .padding(.horizontal, 24)
+                    }
+
+                    Button("Delete enrollment and clips", role: .destructive) {
+                        Task { await vm.deleteEnrollment() }
+                    }
+                    .disabled(vm.isUploading)
+                }
+
                 Spacer()
             }
+            }
             .padding(.vertical, 24)
-            .navigationTitle("Enroll Your Voice")
+            .navigationTitle("Your voice")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
