@@ -27,6 +27,7 @@ import { presenceService, WsMessage } from '../services/presence';
 import { MicIcon as MicIconSvg, PaperclipIcon as PaperclipIconSvg, CameraIcon, CloseIcon, PinIcon, SparkleIcon } from '../components/Icons';
 import MediaBubble, { DocumentBubble } from '../components/MediaBubble';
 import MeetingCard, { JoinMeetingHandler } from '../components/MeetingCard';
+import SelfCardBubble, { isSelfCard } from '../components/SelfCards';
 import { MessageMenuTrigger, MessageReactionPills, TrashIcon, SmileyIcon } from '../components/MessageMenu';
 import CopilotResultModal from '../components/CopilotResultModal';
 import MasterTokenPromptModal from '../components/MasterTokenPromptModal';
@@ -563,7 +564,7 @@ function MessageBubble({
     setTimeout(() => setCopyHint(null), 1500);
   }
 
-  const isTextish = !isMeeting(ct) && !isDocument(ct) && !isVoice(ct) && !isImage(ct) && !isMedia(ct);
+  const isTextish = !isMeeting(ct) && !isSelfCard(ct) && !isDocument(ct) && !isVoice(ct) && !isImage(ct) && !isMedia(ct);
 
   function handleTranslateClick() {
     const text = revealedText ?? (isEncrypted(ct) ? null : msg.content);
@@ -586,7 +587,17 @@ function MessageBubble({
   }
 
   let body: React.ReactNode;
-  if (isMeeting(ct)) {
+  if (isSelfCard(ct)) {
+    body = (
+      <SelfCardBubble
+        token={token}
+        msg={msg}
+        masterToken={masterToken}
+        onDecrypt={onDecrypt}
+        onMasterTokenSaved={onMasterTokenSaved}
+      />
+    );
+  } else if (isMeeting(ct)) {
     body = <MeetingCard content={msg.content} senderUsername={msg.sender} onJoin={onJoinMeeting} />;
   } else if (isEncrypted(ct) || isGifOrSticker(ct)) {
     body = (
@@ -814,6 +825,8 @@ export default function ChatPanel({
   token, myUsername, partner, partnerOnline, masterToken, onMasterTokenSaved, onCall, onJoinMeeting, onBack,
   isMuted, isArchived, isLocked, onToggleMute, onToggleArchive, onToggleLock, onDeleteChat,
 }: Props) {
+  // The personal "You" chat: sender and recipient are both me.
+  const isSelfChat = partner === myUsername;
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [pending, setPending] = useState<PendingMsg[]>([]);
   const [loading, setLoading] = useState(true);
@@ -926,7 +939,7 @@ export default function ChatPanel({
 
   async function getRecentPlaintext(limit = 40): Promise<string[]> {
     const kp = loadKeypair(myUsername);
-    const recent = messages.filter(m => !m.is_deleted && !isMeeting(m.content_type)).slice(-limit);
+    const recent = messages.filter(m => !m.is_deleted && !isMeeting(m.content_type) && !isSelfCard(m.content_type)).slice(-limit);
     const lines: string[] = [];
     for (const m of recent) {
       const who = m.sender === myUsername ? 'You' : m.sender;
@@ -1339,14 +1352,22 @@ export default function ChatPanel({
             </button>
           )}
           <button
-            onClick={() => setShowContactInfo(true)}
+            onClick={() => { if (!isSelfChat) setShowContactInfo(true); }}
             style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'transparent', border: 'none', cursor: 'pointer', padding: 0, textAlign: 'left' }}
             title="Contact info"
           >
-          <div style={cs.avatar}>{initials(partner)}</div>
+          {isSelfChat ? (
+            <div style={{ ...cs.avatar, background: 'var(--accent, #c0392b)', color: '#fff' }}><SelfChatGlyph /></div>
+          ) : (
+            <div style={cs.avatar}>{initials(partner)}</div>
+          )}
           <div>
-            <div style={cs.partnerName}>{partner}</div>
-            {partnerTyping ? (
+            <div style={cs.partnerName}>{isSelfChat ? 'You' : partner}</div>
+            {isSelfChat ? (
+              <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: 2 }}>
+                Notes, meeting recordings and notes · only you can read this
+              </div>
+            ) : partnerTyping ? (
               <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 2 }}>
                 <TypingDots />
                 <span style={{ fontSize: '0.72rem', color: '#25d366', fontStyle: 'italic' }}>typing…</span>
@@ -1370,6 +1391,7 @@ export default function ChatPanel({
           <button onClick={handleSummarize} style={cs.callBtn} title="Summarize thread">
             <SparkleIcon size={17} color="#9ca3af" />
           </button>
+          {!isSelfChat && (<>
           <button onClick={() => onCall(partner, 'audio')} style={cs.callBtn} title="Voice call">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 1h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.64a16 16 0 0 0 6 6l.95-.95a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/>
@@ -1380,6 +1402,7 @@ export default function ChatPanel({
               <path d="M15 10l4.553-2.553A1 1 0 0 1 21 8.382v7.236a1 1 0 0 1-1.447.894L15 14M3 8a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
             </svg>
           </button>
+          </>)}
         </div>
       </div>
 
@@ -1392,7 +1415,11 @@ export default function ChatPanel({
             <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#374151" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
             </svg>
-            <p style={{ color: '#6b7280', fontSize: '0.85rem', marginTop: 8 }}>No messages yet. Say hello!</p>
+            <p style={{ color: '#6b7280', fontSize: '0.85rem', marginTop: 8, textAlign: 'center', maxWidth: 320 }}>
+              {isSelfChat
+                ? 'Your private space. Jot notes to yourself — meeting recordings and meeting notes land here too, locked like every other chat.'
+                : 'No messages yet. Say hello!'}
+            </p>
           </div>
         ) : (
           <>
@@ -1959,3 +1986,11 @@ const cs: Record<string, React.CSSProperties> = {
     flexShrink: 0,
   },
 };
+
+function SelfChatGlyph() {
+  return (
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
+    </svg>
+  );
+}

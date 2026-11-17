@@ -2565,6 +2565,17 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
         handleCommand(commandType, params, commandId).catch(() => {});
       } else if (msg.type === 'new_message') {
         const sender = msg.data?.sender_username as string | undefined;
+        const kind = msg.data?.content_type as string | undefined;
+        // A recording or notes card landed in my own "You" chat.
+        if (sender && sender === username && (kind === 'meeting_recording' || kind === 'meeting_notes')) {
+          const viewingSelf = activeTabRef.current === 'chats' && selectedChatRef.current === username;
+          if (!viewingSelf) {
+            try { playBeep(); } catch {}
+            setUnread(prev => new Set(prev).add(username));
+            pushMessageToast(username);
+          }
+          return;
+        }
         if (sender && sender !== username) {
           const muted = chatSettingsRef.current.find(s => s.peer_username === sender)?.is_muted;
           if (!muted) playBeep();
@@ -2738,7 +2749,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
   useEffect(() => {
     setLoadingContacts(true);
     getConversations(token)
-      .then(users => setContacts(users.filter(u => u.username !== username)))
+      .then(users => setContacts(withSelfChat(users, username)))
       // Not silent: an empty list used to look identical to a failed load, and
       // a retired session then hid as "signed in but nothing works".
       .catch(err => console.warn('[dilarion] conversations failed to load:', err))
@@ -3218,7 +3229,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
   }
 
   const filteredContacts = contacts
-    .filter(c => c.username.toLowerCase().includes(search.toLowerCase()))
+    .filter(c => c.username.toLowerCase().includes(search.toLowerCase()) || (c.is_self && 'you'.includes(search.toLowerCase().trim())))
     .filter(c => showArchived ? true : !settingsForContact(c.username)?.is_archived);
 
   const filteredGroups = groups
@@ -3302,6 +3313,11 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
                     }}
                     onClick={() => openContact(c.username)}
                   >
+                    {c.is_self ? (
+                      <div style={{ ...hs.contactAvatar, background: 'var(--accent, #c0392b)', color: '#fff', flexShrink: 0 }}>
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" /></svg>
+                      </div>
+                    ) : (
                     <div style={{ position: 'relative', flexShrink: 0 }}>
                       <div style={hs.contactAvatar}>{initials(c.username)}</div>
                       <div style={{
@@ -3311,11 +3327,15 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
                         border: c.is_active ? '2px solid var(--bg-panel)' : '1.5px solid var(--text-muted)',
                       }} />
                     </div>
+                    )}
                     <div style={hs.itemInfo}>
                       <span style={{ ...hs.itemName, fontWeight: hasUnread ? 650 : 500, color: hasUnread || isActive ? 'var(--text-primary)' : 'var(--text-secondary)' }}>
-                        {c.username}
+                        {c.is_self ? 'You' : c.username}
                         {cs?.is_locked && <LockBadge />}
                       </span>
+                      {c.is_self && !isTyping && (
+                        <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Notes & meeting recordings</span>
+                      )}
                       {isTyping && (
                         <span style={{ fontSize: '0.72rem', color: '#16a34a', fontStyle: 'italic' }}>typing…</span>
                       )}
@@ -3874,10 +3894,10 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
             >
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontWeight: 700, fontSize: '0.82rem', color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {t.group ? `${t.sender} · ${t.group}` : t.sender}
+                  {t.group ? `${t.sender} · ${t.group}` : t.sender === username ? 'You' : t.sender}
                 </div>
                 <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
-                  {t.group ? 'New group message — tap to open' : 'New message — tap to open'}
+                  {t.group ? 'New group message — tap to open' : t.sender === username ? 'New meeting recording or notes — tap to open' : 'New message — tap to open'}
                 </div>
               </div>
               <button
@@ -5214,3 +5234,10 @@ const hs: Record<string, React.CSSProperties> = {
     background: 'var(--bg-panel)',
   },
 };
+
+/** The "You" chat always sits first, even on servers that don't list it yet. */
+function withSelfChat(list: Contact[], me: string): Contact[] {
+  const fromServer = list.find(c => c.is_self || c.username === me);
+  const self: Contact = { ...(fromServer ?? {}), username: me, is_active: true, is_self: true, display_name: 'You' };
+  return [self, ...list.filter(c => !(c.is_self || c.username === me))];
+}

@@ -44,6 +44,9 @@ export interface ChatMessage {
 export interface Contact {
   username: string;
   is_active: boolean;
+  /** The personal "You" chat (sender == recipient == me). */
+  is_self?: boolean;
+  display_name?: string;
 }
 
 export interface Group {
@@ -2763,4 +2766,131 @@ export async function updateNotificationSettings(token: string, patch: Partial<N
   });
   if (!res.ok) throw new Error('Failed to save notification settings');
   return res.json();
+}
+
+
+// ── "You" chat: meeting recordings ─────────────────────────────────────────────
+
+export interface RecordingCardPayload {
+  kind: 'meeting_recording';
+  recording_id: number;
+  conference_id: number;
+  meeting_title: string;
+  host_username: string;
+  started_at: string | null;
+  ended_at: string | null;
+  duration_seconds: number | null;
+  file_size: number | null;
+  download_path: string;
+  notes_path: string;
+}
+
+export interface NotesCardPayload {
+  kind: 'meeting_notes';
+  recording_id: number;
+  meeting_title: string;
+  summary: string;
+  key_points: string[];
+  action_item_count: number;
+  notes_path: string;
+}
+
+export class RecordingFileError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = 'RecordingFileError';
+    this.status = status;
+  }
+}
+
+async function recordingError(res: Response): Promise<RecordingFileError> {
+  let detail = '';
+  try { detail = (await res.json()).detail || ''; } catch { /* keep status */ }
+  const fallback =
+    res.status === 409 ? 'This recording is still being processed. Try again in a minute.'
+    : res.status === 410 ? 'This recording has expired.'
+    : res.status === 403 ? "You don't have access to this recording."
+    : res.status === 404 ? 'This recording no longer exists.'
+    : `Couldn't open the recording (${res.status}).`;
+  return new RecordingFileError(res.status, typeof detail === 'string' && detail && detail !== 'Not Found' ? detail : fallback);
+}
+
+/**
+ * A URL a <video> tag can play. Prefers a short-lived signed link from
+ * POST /file-link (no session token in the URL). Servers without that route
+ * fall back to downloading the file with the bearer header into a blob URL;
+ * call revoke() when done so the blob is freed.
+ */
+export async function openRecordingFile(
+  token: string,
+  recordingId: number,
+): Promise<{ url: string; revoke: () => void }> {
+  const link = await apiFetch(`${BASE}/meetings/recordings/${recordingId}/file-link`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (link.ok) {
+    const body = await link.json();
+    const url = String(body.url || '');
+    return { url: url.startsWith('http') ? url : `${BASE}${url}`, revoke: () => {} };
+  }
+  // 404 with FastAPI's generic "Not Found" / 405 = route missing on this server.
+  let routeMissing = link.status === 405;
+  if (link.status === 404) {
+    try { routeMissing = (await link.clone().json()).detail === 'Not Found'; } catch { routeMissing = true; }
+  }
+  if (!routeMissing) throw await recordingError(link);
+
+  const res = await apiFetch(`${BASE}/meetings/recordings/${recordingId}/file`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw await recordingError(res);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob.type ? blob : new Blob([blob], { type: 'video/mp4' }));
+  return { url, revoke: () => URL.revokeObjectURL(url) };
+}
+
+// ── Live meeting transcript ────────────────────────────────────────────────────
+
+export interface CaptionSegment {
+  conference_id: number;
+  id: number;
+  speaker_username: string;
+  speaker_name: string;
+  text: string;
+  started_at: string | null;
+  ended_at: string | null;
+}
+
+export interface CaptionsState {
+  conference_id: number;
+  enabled: boolean;
+  status: 'off' | 'starting' | 'running';
+  started_by: string | null;
+  error?: string | null;
+  available?: boolean;
+}
+
+export async function getLiveCaptions(
+  token: string, conferenceId: number, afterId = 0,
+): Promise<CaptionsState & { segments: CaptionSegment[] }> {
+  const res = await apiFetch(`${BASE}/calls/conference/${conferenceId}/captions?after_id=${afterId}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return channelJson(res);
+}
+
+export async function startLiveCaptions(token: string, conferenceId: number): Promise<CaptionsState> {
+  const res = await apiFetch(`${BASE}/calls/conference/${conferenceId}/captions/start`, {
+    method: 'POST', headers: { Authorization: `Bearer ${token}` },
+  });
+  return channelJson(res);
+}
+
+export async function stopLiveCaptions(token: string, conferenceId: number): Promise<CaptionsState> {
+  const res = await apiFetch(`${BASE}/calls/conference/${conferenceId}/captions/stop`, {
+    method: 'POST', headers: { Authorization: `Bearer ${token}` },
+  });
+  return channelJson(res);
 }
