@@ -108,15 +108,7 @@ fun AuthScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    listOf(
-                        DilarionRed.copy(alpha = 0.06f),
-                        BackgroundGrey,
-                        MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
-                    )
-                )
-            )
+            .background(SurfaceWhite)
             .imePadding(),
         contentAlignment = Alignment.Center,
     ) {
@@ -126,7 +118,7 @@ fun AuthScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 24.dp)
                 .padding(vertical = 48.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
+            horizontalAlignment = Alignment.Start,
         ) {
 
             // ── Logo ──────────────────────────────────────────────────────────
@@ -134,10 +126,10 @@ fun AuthScreen(
                 painter = painterResource(R.drawable.dilarion_logo),
                 contentDescription = "Dilarion",
                 contentScale = ContentScale.Fit,
-                modifier = Modifier.size(110.dp).clip(CircleShape),
+                modifier = Modifier.size(72.dp).clip(RoundedCornerShape(20.dp)),
             )
 
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(28.dp))
             Text(
                 when (view) {
                     AuthView.SIGNUP -> "Create Account"
@@ -146,6 +138,9 @@ fun AuthScreen(
                     AuthView.LOGIN -> "Welcome Back"
                 },
                 style = MaterialTheme.typography.headlineLarge,
+                fontWeight = FontWeight.Bold,
+                color = TextPrimary,
+                modifier = Modifier.fillMaxWidth(),
             )
             Text(
                 when (view) {
@@ -156,28 +151,28 @@ fun AuthScreen(
                 },
                 style = MaterialTheme.typography.bodyMedium,
                 color = TextSecondary,
-                modifier = Modifier.padding(top = 6.dp),
+                modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
             )
-            Spacer(Modifier.height(40.dp))
+            Spacer(Modifier.height(32.dp))
 
             // ── Form card ─────────────────────────────────────────────────────
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(20.dp),
-                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
                 colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
             ) {
                 Column(
-                    modifier = Modifier.padding(24.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                    modifier = Modifier.padding(vertical = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
                 ) {
                     when (view) {
                         AuthView.LOGIN -> {
                             // Username
-                            OutlinedTextField(
+                            AuthTextField(
                                 value = username,
                                 onValueChange = { username = it },
-                                label = { Text("Username") },
+                                label = "Username",
                                 leadingIcon = { Icon(Icons.Default.Person, null) },
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth(),
@@ -185,14 +180,13 @@ fun AuthScreen(
                                 keyboardActions = KeyboardActions(
                                     onNext = { focusManager.moveFocus(FocusDirection.Down) }
                                 ),
-                                shape = RoundedCornerShape(14.dp),
                             )
 
                             // Token
-                            OutlinedTextField(
+                            AuthTextField(
                                 value = token,
                                 onValueChange = { token = it },
-                                label = { Text("Authentication Token") },
+                                label = "Authentication Token",
                                 leadingIcon = { Icon(Icons.Default.Lock, null) },
                                 trailingIcon = {
                                     IconButton(onClick = { showToken = !showToken }) {
@@ -215,7 +209,6 @@ fun AuthScreen(
                                         viewModel.login(username, token)
                                     }
                                 ),
-                                shape = RoundedCornerShape(14.dp),
                             )
 
                             Spacer(Modifier.height(4.dp))
@@ -226,8 +219,8 @@ fun AuthScreen(
                                     viewModel.login(username, token)
                                 },
                                 enabled = !uiState.isLoading,
-                                modifier = Modifier.fillMaxWidth().height(52.dp),
-                                shape = RoundedCornerShape(14.dp),
+                                modifier = Modifier.fillMaxWidth().height(54.dp),
+                                shape = RoundedCornerShape(50),
                                 colors = ButtonDefaults.buttonColors(containerColor = DilarionRed),
                             ) {
                                 if (uiState.isLoading) {
@@ -240,7 +233,7 @@ fun AuthScreen(
                             OutlinedButton(
                                 onClick = { view = AuthView.ACTIVATE },
                                 modifier = Modifier.fillMaxWidth().height(48.dp),
-                                shape = RoundedCornerShape(14.dp),
+                                shape = RoundedCornerShape(50),
                             ) {
                                 Icon(Icons.Default.Key, null, tint = DilarionRed, modifier = Modifier.size(18.dp))
                                 Spacer(Modifier.width(8.dp))
@@ -260,19 +253,18 @@ fun AuthScreen(
                                 style = MaterialTheme.typography.bodySmall,
                                 color = TextSecondary,
                             )
-                            OutlinedTextField(
+                            AuthTextField(
                                 value = actCode,
                                 onValueChange = { actCode = it.trim() },
-                                label = { Text("Activation code") },
+                                label = "Activation code",
                                 leadingIcon = { Icon(Icons.Default.Key, null) },
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(14.dp),
                             )
-                            OutlinedTextField(
+                            AuthTextField(
                                 value = actToken,
                                 onValueChange = { actToken = it },
-                                label = { Text("Choose a login token") },
+                                label = "Choose a login token",
                                 supportingText = { Text("At least 8 characters") },
                                 leadingIcon = { Icon(Icons.Default.Lock, null) },
                                 visualTransformation = if (showToken) VisualTransformation.None else PasswordVisualTransformation(),
@@ -284,24 +276,22 @@ fun AuthScreen(
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(14.dp),
                             )
-                            OutlinedTextField(
+                            AuthTextField(
                                 value = actConfirm,
                                 onValueChange = { actConfirm = it },
-                                label = { Text("Confirm login token") },
+                                label = "Confirm login token",
                                 leadingIcon = { Icon(Icons.Default.Lock, null) },
                                 visualTransformation = if (showToken) VisualTransformation.None else PasswordVisualTransformation(),
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(14.dp),
                             )
                             Button(
                                 onClick = { focusManager.clearFocus(); viewModel.activate(actCode, actToken, actConfirm) },
                                 enabled = !uiState.isLoading,
-                                modifier = Modifier.fillMaxWidth().height(52.dp),
-                                shape = RoundedCornerShape(14.dp),
+                                modifier = Modifier.fillMaxWidth().height(54.dp),
+                                shape = RoundedCornerShape(50),
                                 colors = ButtonDefaults.buttonColors(containerColor = DilarionRed),
                             ) {
                                 if (uiState.isLoading) {
@@ -316,31 +306,29 @@ fun AuthScreen(
                         }
 
                         AuthView.SIGNUP -> {
-                            OutlinedTextField(
+                            AuthTextField(
                                 value = signupUsername,
                                 onValueChange = { signupUsername = it },
-                                label = { Text("Choose a username") },
+                                label = "Choose a username",
                                 leadingIcon = { Icon(Icons.Default.Person, null) },
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth(),
                                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
                                 keyboardActions = KeyboardActions(onNext = { focusManager.moveFocus(FocusDirection.Down) }),
-                                shape = RoundedCornerShape(14.dp),
                             )
-                            OutlinedTextField(
+                            AuthTextField(
                                 value = signupPhone,
                                 onValueChange = { signupPhone = it },
-                                label = { Text("Phone number") },
+                                label = "Phone number",
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth(),
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone, imeAction = ImeAction.Next),
                                 keyboardActions = KeyboardActions(onNext = { focusManager.moveFocus(FocusDirection.Down) }),
-                                shape = RoundedCornerShape(14.dp),
                             )
-                            OutlinedTextField(
+                            AuthTextField(
                                 value = signupToken,
                                 onValueChange = { signupToken = it },
-                                label = { Text("Choose an access token") },
+                                label = "Choose an access token",
                                 leadingIcon = { Icon(Icons.Default.Lock, null) },
                                 visualTransformation = PasswordVisualTransformation(),
                                 singleLine = true,
@@ -352,7 +340,6 @@ fun AuthScreen(
                                         viewModel.signUp(signupUsername, signupPhone, signupToken)
                                     }
                                 ),
-                                shape = RoundedCornerShape(14.dp),
                             )
                             Spacer(Modifier.height(4.dp))
                             Button(
@@ -361,8 +348,8 @@ fun AuthScreen(
                                     viewModel.signUp(signupUsername, signupPhone, signupToken)
                                 },
                                 enabled = !uiState.isLoading,
-                                modifier = Modifier.fillMaxWidth().height(52.dp),
-                                shape = RoundedCornerShape(14.dp),
+                                modifier = Modifier.fillMaxWidth().height(54.dp),
+                                shape = RoundedCornerShape(50),
                                 colors = ButtonDefaults.buttonColors(containerColor = DilarionRed),
                             ) {
                                 if (uiState.isLoading) {
@@ -377,31 +364,29 @@ fun AuthScreen(
                         }
 
                         AuthView.RECOVERY -> {
-                            OutlinedTextField(
+                            AuthTextField(
                                 value = recUsername,
                                 onValueChange = { recUsername = it },
-                                label = { Text("Username") },
+                                label = "Username",
                                 leadingIcon = { Icon(Icons.Default.Person, null) },
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth(),
                                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
                                 keyboardActions = KeyboardActions(onNext = { focusManager.moveFocus(FocusDirection.Down) }),
-                                shape = RoundedCornerShape(14.dp),
                             )
-                            OutlinedTextField(
+                            AuthTextField(
                                 value = recCode,
                                 onValueChange = { recCode = it },
-                                label = { Text("Recovery code (XXXX-XXXX-XXXX)") },
+                                label = "Recovery code (XXXX-XXXX-XXXX)",
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth(),
                                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
                                 keyboardActions = KeyboardActions(onNext = { focusManager.moveFocus(FocusDirection.Down) }),
-                                shape = RoundedCornerShape(14.dp),
                             )
-                            OutlinedTextField(
+                            AuthTextField(
                                 value = recNewToken,
                                 onValueChange = { recNewToken = it },
-                                label = { Text("New access token") },
+                                label = "New access token",
                                 leadingIcon = { Icon(Icons.Default.Lock, null) },
                                 visualTransformation = PasswordVisualTransformation(),
                                 singleLine = true,
@@ -413,7 +398,6 @@ fun AuthScreen(
                                         viewModel.resetWithRecoveryCode(recUsername, recCode, recNewToken)
                                     }
                                 ),
-                                shape = RoundedCornerShape(14.dp),
                             )
                             Spacer(Modifier.height(4.dp))
                             Button(
@@ -422,8 +406,8 @@ fun AuthScreen(
                                     viewModel.resetWithRecoveryCode(recUsername, recCode, recNewToken)
                                 },
                                 enabled = !uiState.isLoading,
-                                modifier = Modifier.fillMaxWidth().height(52.dp),
-                                shape = RoundedCornerShape(14.dp),
+                                modifier = Modifier.fillMaxWidth().height(54.dp),
+                                shape = RoundedCornerShape(50),
                                 colors = ButtonDefaults.buttonColors(containerColor = DilarionRed),
                             ) {
                                 if (uiState.isLoading) {
@@ -448,6 +432,7 @@ fun AuthScreen(
                 style = MaterialTheme.typography.bodySmall,
                 color = TextSecondary,
                 textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
             )
         }
     }
@@ -469,11 +454,7 @@ private fun RecoveryCodeRevealScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    listOf(DilarionRed.copy(alpha = 0.06f), BackgroundGrey, MaterialTheme.colorScheme.surface.copy(alpha = 0.96f))
-                )
-            )
+            .background(SurfaceWhite)
             .imePadding(),
         contentAlignment = Alignment.Center,
     ) {
@@ -499,7 +480,7 @@ private fun RecoveryCodeRevealScreen(
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(20.dp),
-                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
                 colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
             ) {
                 Column(modifier = Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -526,8 +507,8 @@ private fun RecoveryCodeRevealScreen(
                     Button(
                         onClick = onContinue,
                         enabled = savedAck,
-                        modifier = Modifier.fillMaxWidth().height(52.dp),
-                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.fillMaxWidth().height(54.dp),
+                        shape = RoundedCornerShape(50),
                         colors = ButtonDefaults.buttonColors(containerColor = DilarionRed),
                     ) {
                         Text("Continue to sign in", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
@@ -535,5 +516,60 @@ private fun RecoveryCodeRevealScreen(
                 }
             }
         }
+    }
+}
+
+/**
+ * Label-above, grey-filled input used across the sign-in flows — no outline,
+ * rounded corners, brand-colour cursor and focus ring.
+ */
+@Composable
+private fun AuthTextField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    modifier: Modifier = Modifier,
+    leadingIcon: (@Composable () -> Unit)? = null,
+    trailingIcon: (@Composable () -> Unit)? = null,
+    supportingText: (@Composable () -> Unit)? = null,
+    visualTransformation: VisualTransformation = VisualTransformation.None,
+    singleLine: Boolean = true,
+    keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
+    keyboardActions: KeyboardActions = KeyboardActions.Default,
+) {
+    Column(modifier) {
+        Text(
+            label,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = TextPrimary,
+            modifier = Modifier.padding(start = 4.dp, bottom = 6.dp),
+        )
+        TextField(
+            value = value,
+            onValueChange = onValueChange,
+            leadingIcon = leadingIcon,
+            trailingIcon = trailingIcon,
+            supportingText = supportingText,
+            visualTransformation = visualTransformation,
+            singleLine = singleLine,
+            keyboardOptions = keyboardOptions,
+            keyboardActions = keyboardActions,
+            shape = RoundedCornerShape(14.dp),
+            modifier = Modifier.fillMaxWidth(),
+            colors = TextFieldDefaults.colors(
+                focusedContainerColor = InputGrey,
+                unfocusedContainerColor = InputGrey,
+                disabledContainerColor = InputGrey,
+                focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                disabledIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                cursorColor = DilarionRed,
+                focusedLeadingIconColor = DilarionRed,
+                unfocusedLeadingIconColor = TextMuted,
+                unfocusedTrailingIconColor = TextMuted,
+                focusedTrailingIconColor = TextSecondary,
+            ),
+        )
     }
 }

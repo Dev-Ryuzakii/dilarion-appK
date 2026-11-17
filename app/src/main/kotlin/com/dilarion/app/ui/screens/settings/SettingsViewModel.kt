@@ -1,6 +1,7 @@
 package com.dilarion.app.ui.screens.settings
 
 import android.content.Context
+import android.media.MediaPlayer
 import android.media.MediaRecorder
 import android.os.Build
 import androidx.lifecycle.ViewModel
@@ -10,13 +11,17 @@ import com.dilarion.app.data.api.parseErrorDetail
 import com.dilarion.app.data.model.AccountDeletionRequestCreate
 import com.dilarion.app.data.model.MasterToken2FADisableRequest
 import com.dilarion.app.data.model.MasterToken2FAEnableRequest
+import com.dilarion.app.data.model.VoiceSpeechClip
+import com.dilarion.app.data.model.VoiceSpeechRequest
 import com.dilarion.app.security.SessionManager
 import com.dilarion.app.services.PresenceService
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.asRequestBody
@@ -46,6 +51,10 @@ data class SettingsUiState(
     val voiceIdentityError: String? = null,
     val isRecordingVoiceIdentity: Boolean = false,
     val voiceIdentityRecordingSeconds: Int = 0,
+    val voiceClips: List<VoiceSpeechClip> = emptyList(),
+    val voiceSpeechBusy: Boolean = false,
+    val voiceSpeechError: String? = null,
+    val voiceSpeechPlayingId: String? = null,
     // Username change — success forces a fresh login (see AccountViewModel
     // notes) rather than trying to hot-swap username through every screen
     // that already holds it in memory.
@@ -147,6 +156,13 @@ class SettingsViewModel @Inject constructor(
     private var voiceIdentityRecorder: MediaRecorder? = null
     private var voiceIdentityFile: File? = null
     private var voiceIdentityTimerJob: kotlinx.coroutines.Job? = null
+    private var voicePlayer: MediaPlayer? = null
+
+    override fun onCleared() {
+        voicePlayer?.release()
+        voicePlayer = null
+        super.onCleared()
+    }
 
     private fun refreshVoiceIdentityStatus() {
         viewModelScope.launch {
@@ -156,6 +172,124 @@ class SettingsViewModel @Inject constructor(
             val enrolled = runCatching { apiService.getVoiceIdentity(bearer, username) }
                 .getOrNull()?.isSuccessful ?: false
             _uiState.value = _uiState.value.copy(voiceIdentityEnrolled = enrolled, voiceIdentityLoading = false)
+            refreshVoiceClips()
+        }
+    }
+
+    private fun refreshVoiceClips() {
+        viewModelScope.launch {
+            val bearer = bearer() ?: return@launch
+            val clips = runCatching { apiService.listVoiceSpeech(bearer) }.getOrNull()
+                ?.takeIf { it.isSuccessful }
+                ?.body()
+                ?.clips
+                .orEmpty()
+            _uiState.value = _uiState.value.copy(voiceClips = clips)
+        }
+    }
+
+    fun generateVoiceSpeech(text: String) {
+        viewModelScope.launch {
+            val bearer = bearer() ?: return@launch
+            _uiState.value = _uiState.value.copy(voiceSpeechBusy = true, voiceSpeechError = null)
+            runCatching {
+                val resp = apiService.createVoiceSpeech(bearer, VoiceSpeechRequest(text.trim()))
+                if (!resp.isSuccessful) {
+                    throw IllegalStateException(resp.errorBody().parseErrorDetail("Couldn't generate speech. Please try again."))
+                }
+            }.onSuccess {
+                _uiState.value = _uiState.value.copy(voiceSpeechBusy = false)
+                refreshVoiceClips()
+            }.onFailure { e ->
+                _uiState.value = _uiState.value.copy(
+                    voiceSpeechBusy = false,
+                    voiceSpeechError = e.toUserMessage(e.message ?: "Couldn't generate speech. Please try again."),
+                )
+            }
+        }
+    }
+
+    fun playVoiceSpeech(context: Context, clipId: String) {
+        viewModelScope.launch {
+            val bearer = bearer() ?: return@launch
+            _uiState.value = _uiState.value.copy(voiceSpeechError = null)
+            runCatching {
+                val resp = apiService.downloadVoiceSpeech(bearer, clipId)
+                if (!resp.isSuccessful) {
+                    throw IllegalStateException(resp.errorBody().parseErrorDetail("Couldn't play that clip."))
+                }
+                val file = withContext(Dispatchers.IO) {
+                    val bytes = resp.body()?.bytes() ?: throw IllegalStateException("Couldn't play that clip.")
+                    File(context.cacheDir, "voice_speech_$clipId.m4a").also { it.writeBytes(bytes) }
+                }
+                voicePlayer?.release()
+                val player = MediaPlayer()
+                player.setDataSource(file.absolutePath)
+                player.setOnCompletionListener {
+                    _uiState.value = _uiState.value.copy(voiceSpeechPlayingId = null)
+                }
+                player.prepare()
+                player.start()
+                voicePlayer = player
+                _uiState.value = _uiState.value.copy(voiceSpeechPlayingId = clipId)
+            }.onFailure { e ->
+                _uiState.value = _uiState.value.copy(
+                    voiceSpeechPlayingId = null,
+                    voiceSpeechError = e.toUserMessage(e.message ?: "Couldn't play that clip."),
+                )
+            }
+        }
+    }
+
+    fun deleteVoiceSpeech(clipId: String) {
+        viewModelScope.launch {
+            val bearer = bearer() ?: return@launch
+            runCatching {
+                val resp = apiService.deleteVoiceSpeech(bearer, clipId)
+                if (!resp.isSuccessful) {
+                    throw IllegalStateException(resp.errorBody().parseErrorDetail("Couldn't delete that clip."))
+                }
+            }.onSuccess {
+                if (_uiState.value.voiceSpeechPlayingId == clipId) {
+                    voicePlayer?.release()
+                    voicePlayer = null
+                }
+                _uiState.value = _uiState.value.copy(
+                    voiceClips = _uiState.value.voiceClips.filter { it.id != clipId },
+                    voiceSpeechPlayingId = if (_uiState.value.voiceSpeechPlayingId == clipId) null else _uiState.value.voiceSpeechPlayingId,
+                )
+            }.onFailure { e ->
+                _uiState.value = _uiState.value.copy(
+                    voiceSpeechError = e.toUserMessage(e.message ?: "Couldn't delete that clip."),
+                )
+            }
+        }
+    }
+
+    fun deleteVoiceEnrollment() {
+        viewModelScope.launch {
+            val bearer = bearer() ?: return@launch
+            _uiState.value = _uiState.value.copy(voiceIdentityUploading = true, voiceIdentityError = null)
+            runCatching {
+                val resp = apiService.deleteVoiceIdentity(bearer)
+                if (!resp.isSuccessful) {
+                    throw IllegalStateException(resp.errorBody().parseErrorDetail("Couldn't delete your voice enrollment."))
+                }
+            }.onSuccess {
+                voicePlayer?.release()
+                voicePlayer = null
+                _uiState.value = _uiState.value.copy(
+                    voiceIdentityUploading = false,
+                    voiceIdentityEnrolled = false,
+                    voiceClips = emptyList(),
+                    voiceSpeechPlayingId = null,
+                )
+            }.onFailure { e ->
+                _uiState.value = _uiState.value.copy(
+                    voiceIdentityUploading = false,
+                    voiceIdentityError = e.toUserMessage(e.message ?: "Couldn't delete your voice enrollment."),
+                )
+            }
         }
     }
 

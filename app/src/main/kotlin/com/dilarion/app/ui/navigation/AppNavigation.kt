@@ -432,6 +432,7 @@ fun AppNavigation(pendingIncomingCall: IncomingCallData? = null) {
                         popUpTo(Screen.Meetings.route) { inclusive = true }
                     }
                 },
+                onNewMeeting = { navController.navigate(Screen.NewMeeting.route) },
             )
         }
 

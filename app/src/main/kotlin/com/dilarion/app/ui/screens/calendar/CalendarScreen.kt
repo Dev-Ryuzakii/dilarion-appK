@@ -17,7 +17,21 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.dilarion.app.data.model.CalendarOccurrence
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.EventAvailable
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import com.dilarion.app.ui.theme.BorderGrey
 import com.dilarion.app.ui.theme.DilarionRed
+import com.dilarion.app.ui.theme.DilarionRedLight
+import com.dilarion.app.ui.theme.DilarionRedSoft
+import com.dilarion.app.ui.theme.SurfaceWhite
+import com.dilarion.app.ui.theme.TextMuted
+import com.dilarion.app.ui.theme.TextPrimary
+import com.dilarion.app.ui.theme.TextSecondary
+import java.time.format.DateTimeFormatter
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.YearMonth
@@ -29,7 +43,7 @@ private val WEEKDAY_ORDER = listOf(
     DayOfWeek.THURSDAY, DayOfWeek.FRIDAY, DayOfWeek.SATURDAY,
 )
 
-/** Month grid over the same scheduled-meetings data as the Meetings tab —
+/** Month grid over the same scheduled-meetings data as the Meetings tab -
  * mirrors the desktop Calendar tab's layout and interaction (tap a day to
  * see its meetings, tap a meeting to join through the same lobby flow). */
 @Composable
@@ -39,6 +53,7 @@ fun CalendarScreen(
 ) {
     val state by viewModel.uiState.collectAsState()
     var selectedDay by remember { mutableStateOf(LocalDate.now()) }
+    val today = LocalDate.now()
 
     val monthStart = state.cursor.atDay(1)
     val monthEnd = state.cursor.atEndOfMonth()
@@ -51,120 +66,214 @@ fun CalendarScreen(
     val occurrencesByDay = remember(state.occurrences) {
         state.occurrences.groupBy { parseIsoToZoned(it.occurrenceStart).toLocalDate() }
     }
+    val selectedOccs = occurrencesByDay[selectedDay].orEmpty().sortedBy { it.occurrenceStart }
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        // Toolbar
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                "${state.cursor.month.getDisplayName(TextStyle.FULL, Locale.getDefault())} ${state.cursor.year}",
-                fontWeight = FontWeight.Bold, fontSize = 17.sp,
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = { viewModel.setMonth(YearMonth.now()); selectedDay = LocalDate.now() }) { Text("Today") }
-                IconButton(onClick = { viewModel.setMonth(state.cursor.minusMonths(1)) }) { Text("‹", fontSize = 20.sp) }
-                IconButton(onClick = { viewModel.setMonth(state.cursor.plusMonths(1)) }) { Text("›", fontSize = 20.sp) }
-            }
-        }
-
-        // Weekday header
-        Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
-            WEEKDAY_ORDER.forEach { dow ->
+    LazyColumn(
+        Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        item {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    dow.getDisplayName(TextStyle.SHORT, Locale.getDefault()),
-                    modifier = Modifier.weight(1f),
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                    fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Gray,
+                    state.cursor.month.getDisplayName(TextStyle.FULL, Locale.getDefault()),
+                    fontWeight = FontWeight.Bold, fontSize = 20.sp, color = TextPrimary,
                 )
+                Spacer(Modifier.width(6.dp))
+                Text("${state.cursor.year}", fontSize = 20.sp, color = TextMuted)
+                Spacer(Modifier.weight(1f))
+                if (state.cursor != YearMonth.now() || selectedDay != today) {
+                    Text(
+                        "Today",
+                        fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = DilarionRed,
+                        modifier = Modifier.clip(RoundedCornerShape(50)).background(DilarionRedSoft)
+                            .clickable { viewModel.setMonth(YearMonth.now()); selectedDay = today }
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                }
+                RoundNav("‹") { viewModel.setMonth(state.cursor.minusMonths(1)) }
+                Spacer(Modifier.width(6.dp))
+                RoundNav("›") { viewModel.setMonth(state.cursor.plusMonths(1)) }
             }
         }
 
-        // Month grid — chunked into weeks
-        Column(modifier = Modifier.fillMaxWidth().padding(8.dp)) {
-            days.chunked(7).forEach { week ->
-                Row(modifier = Modifier.fillMaxWidth()) {
-                    week.forEach { day ->
-                        val inMonth = YearMonth.from(day) == state.cursor
-                        val isToday = day == LocalDate.now()
-                        val isSelected = day == selectedDay
-                        val dayOccs = occurrencesByDay[day].orEmpty()
-                        Column(
-                            modifier = Modifier
-                                .weight(1f)
-                                .padding(2.dp)
-                                .heightIn(min = 56.dp)
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(if (isSelected) DilarionRed.copy(alpha = 0.12f) else Color.Transparent)
-                                .clickable { selectedDay = day }
-                                .padding(4.dp),
-                        ) {
-                            Text(
-                                "${day.dayOfMonth}",
-                                fontSize = 12.sp,
-                                fontWeight = if (isToday) FontWeight.Black else FontWeight.Normal,
-                                color = when {
-                                    isToday -> DilarionRed
-                                    !inMonth -> Color.LightGray
-                                    else -> Color.Black
-                                },
+        item {
+            Column(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(SurfaceWhite)
+                    .border(1.dp, BorderGrey, RoundedCornerShape(18.dp)).padding(horizontal = 6.dp, vertical = 10.dp),
+            ) {
+                Row(Modifier.fillMaxWidth().padding(bottom = 4.dp)) {
+                    WEEKDAY_ORDER.forEach { dow ->
+                        Text(
+                            dow.getDisplayName(TextStyle.NARROW, Locale.getDefault()),
+                            modifier = Modifier.weight(1f),
+                            textAlign = TextAlign.Center,
+                            fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = TextMuted,
+                        )
+                    }
+                }
+                days.chunked(7).forEach { week ->
+                    Row(Modifier.fillMaxWidth()) {
+                        week.forEach { day ->
+                            DayCell(
+                                day = day,
+                                inMonth = YearMonth.from(day) == state.cursor,
+                                isToday = day == today,
+                                isSelected = day == selectedDay,
+                                count = occurrencesByDay[day]?.size ?: 0,
+                                modifier = Modifier.weight(1f),
+                                onClick = { selectedDay = day },
                             )
-                            if (dayOccs.isNotEmpty()) {
-                                Box(
-                                    modifier = Modifier
-                                        .padding(top = 2.dp)
-                                        .size(6.dp)
-                                        .clip(RoundedCornerShape(50))
-                                        .background(DilarionRed),
-                                )
-                            }
                         }
                     }
+                }
+                if (state.isLoading) {
+                    LinearProgressIndicator(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp).clip(RoundedCornerShape(50)),
+                        color = DilarionRed, trackColor = DilarionRedSoft,
+                    )
                 }
             }
         }
 
-        if (state.isLoading) {
-            LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = DilarionRed)
+        item {
+            Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(
+                    Modifier.size(48.dp).clip(RoundedCornerShape(14.dp))
+                        .background(if (selectedDay == today) DilarionRed else DilarionRedSoft),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    val onTile = if (selectedDay == today) SurfaceWhite else DilarionRed
+                    Text(
+                        selectedDay.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.getDefault()).uppercase(),
+                        fontSize = 10.sp, fontWeight = FontWeight.Bold, color = onTile,
+                    )
+                    Text("${selectedDay.dayOfMonth}", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = onTile)
+                }
+                Spacer(Modifier.width(12.dp))
+                Column {
+                    Text(
+                        when (selectedDay) {
+                            today -> "Today"
+                            today.plusDays(1) -> "Tomorrow"
+                            else -> selectedDay.format(DateTimeFormatter.ofPattern("EEEE"))
+                        },
+                        fontWeight = FontWeight.Bold, fontSize = 17.sp, color = TextPrimary,
+                    )
+                    Text(
+                        selectedDay.format(DateTimeFormatter.ofPattern("MMMM d, yyyy")) +
+                            " · " + when (selectedOccs.size) { 0 -> "nothing planned"; 1 -> "1 meeting"; else -> "${selectedOccs.size} meetings" },
+                        fontSize = 13.sp, color = TextSecondary,
+                    )
+                }
+            }
         }
 
-        Divider()
-
-        // Selected day list
-        val selectedOccs = occurrencesByDay[selectedDay].orEmpty().sortedBy { it.occurrenceStart }
-        LazyColumn(modifier = Modifier.fillMaxWidth().weight(1f).padding(12.dp)) {
+        if (selectedOccs.isEmpty()) {
             item {
-                Text(
-                    selectedDay.format(java.time.format.DateTimeFormatter.ofPattern("EEEE, MMMM d")),
-                    fontWeight = FontWeight.Bold, fontSize = 14.sp,
-                    modifier = Modifier.padding(bottom = 10.dp),
-                )
+                Column(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Color(0xFFF6F7F9))
+                        .padding(vertical = 22.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Icon(Icons.Default.EventAvailable, null, tint = TextMuted, modifier = Modifier.size(26.dp))
+                    Spacer(Modifier.height(6.dp))
+                    Text("Your day is clear", fontWeight = FontWeight.Medium, color = TextSecondary, fontSize = 14.sp)
+                }
             }
-            if (selectedOccs.isEmpty()) {
-                item { Text("No meetings.", color = Color.Gray, fontSize = 13.sp) }
-            }
-            items(selectedOccs) { occ -> CalendarOccurrenceCard(occ, onClick = { onJoinMeeting(occ.joinCode, occ.title) }) }
+        }
+        items(selectedOccs, key = { "${it.meetingId}-${it.occurrenceStart}" }) { occ ->
+            CalendarOccurrenceCard(occ, onJoin = { onJoinMeeting(occ.joinCode, occ.title) })
         }
     }
 }
 
 @Composable
-private fun CalendarOccurrenceCard(occ: CalendarOccurrence, onClick: () -> Unit) {
-    Card(
-        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp).clickable(onClick = onClick),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFFF5F5F5)),
+private fun RoundNav(label: String, onClick: () -> Unit) {
+    Box(
+        Modifier.size(34.dp).clip(CircleShape).border(1.dp, BorderGrey, CircleShape).clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) { Text(label, fontSize = 20.sp, color = TextPrimary, modifier = Modifier.padding(bottom = 2.dp)) }
+}
+
+@Composable
+private fun DayCell(
+    day: LocalDate,
+    inMonth: Boolean,
+    isToday: Boolean,
+    isSelected: Boolean,
+    count: Int,
+    modifier: Modifier,
+    onClick: () -> Unit,
+) {
+    Column(
+        modifier.height(50.dp).clip(RoundedCornerShape(12.dp)).clickable(onClick = onClick),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Text(occ.title ?: "Meeting", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-            val time = parseIsoToZoned(occ.occurrenceStart)
+        Box(
+            Modifier.size(34.dp).clip(CircleShape).background(
+                when {
+                    isToday -> DilarionRed
+                    isSelected -> DilarionRedSoft
+                    else -> Color.Transparent
+                },
+            ),
+            contentAlignment = Alignment.Center,
+        ) {
             Text(
-                "${time.format(java.time.format.DateTimeFormatter.ofPattern("h:mm a"))} · ${occ.durationMinutes}min" +
-                    (occ.recurrence?.let { " · repeats $it" } ?: ""),
-                fontSize = 12.sp, color = Color.Gray,
+                "${day.dayOfMonth}",
+                fontSize = 14.sp,
+                fontWeight = if (isToday || isSelected) FontWeight.Bold else FontWeight.Normal,
+                color = when {
+                    isToday -> SurfaceWhite
+                    isSelected -> DilarionRed
+                    !inMonth -> Color(0xFFD1D5DB)
+                    else -> TextPrimary
+                },
             )
-            Text("Host: ${occ.creatorUsername}", fontSize = 11.sp, color = Color.Gray)
         }
+        Row(Modifier.height(6.dp).padding(top = 2.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+            repeat(count.coerceAtMost(3)) {
+                Box(Modifier.size(4.dp).clip(CircleShape).background(if (inMonth) DilarionRed else DilarionRedLight))
+            }
+        }
+    }
+}
+
+@Composable
+private fun CalendarOccurrenceCard(occ: CalendarOccurrence, onJoin: () -> Unit) {
+    val start = parseIsoToZoned(occ.occurrenceStart)
+    val end = start.plusMinutes(occ.durationMinutes.toLong())
+    val clock = DateTimeFormatter.ofPattern("h:mm a")
+    val live = occ.status.equals("live", ignoreCase = true)
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(SurfaceWhite)
+            .border(1.dp, BorderGrey, RoundedCornerShape(16.dp)).clickable(onClick = onJoin).padding(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.width(4.dp).height(44.dp).clip(RoundedCornerShape(2.dp)).background(DilarionRed))
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                occ.title ?: "Meeting", fontWeight = FontWeight.SemiBold, fontSize = 15.sp, color = TextPrimary,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                "${start.format(clock)} – ${end.format(clock)}" + (occ.recurrence?.let { " · repeats $it" } ?: ""),
+                fontSize = 12.sp, color = TextSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
+            Text("Host: ${occ.creatorUsername}", fontSize = 12.sp, color = TextMuted)
+        }
+        Spacer(Modifier.width(8.dp))
+        Text(
+            if (live) "Join · LIVE" else "Join",
+            fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+            color = if (live) SurfaceWhite else DilarionRed,
+            modifier = Modifier.clip(RoundedCornerShape(50)).background(if (live) DilarionRed else DilarionRedSoft)
+                .clickable(onClick = onJoin).padding(horizontal = 14.dp, vertical = 8.dp),
+        )
     }
 }

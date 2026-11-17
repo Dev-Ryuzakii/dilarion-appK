@@ -1,9 +1,12 @@
 package com.dilarion.app.ui.screens.home
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -14,6 +17,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
@@ -21,16 +26,58 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.saveable.rememberSaveable
 import com.dilarion.app.data.model.CallHistoryItem
-import com.dilarion.app.data.model.Group
 import com.dilarion.app.data.model.Message
 import com.dilarion.app.ui.components.ConversationListSkeleton
 import com.dilarion.app.ui.components.UserListSkeleton
 import com.dilarion.app.ui.theme.*
-import java.text.SimpleDateFormat
 import java.util.Locale
 
-private enum class HomeTab { CHATS, GROUPS, CHANNELS, MEETINGS, CALENDAR, TASKS, CALLS }
+private enum class HomeTab(val label: String, val icon: ImageVector) {
+    HOME("Home", Icons.Default.Home),
+    DMS("DMs", Icons.Default.ChatBubble),
+    CALLS("Calls", Icons.Default.Call),
+    CALENDAR("Calendar", Icons.Default.CalendarMonth),
+    TASKS("Tasks", Icons.Default.Checklist),
+}
+
+/** One direct-message conversation, newest message first in the list. */
+private data class DmThread(val peer: String, val last: Message, val unread: Int)
+
+private fun dmThreads(uiState: HomeUiState): List<DmThread> {
+    val me = uiState.currentUsername
+    return uiState.messages
+        .filter { it.groupId == null }
+        .groupBy { ((if (it.sender == me) it.recipient else it.sender) ?: "").ifEmpty { "Unknown" } }
+        .map { (peer, msgs) ->
+            val last = msgs.maxByOrNull { it.timestamp ?: "" } ?: msgs.first()
+            DmThread(peer, last, msgs.count { !it.read && it.sender != me })
+        }
+        .sortedByDescending { it.last.timestamp ?: "" }
+}
+
+/**
+ * Message bodies are end-to-end encrypted, so the list never shows text.
+ * It says what kind of message it was and who sent it instead.
+ */
+private fun previewOf(msg: Message, me: String, unread: Int): String {
+    val kind = when (msg.contentType?.lowercase()) {
+        "image", "photo" -> "Photo"
+        "video" -> "Video"
+        "audio", "voice", "voice_note" -> "Voice note"
+        "file", "document" -> "File"
+        "sticker" -> "Sticker"
+        else -> null
+    }
+    return when {
+        msg.isDeleted -> "Message deleted"
+        msg.sender == me -> "You: ${kind ?: "message sent"}"
+        unread > 1 -> "$unread new messages"
+        unread == 1 -> if (kind != null) "New ${kind.lowercase()}" else "New message"
+        else -> kind ?: "Encrypted message"
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -52,10 +99,9 @@ fun HomeScreen(
     onLogout: () -> Unit,
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    var selectedTab by remember { mutableStateOf(HomeTab.CHATS) }
+    var selectedTab by remember { mutableStateOf(HomeTab.HOME) }
     var showLogoutDialog by remember { mutableStateOf(false) }
     var showJoinGroup by remember { mutableStateOf(false) }
-    var showGroupMenu by remember { mutableStateOf(false) }
 
     if (showJoinGroup) {
         com.dilarion.app.ui.screens.groups.JoinGroupDialog(
@@ -79,252 +125,521 @@ fun HomeScreen(
     }
 
     Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text("Dilarion", style = MaterialTheme.typography.titleLarge, color = SurfaceWhite)
-                        Text("end-to-end encrypted", fontSize = 10.sp, color = SurfaceWhite.copy(alpha = 0.75f))
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = DilarionRed),
-                actions = {
-                    IconButton(onClick = onSearch) { Icon(Icons.Default.Search, "Search", tint = SurfaceWhite) }
-                    IconButton(onClick = onSettings) { Icon(Icons.Default.Settings, "Settings", tint = SurfaceWhite) }
-                    IconButton(onClick = { showLogoutDialog = true }) { Icon(Icons.Default.ExitToApp, "Logout", tint = SurfaceWhite) }
+        bottomBar = {
+            FloatingNavBar(
+                selected = selectedTab,
+                dmUnread = dmThreads(uiState).sumOf { it.unread },
+                onSelect = { tab ->
+                    selectedTab = tab
+                    if (tab == HomeTab.CALLS) viewModel.loadCallHistory()
                 },
             )
         },
-        bottomBar = {
-            NavigationBar(containerColor = SurfaceWhite, tonalElevation = 8.dp) {
-                NavigationBarItem(
-                    selected = selectedTab == HomeTab.CHATS,
-                    onClick = { selectedTab = HomeTab.CHATS },
-                    icon = { Icon(Icons.Default.ChatBubble, "Chats") },
-                    label = { Text("Chats") },
-                    colors = NavigationBarItemDefaults.colors(indicatorColor = DilarionRed.copy(alpha = 0.12f), selectedIconColor = DilarionRed, selectedTextColor = DilarionRed),
-                )
-                NavigationBarItem(
-                    selected = selectedTab == HomeTab.GROUPS,
-                    onClick = { selectedTab = HomeTab.GROUPS },
-                    icon = { Icon(Icons.Default.Group, "Groups") },
-                    label = { Text("Groups") },
-                    colors = NavigationBarItemDefaults.colors(indicatorColor = DilarionRed.copy(alpha = 0.12f), selectedIconColor = DilarionRed, selectedTextColor = DilarionRed),
-                )
-                NavigationBarItem(
-                    selected = selectedTab == HomeTab.CHANNELS,
-                    onClick = { selectedTab = HomeTab.CHANNELS },
-                    icon = { Icon(Icons.Default.Tag, "Channels") },
-                    label = { Text("Channels") },
-                    colors = NavigationBarItemDefaults.colors(indicatorColor = DilarionRed.copy(alpha = 0.12f), selectedIconColor = DilarionRed, selectedTextColor = DilarionRed),
-                )
-                NavigationBarItem(
-                    selected = selectedTab == HomeTab.MEETINGS,
-                    onClick = { selectedTab = HomeTab.MEETINGS },
-                    icon = { Icon(Icons.Default.Videocam, "Meetings") },
-                    label = { Text("Meetings") },
-                    colors = NavigationBarItemDefaults.colors(indicatorColor = DilarionRed.copy(alpha = 0.12f), selectedIconColor = DilarionRed, selectedTextColor = DilarionRed),
-                )
-                NavigationBarItem(
-                    selected = selectedTab == HomeTab.CALENDAR,
-                    onClick = { selectedTab = HomeTab.CALENDAR },
-                    icon = { Icon(Icons.Default.CalendarMonth, "Calendar") },
-                    label = { Text("Calendar") },
-                    colors = NavigationBarItemDefaults.colors(indicatorColor = DilarionRed.copy(alpha = 0.12f), selectedIconColor = DilarionRed, selectedTextColor = DilarionRed),
-                )
-                NavigationBarItem(
-                    selected = selectedTab == HomeTab.TASKS,
-                    onClick = { selectedTab = HomeTab.TASKS },
-                    icon = { Icon(Icons.Default.Checklist, "Tasks") },
-                    label = { Text("Tasks") },
-                    colors = NavigationBarItemDefaults.colors(indicatorColor = DilarionRed.copy(alpha = 0.12f), selectedIconColor = DilarionRed, selectedTextColor = DilarionRed),
-                )
-                NavigationBarItem(
-                    selected = selectedTab == HomeTab.CALLS,
-                    onClick = {
-                        selectedTab = HomeTab.CALLS
-                        viewModel.loadCallHistory()
-                    },
-                    icon = { Icon(Icons.Default.Call, "Calls") },
-                    label = { Text("Calls") },
-                    colors = NavigationBarItemDefaults.colors(indicatorColor = DilarionRed.copy(alpha = 0.12f), selectedIconColor = DilarionRed, selectedTextColor = DilarionRed),
-                )
-            }
-        },
-        floatingActionButton = {
-            if (selectedTab == HomeTab.CHATS) {
-                FloatingActionButton(onClick = onNewChat, containerColor = DilarionRed) {
-                    Icon(Icons.Default.Add, "New chat", tint = SurfaceWhite)
-                }
-            }
-            // Any user can create or join a group — no admin needed.
-            if (selectedTab == HomeTab.GROUPS) {
-                Box {
-                    FloatingActionButton(onClick = { showGroupMenu = true }, containerColor = DilarionRed) {
-                        Icon(Icons.Default.GroupAdd, "New group", tint = SurfaceWhite)
-                    }
-                    DropdownMenu(expanded = showGroupMenu, onDismissRequest = { showGroupMenu = false }) {
-                        DropdownMenuItem(
-                            text = { Text("New group") },
-                            leadingIcon = { Icon(Icons.Default.GroupAdd, null) },
-                            onClick = { showGroupMenu = false; onNewGroup() },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Join via link or QR") },
-                            leadingIcon = { Icon(Icons.Default.QrCodeScanner, null) },
-                            onClick = { showGroupMenu = false; showJoinGroup = true },
-                        )
-                    }
-                }
-            }
-        },
-        containerColor = BackgroundGrey,
+        containerColor = SurfaceWhite,
     ) { innerPadding ->
         Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
             when (selectedTab) {
-                HomeTab.CHATS    -> ChatsTab(uiState, onOpenChat)
-                HomeTab.GROUPS   -> GroupsTab(uiState, onOpenGroupChat)
-                HomeTab.CHANNELS -> ChannelsTab(uiState, onOpenGroupChat)
-                HomeTab.MEETINGS -> MeetingsTab(onNewMeeting, onMeetings)
-                HomeTab.CALENDAR -> com.dilarion.app.ui.screens.calendar.CalendarScreen(onJoinMeeting = onJoinMeeting)
-                HomeTab.TASKS    -> com.dilarion.app.ui.screens.tasks.TasksScreen()
-                HomeTab.CALLS    -> CallsTab(uiState, uiState.currentUsername, onCallUser, onRedialGroup)
+                HomeTab.HOME -> HomeTabContent(
+                    uiState = uiState,
+                    onOpenChat = onOpenChat,
+                    onOpenGroupChat = onOpenGroupChat,
+                    onNewChat = onNewChat,
+                    onNewGroup = onNewGroup,
+                    onJoinGroup = { showJoinGroup = true },
+                    onNewMeeting = onNewMeeting,
+                    onMeetings = onMeetings,
+                    onSearch = onSearch,
+                    onSettings = onSettings,
+                    onLogout = { showLogoutDialog = true },
+                )
+                HomeTab.DMS -> DmsTab(uiState, onOpenChat, onNewChat, onSearch)
+                HomeTab.CALLS -> Column(Modifier.fillMaxSize()) {
+                    TabHeader("Calls")
+                    CallsTab(uiState, uiState.currentUsername, onCallUser, onRedialGroup)
+                }
+                HomeTab.CALENDAR -> Column(Modifier.fillMaxSize()) {
+                    TabHeader("Calendar")
+                    com.dilarion.app.ui.screens.calendar.CalendarScreen(onJoinMeeting = onJoinMeeting)
+                }
+                HomeTab.TASKS -> Column(Modifier.fillMaxSize()) {
+                    TabHeader("Tasks")
+                    com.dilarion.app.ui.screens.tasks.TasksScreen()
+                }
             }
         }
     }
 }
 
-// ── Meetings Tab ─────────────────────────────────────────────────────────────
-// Consolidates the two things that used to be small top-bar icon buttons.
+// ── Floating bottom bar ──────────────────────────────────────────────────────
+// A rounded brand-colour pill that floats above the content. The selected tab
+// gets a white chip with its label; the others show just the icon.
 
 @Composable
-private fun MeetingsTab(onNewMeeting: () -> Unit, onMeetings: () -> Unit) {
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        MeetingsTabCard(
-            icon = Icons.Default.Videocam,
-            title = "Start Instant Meeting",
-            subtitle = "Group video — invite anyone, add more later",
-            onClick = onNewMeeting,
-        )
-        MeetingsTabCard(
-            icon = Icons.Default.CalendarMonth,
-            title = "Scheduled Meetings",
-            subtitle = "Upcoming, join by code, or schedule a new one",
-            onClick = onMeetings,
-        )
+private fun FloatingNavBar(selected: HomeTab, dmUnread: Int, onSelect: (HomeTab) -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(SurfaceWhite)
+            .navigationBarsPadding()
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .shadow(12.dp, RoundedCornerShape(32.dp), ambientColor = DilarionRed, spotColor = DilarionRed)
+                .clip(RoundedCornerShape(32.dp))
+                .background(DilarionRed)
+                .padding(horizontal = 8.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            HomeTab.entries.forEach { tab ->
+                val isSel = tab == selected
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(24.dp))
+                        .background(if (isSel) SurfaceWhite else Color.Transparent)
+                        .clickable { onSelect(tab) }
+                        .animateContentSize()
+                        .padding(horizontal = if (isSel) 14.dp else 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    BadgedBox(badge = {
+                        if (tab == HomeTab.DMS && dmUnread > 0 && !isSel) {
+                            Badge(containerColor = SurfaceWhite, contentColor = DilarionRed) {
+                                Text(if (dmUnread > 99) "99+" else dmUnread.toString(), fontSize = 9.sp)
+                            }
+                        }
+                    }) {
+                        Icon(
+                            tab.icon,
+                            contentDescription = tab.label,
+                            tint = if (isSel) DilarionRed else SurfaceWhite.copy(alpha = 0.85f),
+                            modifier = Modifier.size(22.dp),
+                        )
+                    }
+                    AnimatedVisibility(visible = isSel) {
+                        Text(
+                            tab.label,
+                            color = DilarionRed,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 13.sp,
+                            modifier = Modifier.padding(start = 6.dp),
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
 @Composable
-private fun MeetingsTabCard(icon: ImageVector, title: String, subtitle: String, onClick: () -> Unit) {
+private fun TabHeader(title: String, action: (@Composable () -> Unit)? = null) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(SurfaceWhite)
-            .clickable(onClick = onClick)
-            .padding(16.dp),
+            .padding(start = 20.dp, end = 8.dp, top = 12.dp, bottom = 8.dp)
+            .heightIn(min = 48.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        Text(title, fontSize = 26.sp, fontWeight = FontWeight.Bold, color = TextPrimary, modifier = Modifier.weight(1f))
+        action?.invoke()
+    }
+}
+
+@Composable
+private fun JumpToField(placeholder: String, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(InputGrey)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Default.Search, null, tint = TextMuted, modifier = Modifier.size(20.dp))
+        Spacer(Modifier.width(10.dp))
+        Text(placeholder, color = TextMuted, fontSize = 15.sp)
+    }
+}
+
+// ── Home tab ─────────────────────────────────────────────────────────────────
+// Profile header, "Jump to…" search, quick actions, then collapsible
+// Channels / Groups / Direct messages sections — one place to see everything.
+
+@Composable
+private fun HomeTabContent(
+    uiState: HomeUiState,
+    onOpenChat: (String) -> Unit,
+    onOpenGroupChat: (Int, String) -> Unit,
+    onNewChat: () -> Unit,
+    onNewGroup: () -> Unit,
+    onJoinGroup: () -> Unit,
+    onNewMeeting: () -> Unit,
+    onMeetings: () -> Unit,
+    onSearch: () -> Unit,
+    onSettings: () -> Unit,
+    onLogout: () -> Unit,
+) {
+    var channelsOpen by rememberSaveable { mutableStateOf(true) }
+    var groupsOpen by rememberSaveable { mutableStateOf(true) }
+    var dmsOpen by rememberSaveable { mutableStateOf(true) }
+    var showGroupMenu by remember { mutableStateOf(false) }
+    var showProfileMenu by remember { mutableStateOf(false) }
+    val me = uiState.currentUsername
+    val threads = dmThreads(uiState)
+    val channels = uiState.channels.filter { !it.isArchived }
+
+    // The skeleton is itself a scrolling list, so it must sit beside the
+    // LazyColumn, never inside one of its items (that crashes on measure).
+    val showSkeleton = uiState.isLoading && uiState.messages.isEmpty() && uiState.groups.isEmpty()
+    Column(Modifier.fillMaxSize()) {
+    LazyColumn(
+        if (showSkeleton) Modifier.fillMaxWidth() else Modifier.fillMaxWidth().weight(1f),
+        contentPadding = PaddingValues(bottom = 16.dp),
+    ) {
+        // Profile header
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 12.dp, bottom = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box {
+                    Avatar(name = me.ifEmpty { "D" }, size = 44.dp, online = true)
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(me.ifEmpty { "Dilarion" }, fontWeight = FontWeight.Bold, fontSize = 17.sp, color = TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Lock, null, tint = TextMuted, modifier = Modifier.size(11.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Dilarion · end-to-end encrypted", fontSize = 12.sp, color = TextSecondary)
+                    }
+                }
+                IconButton(onClick = onSettings) { Icon(Icons.Default.Settings, "Settings", tint = TextPrimary) }
+                Box {
+                    IconButton(onClick = { showProfileMenu = true }) { Icon(Icons.Default.MoreVert, "More", tint = TextPrimary) }
+                    DropdownMenu(expanded = showProfileMenu, onDismissRequest = { showProfileMenu = false }) {
+                        DropdownMenuItem(
+                            text = { Text("Log out", color = DilarionRed) },
+                            leadingIcon = { Icon(Icons.Default.ExitToApp, null, tint = DilarionRed) },
+                            onClick = { showProfileMenu = false; onLogout() },
+                        )
+                    }
+                }
+            }
+        }
+        item { JumpToField("Jump to…", onSearch) }
+
+        // Quick actions
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                QuickAction(Icons.Default.Videocam, "Meet now", Modifier.weight(1f), onNewMeeting)
+                QuickAction(Icons.Default.Event, "Meetings", Modifier.weight(1f), onMeetings)
+                QuickAction(Icons.Default.Edit, "New chat", Modifier.weight(1f), onNewChat)
+            }
+        }
+
+        if (showSkeleton) return@LazyColumn
+
+        // Channels
+        item {
+            SectionHeader("Channels", channelsOpen, channels.sumOf { it.unreadCount }, onToggle = { channelsOpen = !channelsOpen })
+        }
+        if (channelsOpen) {
+            if (channels.isEmpty()) {
+                item { SectionHint("Channels in your organization show up here") }
+            }
+            items(channels, key = { "channel_${it.id}" }) { channel ->
+                SidebarRow(
+                    leading = { Text("#", fontSize = 18.sp, color = if (channel.unreadCount > 0) TextPrimary else TextMuted, fontWeight = FontWeight.Medium) },
+                    title = channel.name,
+                    unread = channel.unreadCount,
+                    onClick = { onOpenGroupChat(channel.id, channel.name) },
+                )
+            }
+        }
+
+        // Groups
+        item {
+            SectionHeader(
+                "Groups", groupsOpen,
+                unread = uiState.groups.sumOf { g -> uiState.messages.count { it.groupId == g.id && !it.read && it.sender != me } },
+                onToggle = { groupsOpen = !groupsOpen },
+                action = {
+                    Box {
+                        SectionAddButton("New group") { showGroupMenu = true }
+                        DropdownMenu(expanded = showGroupMenu, onDismissRequest = { showGroupMenu = false }) {
+                            DropdownMenuItem(
+                                text = { Text("New group") },
+                                leadingIcon = { Icon(Icons.Default.GroupAdd, null) },
+                                onClick = { showGroupMenu = false; onNewGroup() },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Join via link or QR") },
+                                leadingIcon = { Icon(Icons.Default.QrCodeScanner, null) },
+                                onClick = { showGroupMenu = false; onJoinGroup() },
+                            )
+                        }
+                    }
+                },
+            )
+        }
+        if (groupsOpen) {
+            if (uiState.groups.isEmpty()) {
+                item { SectionHint("Tap + to create or join a group") }
+            }
+            items(uiState.groups, key = { "group_${it.id}" }) { group ->
+                val unread = uiState.messages.count { it.groupId == group.id && !it.read && it.sender != me }
+                SidebarRow(
+                    leading = { Icon(Icons.Default.Group, null, tint = if (unread > 0) TextPrimary else TextMuted, modifier = Modifier.size(18.dp)) },
+                    title = group.name,
+                    unread = unread,
+                    onClick = { onOpenGroupChat(group.id, group.name) },
+                )
+            }
+        }
+
+        // Direct messages
+        item {
+            SectionHeader(
+                "Direct messages", dmsOpen, threads.sumOf { it.unread },
+                onToggle = { dmsOpen = !dmsOpen },
+                action = { SectionAddButton("New chat", onNewChat) },
+            )
+        }
+        if (dmsOpen) {
+            if (threads.isEmpty()) {
+                item { SectionHint("Tap + to find people and start a chat") }
+            }
+            items(threads, key = { "dm_${it.peer}" }) { t ->
+                SidebarRow(
+                    leading = { Avatar(t.peer, size = 26.dp, corner = 7.dp) },
+                    title = t.peer,
+                    unread = t.unread,
+                    onClick = { onOpenChat(t.peer) },
+                )
+            }
+        }
+    }
+    if (showSkeleton) Box(Modifier.fillMaxWidth().weight(1f)) { ConversationListSkeleton() }
+    }
+}
+
+@Composable
+private fun QuickAction(icon: ImageVector, label: String, modifier: Modifier, onClick: () -> Unit) {
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(14.dp))
+            .background(DilarionRedSoft)
+            .clickable(onClick = onClick)
+            .padding(vertical = 12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Icon(icon, null, tint = DilarionRed, modifier = Modifier.size(22.dp))
+        Spacer(Modifier.height(4.dp))
+        Text(label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = DilarionRedDark)
+    }
+}
+
+@Composable
+private fun SectionHeader(
+    title: String,
+    open: Boolean,
+    unread: Int,
+    onToggle: () -> Unit,
+    action: (@Composable () -> Unit)? = null,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onToggle)
+            .padding(start = 12.dp, end = 8.dp, top = 10.dp, bottom = 4.dp)
+            .heightIn(min = 36.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            Icons.Default.KeyboardArrowDown, null,
+            tint = TextSecondary,
+            modifier = Modifier.size(20.dp).rotate(if (open) 0f else -90f),
+        )
+        Spacer(Modifier.width(4.dp))
+        Text(title, fontWeight = FontWeight.Bold, fontSize = 15.sp, color = TextPrimary)
+        if (!open && unread > 0) {
+            Spacer(Modifier.width(8.dp))
+            UnreadBadge(unread)
+        }
+        Spacer(Modifier.weight(1f))
+        action?.invoke()
+    }
+}
+
+@Composable
+private fun SectionAddButton(description: String, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(30.dp)
+            .clip(RoundedCornerShape(9.dp))
+            .background(InputGrey)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(Icons.Default.Add, description, tint = TextPrimary, modifier = Modifier.size(18.dp))
+    }
+}
+
+@Composable
+private fun SectionHint(text: String) {
+    Text(text, fontSize = 13.sp, color = TextMuted, modifier = Modifier.padding(start = 40.dp, top = 2.dp, bottom = 6.dp))
+}
+
+@Composable
+private fun SidebarRow(leading: @Composable () -> Unit, title: String, unread: Int, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(start = 18.dp, end = 16.dp, top = 9.dp, bottom = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.width(26.dp), contentAlignment = Alignment.Center) { leading() }
+        Spacer(Modifier.width(12.dp))
+        Text(
+            title,
+            fontSize = 15.sp,
+            fontWeight = if (unread > 0) FontWeight.Bold else FontWeight.Normal,
+            color = if (unread > 0) TextPrimary else TextSecondary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        if (unread > 0) UnreadBadge(unread)
+    }
+}
+
+@Composable
+private fun UnreadBadge(count: Int) {
+    Box(
+        modifier = Modifier
+            .heightIn(min = 20.dp)
+            .widthIn(min = 20.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(DilarionRed)
+            .padding(horizontal = 6.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(if (count > 99) "99+" else count.toString(), color = SurfaceWhite, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+/** Initial-letter avatar on a colour picked from the name, so people are easy to tell apart. */
+@Composable
+private fun Avatar(name: String, size: androidx.compose.ui.unit.Dp, corner: androidx.compose.ui.unit.Dp = size / 3, online: Boolean = false) {
+    val palette = listOf(
+        DilarionRed, Color(0xFF2563EB), Color(0xFF059669), Color(0xFFD97706),
+        Color(0xFF7C3AED), Color(0xFFDB2777), Color(0xFF0891B2), Color(0xFF4B5563),
+    )
+    val bg = palette[(name.lowercase().hashCode() and 0x7fffffff) % palette.size]
+    Box {
         Box(
-            modifier = Modifier.size(40.dp).clip(CircleShape).background(DilarionRed),
+            modifier = Modifier.size(size).clip(RoundedCornerShape(corner)).background(bg),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(icon, null, tint = SurfaceWhite)
+            Text(
+                name.firstOrNull()?.uppercaseChar()?.toString() ?: "?",
+                color = SurfaceWhite,
+                fontSize = (size.value * 0.42f).sp,
+                fontWeight = FontWeight.Bold,
+            )
         }
-        Spacer(Modifier.width(14.dp))
-        Column {
-            Text(title, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
-            Text(subtitle, fontSize = 12.sp, color = Color.Gray)
-        }
-    }
-}
-
-// ── Chats Tab ────────────────────────────────────────────────────────────────
-
-@Composable
-private fun ChatsTab(uiState: HomeUiState, onOpenChat: (String) -> Unit) {
-    val me = uiState.currentUsername
-    val threads = uiState.messages
-        .filter { it.groupId == null }
-        .groupBy { ((if (it.sender == me) it.recipient else it.sender) ?: "").ifEmpty { "Unknown" } }
-        .map { (peer, msgs) ->
-            val last = msgs.maxByOrNull { it.timestamp ?: "" } ?: msgs.first()
-            val unread = msgs.count { !it.read && it.sender != me }
-            Triple(peer, last, unread)
-        }
-        .sortedByDescending { it.second.timestamp ?: "" }
-
-    if (uiState.isLoading) {
-        ConversationListSkeleton()
-        return
-    }
-
-    if (threads.isEmpty()) {
-        EmptyState(Icons.Default.ChatBubble, "No chats yet", "Tap + to find people and start a chat")
-        return
-    }
-
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = 8.dp)) {
-        items(threads, key = { "dm_${it.first}" }) { (peer, last, unread) ->
-            ConversationRow(
-                title    = peer,
-                subtitle = "",
-                time     = last.timestamp ?: "",
-                unread   = unread,
-                isGroup  = false,
-                onClick  = { onOpenChat(peer) },
+        if (online) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .offset(x = 2.dp, y = 2.dp)
+                    .size(12.dp)
+                    .clip(CircleShape)
+                    .background(SurfaceWhite)
+                    .padding(2.dp)
+                    .clip(CircleShape)
+                    .background(OnlineGreen),
             )
         }
     }
 }
 
+// ── DMs tab ──────────────────────────────────────────────────────────────────
+
 @Composable
-private fun ChannelsTab(uiState: HomeUiState, onOpen: (Int, String) -> Unit) {
-    if (uiState.channels.isEmpty()) {
-        EmptyState(Icons.Default.Tag, "No channels yet", "Public channels in your organization show up here")
-        return
-    }
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = 8.dp)) {
-        items(uiState.channels, key = { "channel_${it.id}" }) { channel ->
-            ConversationRow(
-                title = "#${channel.name}",
-                subtitle = channel.topic ?: if (channel.isArchived) "Archived" else "",
-                time = "",
-                unread = channel.unreadCount,
-                isGroup = true,
-                onClick = { onOpen(channel.id, channel.name) },
-            )
+private fun DmsTab(uiState: HomeUiState, onOpenChat: (String) -> Unit, onNewChat: () -> Unit, onSearch: () -> Unit) {
+    val threads = dmThreads(uiState)
+    Column(Modifier.fillMaxSize()) {
+        TabHeader("Direct messages") {
+            IconButton(onClick = onNewChat) { Icon(Icons.Default.Edit, "New chat", tint = TextPrimary) }
+        }
+        JumpToField("Find a DM", onSearch)
+        Spacer(Modifier.height(8.dp))
+        when {
+            uiState.isLoading && threads.isEmpty() -> ConversationListSkeleton()
+            threads.isEmpty() -> EmptyState(Icons.Default.ChatBubble, "No chats yet", "Tap the pencil to find people and start a chat")
+            else -> LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = 4.dp)) {
+                items(threads, key = { "dmrow_${it.peer}" }) { t ->
+                    DmRow(t, uiState.currentUsername) { onOpenChat(t.peer) }
+                }
+            }
         }
     }
 }
 
-// ── Groups Tab ───────────────────────────────────────────────────────────────
-
 @Composable
-private fun GroupsTab(uiState: HomeUiState, onOpenGroupChat: (Int, String) -> Unit) {
-    if (uiState.isLoading) {
-        ConversationListSkeleton()
-        return
-    }
-
-    if (uiState.groups.isEmpty()) {
-        EmptyState(Icons.Default.Group, "No groups yet", "Tap + to create a group")
-        return
-    }
-
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = 8.dp)) {
-        items(uiState.groups, key = { "group_${it.id}" }) { group ->
-            val groupMsgs = uiState.messages.filter { it.groupId == group.id }
-            val unread = groupMsgs.count { !it.read }
-            ConversationRow(
-                title    = group.name,
-                subtitle = if (groupMsgs.isEmpty()) "No messages yet" else "",
-                time     = groupMsgs.maxByOrNull { it.timestamp ?: "" }?.timestamp ?: group.createdAt,
-                unread   = unread,
-                isGroup  = true,
-                onClick  = { onOpenGroupChat(group.id, group.name) },
-            )
+private fun DmRow(t: DmThread, me: String, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Avatar(t.peer, size = 48.dp, corner = 14.dp)
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    t.peer,
+                    fontSize = 16.sp,
+                    fontWeight = if (t.unread > 0) FontWeight.Bold else FontWeight.SemiBold,
+                    color = TextPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    formatTime(t.last.timestamp ?: ""),
+                    fontSize = 12.sp,
+                    color = if (t.unread > 0) DilarionRed else TextMuted,
+                    fontWeight = if (t.unread > 0) FontWeight.SemiBold else FontWeight.Normal,
+                )
+            }
+            Spacer(Modifier.height(3.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    previewOf(t.last, me, t.unread),
+                    fontSize = 14.sp,
+                    color = if (t.unread > 0) TextPrimary else TextSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                if (t.unread > 0) {
+                    Spacer(Modifier.width(8.dp))
+                    UnreadBadge(t.unread)
+                }
+            }
         }
     }
 }
@@ -382,12 +697,12 @@ private fun CallHistoryRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
-            modifier = Modifier.size(50.dp).clip(CircleShape).background(DilarionRed),
+            modifier = Modifier.size(48.dp).clip(RoundedCornerShape(14.dp)).background(DilarionRedSoft),
             contentAlignment = Alignment.Center,
         ) {
             Text(
                 peer.firstOrNull()?.uppercaseChar()?.toString() ?: "?",
-                color = SurfaceWhite, fontSize = 20.sp, fontWeight = FontWeight.Bold,
+                color = DilarionRed, fontSize = 19.sp, fontWeight = FontWeight.Bold,
             )
         }
         Spacer(Modifier.width(12.dp))
@@ -435,98 +750,9 @@ private fun CallHistoryRow(
             }
         }
     }
-    HorizontalDivider(modifier = Modifier.padding(start = 78.dp), color = BorderGrey, thickness = 0.5.dp)
-}
+    }
 
 // ── Shared components ─────────────────────────────────────────────────────────
-
-@Composable
-private fun ConversationRow(
-    title: String,
-    subtitle: String,
-    time: String,
-    unread: Int,
-    isGroup: Boolean,
-    onClick: () -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(SurfaceWhite)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
-            modifier = Modifier
-                .size(50.dp)
-                .clip(CircleShape)
-                .background(if (isGroup) DilarionRed.copy(alpha = 0.12f) else DilarionRed),
-            contentAlignment = Alignment.Center,
-        ) {
-            if (isGroup) {
-                Icon(Icons.Default.Group, null, tint = DilarionRed, modifier = Modifier.size(26.dp))
-            } else {
-                Text(
-                    title.firstOrNull()?.uppercaseChar()?.toString() ?: "?",
-                    color = SurfaceWhite, fontSize = 20.sp, fontWeight = FontWeight.Bold,
-                )
-            }
-        }
-        Spacer(Modifier.width(12.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    title,
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.weight(1f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    formatTime(time),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (unread > 0) DilarionRed else TextSecondary,
-                )
-            }
-            Spacer(Modifier.height(2.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                if (subtitle.isNotEmpty()) {
-                    Text(
-                        subtitle,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = TextSecondary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
-                    )
-                } else {
-                    Spacer(Modifier.weight(1f))
-                }
-                if (unread > 0) {
-                    Box(
-                        modifier = Modifier.size(20.dp).clip(CircleShape).background(DilarionRed),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            if (unread > 99) "99+" else unread.toString(),
-                            color = SurfaceWhite, fontSize = 10.sp, fontWeight = FontWeight.Bold,
-                        )
-                    }
-                }
-            }
-        }
-    }
-    HorizontalDivider(modifier = Modifier.padding(start = 78.dp), color = BorderGrey, thickness = 0.5.dp)
-}
 
 @Composable
 private fun EmptyState(icon: ImageVector, title: String, subtitle: String) {

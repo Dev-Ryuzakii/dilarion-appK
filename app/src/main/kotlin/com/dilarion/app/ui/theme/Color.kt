@@ -14,3 +14,8 @@ val TextPrimary    = Color(0xFF111827)
 val TextSecondary  = Color(0xFF667781)
 val BorderGrey     = Color(0xFFE9EDEF)
 val OnlineGreen    = Color(0xFF25D366)
+
+// Light redesign neutrals (mobile Slack-style layout)
+val DilarionRedSoft = Color(0xFFFDECEA)
+val InputGrey       = Color(0xFFF3F4F6)
+val TextMuted       = Color(0xFF9CA3AF)

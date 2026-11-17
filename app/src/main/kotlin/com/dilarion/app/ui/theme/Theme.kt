@@ -7,7 +7,10 @@ import androidx.compose.runtime.Composable
 private val DilarionColorScheme = lightColorScheme(
     primary          = DilarionRed,
     onPrimary        = SurfaceWhite,
-    primaryContainer = DilarionRedLight,
+    primaryContainer = DilarionRedSoft,
+    onPrimaryContainer = DilarionRedDark,
+    surfaceVariant   = InputGrey,
+    onSurfaceVariant = TextSecondary,
     secondary        = TextSecondary,
     background       = BackgroundGrey,
     surface          = SurfaceWhite,
