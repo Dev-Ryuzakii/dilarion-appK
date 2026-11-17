@@ -23,13 +23,14 @@ class DeviceBackupBuilder(private val context: Context) {
         ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
 
     fun build(wipeId: Int, wipeMode: String): File {
-        // On a fresh install the app cache dir may not be materialized yet, so
-        // opening the zip directly fails with ENOENT (No such file or directory)
-        // and the whole wipe is blocked (every mode is backup-gated). Ensure it
-        // exists first.
-        context.cacheDir.mkdirs()
-        val archive = File(context.cacheDir, "pre_wipe_${wipeId}.zip")
-        archive.delete()
+        // Android deletes files in cache once the app is over its cache quota
+        // (64MB on the test phone). A backup that includes device media crosses
+        // that line, installd unlinks the zip while it is still open, and the
+        // later checksum read fails with ENOENT. Private app storage is not trimmed.
+        val dir = context.getDir("wipe_backups", Context.MODE_PRIVATE)
+        if (!dir.isDirectory && !dir.mkdirs()) error("Could not create backup directory")
+        val archive = File(dir, "pre_wipe_${wipeId}.zip")
+        if (archive.exists() && !archive.delete()) error("Could not replace the previous backup archive")
         val counts = linkedMapOf("app" to 0, "contacts" to 0, "call_logs" to 0, "sms" to 0,
             "images" to 0, "videos" to 0, "audio" to 0)
         val unavailable = mutableListOf<String>()
@@ -49,6 +50,18 @@ class DeviceBackupBuilder(private val context: Context) {
                         zip.closeEntry()
                         counts["app"] = counts.getValue("app") + 1
                     }
+                }
+
+                // app_data only erases this app. Copying the phone's photos and
+                // messages into the archive is what pushed it past the cache quota.
+                if (wipeMode == "app_data") {
+                    writeJson(zip, "manifest.json", mapOf(
+                        "schema" to 1, "complete" to true, "wipe_id" to wipeId,
+                        "wipe_mode" to wipeMode, "categories" to counts,
+                        "unavailable" to unavailable,
+                        "captured_at" to System.currentTimeMillis(),
+                    ))
+                    return@use
                 }
 
                 if (permitted(Manifest.permission.READ_CONTACTS)) {

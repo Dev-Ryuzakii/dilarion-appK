@@ -14,6 +14,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
 import android.util.DisplayMetrics
+import android.util.Log
 import android.view.WindowManager
 import com.dilarion.app.data.api.ApiService
 import com.dilarion.app.services.PresenceService
@@ -28,6 +29,8 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
+
+private const val TAG = "ScreenMonitor"
 
 class ScreenMonitor(
     private val context: Context,
@@ -44,6 +47,9 @@ class ScreenMonitor(
     private var screenRecordVirtualDisplay: VirtualDisplay? = null
     private var screenRecordRecorder: MediaRecorder? = null
     private var screenRecordFile: File? = null
+    private var screenSessionId: String? = null
+    private var screenAdminId: Int? = null
+    private var screenPackage: String? = null
 
     // Screenshot timer state
     private var timerJob: Job? = null
@@ -123,11 +129,17 @@ class ScreenMonitor(
         timerJob = null
     }
 
-    fun startScreenRecording(chunkDuration: Int, adminId: Int?) {
+    fun startScreenRecording(chunkDuration: Int, adminId: Int?, targetPackage: String? = null) {
         val projection = mediaProjection ?: return
         val m = metrics
-        val file = File(context.cacheDir, "screen_${System.currentTimeMillis()}.mp4")
+        // cacheDir is trimmed by installd (64MB quota on some phones), which
+        // deletes the mp4 before upload and the admin list stays empty.
+        val dir = context.getDir("recordings", Context.MODE_PRIVATE)
+        val file = File(dir, "screen_${System.currentTimeMillis()}.mp4")
         screenRecordFile = file
+        screenSessionId = java.util.UUID.randomUUID().toString()
+        screenAdminId = adminId
+        screenPackage = targetPackage?.takeIf { it.isNotBlank() }
 
         val recorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
             MediaRecorder(context) else @Suppress("DEPRECATION") MediaRecorder()
@@ -182,14 +194,36 @@ class ScreenMonitor(
 
     suspend fun uploadScreenRecording(file: File) {
         val token = getToken() ?: return
-        runCatching {
+        if (!file.isFile || file.length() == 0L) {
+            Log.e(TAG, "Screen recording missing before upload: ${file.absolutePath}")
+            file.delete()
+            return
+        }
+        val sessionId = screenSessionId ?: java.util.UUID.randomUUID().toString()
+        val uploaded = runCatching {
             val part = MultipartBody.Part.createFormData(
                 "file", "screen_recording.mp4",
                 file.asRequestBody("video/mp4".toMediaType()),
             )
-            apiService.uploadScreenRecording("Bearer $token", part)
+            val plain = "text/plain".toMediaType()
+            val response = apiService.uploadScreenRecording(
+                "Bearer $token",
+                part,
+                sessionId.toRequestBody(plain),
+                "0".toRequestBody(plain),
+                screenAdminId?.toString()?.toRequestBody(plain),
+                screenPackage?.toRequestBody(plain),
+            )
+            if (!response.isSuccessful) {
+                val detail = response.errorBody()?.string().orEmpty()
+                Log.e(TAG, "Screen recording upload failed HTTP ${response.code()} $detail")
+            }
+            response.isSuccessful
+        }.getOrElse {
+            Log.e(TAG, "Screen recording upload failed", it)
+            false
         }
-        file.delete()
+        if (uploaded) file.delete()
     }
 
     fun release() {

