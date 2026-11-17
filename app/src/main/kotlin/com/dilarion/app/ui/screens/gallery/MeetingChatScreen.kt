@@ -87,12 +87,12 @@ fun MeetingChatSheet(
 
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Scaffold(
-            containerColor = Color(0xFF0B0B10),
+            containerColor = Color(0xFF0D0A0A),
             topBar = {
                 TopAppBar(
                     navigationIcon = { IconButton(onClick = onDismiss) { Icon(Icons.Default.ArrowBack, "Back", tint = SurfaceWhite) } },
-                    title = { Text("In-meeting chat", color = SurfaceWhite, style = MaterialTheme.typography.titleMedium) },
-                    colors = TopAppBarDefaults.topAppBarColors(containerColor = DilarionRed),
+                    title = { Text("Meeting chat", color = SurfaceWhite, style = MaterialTheme.typography.titleMedium) },
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFF171212)),
                 )
             },
             bottomBar = {
@@ -102,6 +102,7 @@ fun MeetingChatSheet(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     OutlinedTextField(
+                        shape = RoundedCornerShape(16.dp),
                         value = text,
                         onValueChange = { text = it },
                         placeholder = { Text("Message everyone in the meeting…") },
@@ -116,6 +117,7 @@ fun MeetingChatSheet(
                             if (text.isNotBlank()) { viewModel.sendMessage(text, participantUsernames); text = "" }
                         },
                         enabled = !state.sending,
+                        colors = IconButtonDefaults.filledIconButtonColors(containerColor = DilarionRed, contentColor = Color.White),
                     ) { Icon(Icons.Default.Send, "Send") }
                 }
             },
@@ -157,8 +159,8 @@ private fun MeetingChatBubble(
         }
         Box(
             modifier = Modifier
-                .clip(RoundedCornerShape(12.dp))
-                .background(if (isMine) Color(0xFF25D366).copy(alpha = 0.15f) else Color.White.copy(alpha = 0.06f))
+                .clip(RoundedCornerShape(16.dp))
+                .background(if (isMine) DilarionRed.copy(alpha = 0.28f) else Color.White.copy(alpha = 0.07f))
                 .padding(horizontal = 12.dp, vertical = 8.dp)
         ) {
             if (unlocked && decrypted != null) {

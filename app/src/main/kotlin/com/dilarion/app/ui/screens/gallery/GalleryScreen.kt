@@ -2,19 +2,28 @@ package com.dilarion.app.ui.screens.gallery
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.CallSplit
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Draw
+import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.PictureInPictureAlt
+import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.VideocamOff
 import androidx.compose.material3.*
@@ -22,9 +31,16 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -33,16 +49,26 @@ import com.dilarion.app.data.model.BreakoutGroupInput
 import com.dilarion.app.data.model.UserInfo
 import com.dilarion.app.ui.components.PipController
 import com.dilarion.app.ui.theme.DilarionRed
-import com.dilarion.app.ui.theme.SurfaceWhite
 import io.livekit.android.renderer.TextureViewRenderer
 import io.livekit.android.room.Room
 import io.livekit.android.room.track.VideoTrack
 
+// In-call palette: dark stage, brand red for leave and active states.
+private val Stage = Color(0xFF0D0A0A)
+private val Panel = Color(0xFF171212)
+private val Card = Color(0xFF211919)
+private val Line = Color.White.copy(alpha = 0.10f)
+private val TextMain = Color(0xFFF6F1F0)
+private val TextMuted = Color(0xFFA39A98)
+private val Speaking = Color(0xFF22C55E)
+private val LeaveRed = Color(0xFFE5392B)
+private val SoftRed = Color(0xFFFF9B91)
+
 /**
- * Group video via LiveKit — the "home" for all in-call tools: gallery grid,
- * mute/camera, participants list, adding someone new mid-call, breakout
- * rooms, and leaving. Mirrors desktop's GalleryView.tsx. Together-mode /
- * recording / captions are explicitly out of scope for this round.
+ * Group video via LiveKit. The screen keeps only the controls people reach
+ * for constantly (mic, camera, people, leave); everything else lives in the
+ * "More" bottom sheet so the call itself stays uncluttered. Mirrors desktop's
+ * GalleryView.tsx.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -59,6 +85,7 @@ fun GalleryScreen(
     val state by viewModel.uiState.collectAsState()
     com.dilarion.app.security.HoldIdleLogoutWhileVisible()
     var showChat by remember { mutableStateOf(false) }
+    var showMore by remember { mutableStateOf(false) }
     val isInPip by PipController.isInPip
 
     LaunchedEffect(conferenceId) { viewModel.connect(conferenceId, initialMicOn, initialCamOn, displayName, isAdHocCall) }
@@ -75,7 +102,7 @@ fun GalleryScreen(
             val mainTile = state.tiles.firstOrNull { it.isSpeaking && !it.isLocal }
                 ?: state.tiles.firstOrNull { !it.isLocal }
                 ?: state.tiles.firstOrNull()
-            mainTile?.let { GalleryTileView(tile = it, room = viewModel.room) }
+            mainTile?.let { GalleryTileView(tile = it, room = viewModel.room, fill = true) }
         }
         return
     }
@@ -88,160 +115,100 @@ fun GalleryScreen(
         )
     }
 
-    Scaffold(
-        containerColor = Color(0xFF0B0B10),
-        topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text(
-                            (state.inBreakoutName?.let { "Breakout: $it" }
-                                ?: if (state.isAdHocCall) {
-                                    if ((state.callType ?: if (state.camOn) "video" else "voice") == "voice") "Voice call" else "Video call"
-                                } else "Group Video") +
-                                if (state.tiles.isNotEmpty()) " · ${state.tiles.size}" else "",
-                            color = SurfaceWhite,
-                        )
-                        if (state.inBreakoutName != null) {
-                            Text("in breakout room", color = Color(0xFFC4B5FD), fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                },
-                actions = {
-                    BadgedBox(badge = {
-                        if (!state.isAdHocCall && state.waiting.isNotEmpty()) Badge { Text("${state.waiting.size}") }
-                    }) {
-                        TextButton(onClick = { viewModel.openParticipants() }) { Text("Participants", color = SurfaceWhite) }
-                    }
-                    if (state.isHost && !state.isAdHocCall) {
-                        IconButton(onClick = {
-                            if (state.breakoutActive) {
-                                viewModel.endBreakoutRooms()
-                            } else {
-                                viewModel.toggleBreakoutPanel(true)
-                            }
-                        }) {
-                            Icon(
-                                Icons.Default.CallSplit, "Breakout rooms",
-                                tint = if (state.breakoutActive) Color(0xFFEF4444) else SurfaceWhite,
-                            )
-                        }
-                    }
-                    if (!state.isAdHocCall) {
-                    IconButton(onClick = { showChat = true }) {
-                        Icon(Icons.Default.Chat, "Chat", tint = SurfaceWhite)
-                    }
-                    IconButton(onClick = {
-                        if (state.whiteboardOwner == null) {
-                            viewModel.shareWhiteboard(conferenceId)
-                            onOpenWhiteboard(conferenceId, true)
-                        } else {
-                            onOpenWhiteboard(conferenceId, state.whiteboardOwner == state.myUsername)
-                        }
-                    }) {
-                        Icon(
-                            Icons.Default.Draw, "Whiteboard",
-                            tint = if (state.whiteboardOwner != null) Color(0xFF6D5EFC) else SurfaceWhite,
-                        )
-                    }
-                    }
-                    IconButton(onClick = { PipController.enter?.invoke() }) {
-                        Icon(Icons.Default.PictureInPictureAlt, "Minimize", tint = SurfaceWhite)
-                    }
-                    IconButton(onClick = { viewModel.leave(); onClose() }) {
-                        Icon(Icons.Default.Close, "Close", tint = SurfaceWhite)
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = DilarionRed),
-            )
-        },
-        bottomBar = {
-            if (!state.connecting && state.error == null) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterHorizontally),
-                ) {
-                    CtrlButton(icon = if (state.micOn) Icons.Default.Mic else Icons.Default.MicOff, onClick = { viewModel.toggleMic() })
-                    CtrlButton(icon = if (state.camOn) Icons.Default.Videocam else Icons.Default.VideocamOff, onClick = { viewModel.toggleCam() })
-                    CtrlButton(icon = Icons.Default.PersonAdd, onClick = { viewModel.openParticipants() })
-                    CtrlButton(icon = Icons.Default.Close, onClick = { viewModel.leave(); onClose() }, danger = true)
-                }
-            }
-        },
-    ) { padding ->
-        Column(modifier = Modifier.padding(padding).fillMaxSize()) {
+    val leave = { viewModel.leave(); onClose() }
+    val openWhiteboard = {
+        if (state.whiteboardOwner == null) {
+            viewModel.shareWhiteboard(conferenceId)
+            onOpenWhiteboard(conferenceId, true)
+        } else {
+            onOpenWhiteboard(conferenceId, state.whiteboardOwner == state.myUsername)
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Brush.verticalGradient(listOf(Color(0xFF2A1210), Stage, Stage)))
+            .systemBarsPadding(),
+    ) {
+        Column(Modifier.fillMaxSize()) {
+            CallHeader(state = state, onMinimize = { PipController.enter?.invoke() })
+
             if (state.whiteboardOwner != null && state.whiteboardOwner != state.myUsername && !state.isAdHocCall) {
                 Row(
                     modifier = Modifier
+                        .padding(horizontal = 12.dp, vertical = 4.dp)
                         .fillMaxWidth()
-                        .background(Color(0xFF6D5EFC).copy(alpha = 0.18f))
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(DilarionRed.copy(alpha = 0.18f))
+                        .border(1.dp, DilarionRed.copy(alpha = 0.45f), RoundedCornerShape(14.dp))
+                        .padding(start = 14.dp, end = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text("${state.whiteboardOwner} is sharing the whiteboard", color = SurfaceWhite, fontSize = 13.sp)
-                    TextButton(onClick = { onOpenWhiteboard(conferenceId, false) }) { Text("View", color = Color(0xFF6D5EFC)) }
-                }
-            }
-            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-            when {
-                state.connecting -> Text("Connecting…", color = SurfaceWhite, modifier = Modifier.align(Alignment.Center))
-                state.error != null -> Text(state.error ?: "", color = Color(0xFFEF4444), modifier = Modifier.align(Alignment.Center).padding(20.dp))
-                else -> {
-                    val room = viewModel.room
-                    when (state.tiles.size) {
-                        // Solo: one big card filling the screen.
-                        0, 1 -> state.tiles.firstOrNull()?.let {
-                            Box(modifier = Modifier.fillMaxSize().padding(12.dp)) {
-                                GalleryTileView(tile = it, room = room)
-                            }
-                        }
-                        // Two people: even split, not a giant-card-plus-tiny-strip -
-                        // that reads as broken with exactly one other participant.
-                        2 -> Column(
-                            modifier = Modifier.fillMaxSize().padding(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp),
-                        ) {
-                            state.tiles.forEach { tile ->
-                                Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                                    GalleryTileView(tile = tile, room = room)
-                                }
-                            }
-                        }
-                        // 3+: every face shares the screen. A filmstrip plus one large
-                        // tile hid whoever didn't fit the strip on a phone, so
-                        // three people only ever saw two.
-                        else -> {
-                            Column(
-                                modifier = Modifier.fillMaxSize().padding(12.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                state.tiles.chunked(2).forEach { row ->
-                                    Row(
-                                        Modifier.weight(1f).fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    ) {
-                                        row.forEach { tile ->
-                                            Box(Modifier.weight(1f).fillMaxHeight()) {
-                                                GalleryTileView(tile = tile, room = room, fill = true)
-                                            }
-                                        }
-                                        if (row.size == 1) Spacer(Modifier.weight(1f))
-                                    }
-                                }
-                            }
-                        }
+                    Icon(Icons.Default.Draw, null, tint = SoftRed, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        "${state.whiteboardOwner} is sharing a whiteboard",
+                        color = TextMain, fontSize = 13.sp, modifier = Modifier.weight(1f),
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
+                    TextButton(onClick = { onOpenWhiteboard(conferenceId, false) }) {
+                        Text("View", color = SoftRed, fontWeight = FontWeight.Bold)
                     }
                 }
             }
+
+            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                when {
+                    state.connecting -> Column(
+                        Modifier.align(Alignment.Center),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        CircularProgressIndicator(color = DilarionRed, strokeWidth = 3.dp, modifier = Modifier.size(32.dp))
+                        Spacer(Modifier.height(12.dp))
+                        Text("Connecting…", color = TextMuted, fontSize = 14.sp)
+                    }
+                    state.error != null -> Text(
+                        state.error ?: "", color = SoftRed, textAlign = TextAlign.Center,
+                        modifier = Modifier.align(Alignment.Center).padding(24.dp),
+                    )
+                    else -> TileGrid(state = state, room = viewModel.room)
+                }
+            }
+
+            if (!state.connecting && state.error == null) {
+                ControlDock(
+                    state = state,
+                    onMic = { viewModel.toggleMic() },
+                    onCam = { viewModel.toggleCam() },
+                    onPeople = { viewModel.openParticipants() },
+                    onMore = { showMore = true },
+                    onLeave = leave,
+                )
             }
         }
+    }
+
+    if (showMore) {
+        MoreSheet(
+            state = state,
+            onDismiss = { showMore = false },
+            onChat = { showMore = false; showChat = true },
+            onWhiteboard = { showMore = false; openWhiteboard() },
+            onStopWhiteboard = { showMore = false; viewModel.stopSharingWhiteboard(conferenceId) },
+            onBreakout = {
+                showMore = false
+                if (state.breakoutActive) viewModel.endBreakoutRooms() else viewModel.toggleBreakoutPanel(true)
+            },
+            onPeople = { showMore = false; viewModel.openParticipants() },
+            onMinimize = { showMore = false; PipController.enter?.invoke() },
+            onLeave = { showMore = false; leave() },
+        )
     }
 
     if (state.showParticipants) {
         ParticipantsSheet(
             state = state,
-            conferenceId = conferenceId,
             onDismiss = { viewModel.closeParticipants() },
             onSearchChange = { viewModel.setAddSearch(it) },
             onInvite = { viewModel.invite(conferenceId, it) },
@@ -251,7 +218,7 @@ fun GalleryScreen(
     }
 
     if (state.showBreakoutPanel && !state.isAdHocCall) {
-        BreakoutPanelDialog(
+        BreakoutSheet(
             state = state,
             onDismiss = { viewModel.toggleBreakoutPanel(false) },
             onAuto = { n -> viewModel.autoBreakoutRooms(n) },
@@ -260,113 +227,107 @@ fun GalleryScreen(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+// ── Header ─────────────────────────────────────────────────────────────
+
 @Composable
-private fun BreakoutPanelDialog(
-    state: GalleryUiState,
-    onDismiss: () -> Unit,
-    onAuto: (Int) -> Unit,
-    onManual: (List<BreakoutGroupInput>) -> Unit,
-) {
-    val others = remember(state.tiles) { state.tiles.filter { !it.isLocal } }
-    var numRooms by remember { mutableStateOf(2) }
-    var groups by remember {
-        mutableStateOf(
-            if (others.size >= 2) listOf("Room 1" to setOf<String>(), "Room 2" to setOf<String>())
-            else emptyList()
-        )
-    }
-
-    ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 24.dp)) {
-            Text("Breakout Rooms", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-            Spacer(Modifier.height(14.dp))
-
-            Text("Auto-shuffle", style = MaterialTheme.typography.labelMedium, color = Color.Gray)
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 6.dp)) {
-                OutlinedTextField(
-                    value = numRooms.toString(),
-                    onValueChange = { v -> v.toIntOrNull()?.let { numRooms = it.coerceIn(2, maxOf(2, others.size)) } },
-                    modifier = Modifier.width(80.dp),
-                    singleLine = true,
-                )
-                Spacer(Modifier.width(10.dp))
-                Text("rooms", fontSize = 13.sp)
-                Spacer(Modifier.weight(1f))
-                Button(onClick = { onAuto(numRooms) }, enabled = !state.breakoutBusy && others.isNotEmpty(), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6D5EFC))) {
-                    Text(if (state.breakoutBusy) "Starting…" else "Auto-start")
+private fun CallHeader(state: GalleryUiState, onMinimize: () -> Unit) {
+    val title = state.inBreakoutName
+        ?: if (state.isAdHocCall) {
+            if ((state.callType ?: if (state.camOn) "video" else "voice") == "voice") "Voice call" else "Video call"
+        } else "Meeting"
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(start = 18.dp, end = 8.dp, top = 8.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                title, color = TextMain, fontSize = 18.sp, fontWeight = FontWeight.Bold,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(4.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(7.dp).clip(CircleShape).background(Speaking))
+                Spacer(Modifier.width(6.dp))
+                val n = state.tiles.size
+                Text("$n ${if (n == 1) "person" else "people"}", color = TextMuted, fontSize = 12.sp)
+                if (state.inBreakoutName != null) {
+                    Spacer(Modifier.width(8.dp))
+                    Chip("Breakout room")
+                }
+                if (state.breakoutActive && state.inBreakoutName == null) {
+                    Spacer(Modifier.width(8.dp))
+                    Chip("Rooms open")
                 }
             }
-
-            Divider(modifier = Modifier.padding(vertical = 16.dp))
-
-            Text("Or assign manually", style = MaterialTheme.typography.labelMedium, color = Color.Gray)
-            Spacer(Modifier.height(8.dp))
-            groups.forEachIndexed { gi, (name, members) ->
-                Column(modifier = Modifier.padding(bottom = 10.dp)) {
-                    OutlinedTextField(
-                        value = name,
-                        onValueChange = { v -> groups = groups.toMutableList().also { it[gi] = v to members } },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Spacer(Modifier.height(6.dp))
-                    androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        others.forEach { tile ->
-                            val checked = members.contains(tile.identity)
-                            FilterChip(
-                                selected = checked,
-                                onClick = {
-                                    val next = if (checked) members - tile.identity else members + tile.identity
-                                    groups = groups.toMutableList().also { it[gi] = name to next }
-                                },
-                                label = { Text(tile.displayName, fontSize = 11.sp) },
-                            )
-                        }
-                    }
-                }
-            }
-            TextButton(onClick = { groups = groups + ("Room ${groups.size + 1}" to emptySet()) }) {
-                Text("+ Add room", color = Color(0xFF6D5EFC))
-            }
-            Button(
-                onClick = { onManual(groups.map { (n, u) -> BreakoutGroupInput(n, u.toList()) }) },
-                enabled = !state.breakoutBusy && groups.any { it.second.isNotEmpty() },
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6D5EFC)),
-                modifier = Modifier.padding(top = 8.dp),
+        }
+        IconButton(onClick = onMinimize) {
+            Box(
+                Modifier.size(38.dp).clip(RoundedCornerShape(12.dp)).background(Color.White.copy(alpha = 0.08f)),
+                contentAlignment = Alignment.Center,
             ) {
-                Text(if (state.breakoutBusy) "Starting…" else "Start manual rooms")
-            }
-
-            state.breakoutError?.let {
-                Text(it, color = Color(0xFFEF4444), fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
+                Icon(Icons.Default.PictureInPictureAlt, "Minimize", tint = TextMain, modifier = Modifier.size(19.dp))
             }
         }
     }
 }
 
 @Composable
-private fun CtrlButton(icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit, danger: Boolean = false) {
-    FilledIconButton(
-        onClick = onClick,
-        colors = IconButtonDefaults.filledIconButtonColors(
-            containerColor = if (danger) Color(0xFFEF4444) else Color.White.copy(alpha = 0.15f),
-        ),
-    ) {
-        Icon(icon, null, tint = SurfaceWhite)
+private fun Chip(text: String) {
+    Text(
+        text,
+        color = SoftRed, fontSize = 11.sp, fontWeight = FontWeight.Bold,
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .background(DilarionRed.copy(alpha = 0.2f))
+            .border(1.dp, DilarionRed.copy(alpha = 0.5f), RoundedCornerShape(50))
+            .padding(horizontal = 9.dp, vertical = 2.dp),
+    )
+}
+
+// ── Tiles ──────────────────────────────────────────────────────────────
+
+@Composable
+private fun TileGrid(state: GalleryUiState, room: Room?) {
+    val gap = 10.dp
+    val pad = Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 6.dp)
+    when (state.tiles.size) {
+        0 -> Unit
+        // Solo: one big card filling the screen.
+        1 -> Box(pad) { GalleryTileView(tile = state.tiles[0], room = room, fill = true) }
+        // Two people: even split, not a giant-card-plus-tiny-strip.
+        2 -> Column(pad, verticalArrangement = Arrangement.spacedBy(gap)) {
+            state.tiles.forEach { tile ->
+                Box(Modifier.weight(1f).fillMaxWidth()) { GalleryTileView(tile = tile, room = room, fill = true) }
+            }
+        }
+        // 3+: every face shares the screen, two per row.
+        else -> Column(pad, verticalArrangement = Arrangement.spacedBy(gap)) {
+            state.tiles.chunked(2).forEach { row ->
+                Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap)) {
+                    row.forEach { tile ->
+                        Box(Modifier.weight(1f).fillMaxHeight()) {
+                            GalleryTileView(tile = tile, room = room, fill = true, compact = state.tiles.size > 4)
+                        }
+                    }
+                    if (row.size == 1) Spacer(Modifier.weight(1f))
+                }
+            }
+        }
     }
 }
 
 @Composable
 private fun GalleryTileView(tile: GalleryTile, room: Room?, compact: Boolean = false, fill: Boolean = false) {
-    val avatarSize = if (compact) 30.dp else 56.dp
+    val shape = RoundedCornerShape(if (compact) 16.dp else 22.dp)
+    val avatarSize = if (compact) 52.dp else 84.dp
     Box(
         modifier = (if (fill) Modifier.fillMaxSize() else Modifier.fillMaxWidth().aspectRatio(16f / 9f))
-            .clip(RoundedCornerShape(12.dp))
-            .background(Color(0xFF1A1A22))
-            .then(
-                if (tile.isSpeaking) Modifier.border(2.dp, Color(0xFF25D366), RoundedCornerShape(12.dp))
-                else Modifier
+            .clip(shape)
+            .background(Brush.linearGradient(listOf(Color(0xFF241B1B), Color(0xFF141010))))
+            .border(
+                if (tile.isSpeaking) 2.dp else 1.dp,
+                if (tile.isSpeaking) Speaking else Line,
+                shape,
             ),
         contentAlignment = Alignment.Center,
     ) {
@@ -374,30 +335,49 @@ private fun GalleryTileView(tile: GalleryTile, room: Room?, compact: Boolean = f
             VideoRenderer(room = room, videoTrack = tile.videoTrack)
         } else {
             Box(
-                modifier = Modifier.size(avatarSize).clip(CircleShape).background(DilarionRed),
+                modifier = Modifier
+                    .size(avatarSize + 12.dp)
+                    .clip(CircleShape)
+                    .background((if (tile.isSpeaking) Speaking else DilarionRed).copy(alpha = 0.16f)),
                 contentAlignment = Alignment.Center,
             ) {
-                Text(tile.displayName.take(1).uppercase(), color = SurfaceWhite, fontWeight = FontWeight.Bold)
+                Box(
+                    modifier = Modifier
+                        .size(avatarSize)
+                        .clip(CircleShape)
+                        .background(Brush.linearGradient(listOf(DilarionRed, Color(0xFF6E1A12)))),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        tile.displayName.take(1).uppercase(), color = Color.White,
+                        fontWeight = FontWeight.Bold, fontSize = if (compact) 20.sp else 30.sp,
+                    )
+                }
             }
         }
         if (!tile.micOn) {
             Box(
-                modifier = Modifier.align(Alignment.TopEnd).padding(6.dp)
-                    .size(if (compact) 16.dp else 22.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.55f)),
+                modifier = Modifier.align(Alignment.TopEnd).padding(8.dp)
+                    .size(26.dp).clip(CircleShape).background(LeaveRed.copy(alpha = 0.9f)),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(Icons.Default.MicOff, null, tint = SurfaceWhite, modifier = Modifier.size(if (compact) 9.dp else 12.dp))
+                Icon(Icons.Default.MicOff, "Muted", tint = Color.White, modifier = Modifier.size(14.dp))
             }
         }
-        if (!compact) {
-            Text(
-                tile.displayName + if (tile.isLocal) " (you)" else "",
-                color = SurfaceWhite,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.align(Alignment.BottomStart).padding(8.dp),
-            )
-        }
+        Text(
+            tile.displayName + if (tile.isLocal) " (You)" else "",
+            color = Color.White,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(10.dp)
+                .clip(RoundedCornerShape(50))
+                .background(Color(0xFF0A0808).copy(alpha = 0.65f))
+                .padding(horizontal = 10.dp, vertical = 4.dp),
+        )
     }
 }
 
@@ -417,11 +397,316 @@ private fun VideoRenderer(room: Room, videoTrack: VideoTrack) {
     AndroidView(factory = { renderer }, modifier = Modifier.fillMaxSize())
 }
 
+// ── Control dock ───────────────────────────────────────────────────────
+
+@Composable
+private fun ControlDock(
+    state: GalleryUiState,
+    onMic: () -> Unit,
+    onCam: () -> Unit,
+    onPeople: () -> Unit,
+    onMore: () -> Unit,
+    onLeave: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 10.dp)
+            .clip(RoundedCornerShape(26.dp))
+            .background(Color(0xFF181212).copy(alpha = 0.95f))
+            .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(26.dp))
+            .padding(horizontal = 10.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        DockButton(
+            icon = if (state.micOn) Icons.Default.Mic else Icons.Default.MicOff,
+            label = if (state.micOn) "Mute" else "Unmute",
+            off = !state.micOn, onClick = onMic,
+        )
+        DockButton(
+            icon = if (state.camOn) Icons.Default.Videocam else Icons.Default.VideocamOff,
+            label = if (state.camOn) "Stop video" else "Start video",
+            off = !state.camOn, onClick = onCam,
+        )
+        DockButton(
+            icon = Icons.Default.Groups, label = "People", onClick = onPeople,
+            badge = if (!state.isAdHocCall) state.waiting.size else 0,
+        )
+        DockButton(icon = Icons.Default.MoreHoriz, label = "More", onClick = onMore)
+        Box(
+            modifier = Modifier
+                .size(width = 64.dp, height = 52.dp)
+                .clip(RoundedCornerShape(18.dp))
+                .background(LeaveRed)
+                .clickable(onClick = onLeave),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Default.CallEnd, "Leave", tint = Color.White, modifier = Modifier.size(26.dp))
+        }
+    }
+}
+
+@Composable
+private fun DockButton(icon: ImageVector, label: String, onClick: () -> Unit, off: Boolean = false, badge: Int = 0) {
+    Box {
+        Box(
+            modifier = Modifier
+                .size(52.dp)
+                .clip(RoundedCornerShape(18.dp))
+                .background(if (off) LeaveRed.copy(alpha = 0.22f) else Color.White.copy(alpha = 0.08f))
+                .border(1.dp, if (off) LeaveRed.copy(alpha = 0.5f) else Color.Transparent, RoundedCornerShape(18.dp))
+                .clickable(onClick = onClick),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(icon, label, tint = if (off) SoftRed else Color.White, modifier = Modifier.size(24.dp))
+        }
+        if (badge > 0) {
+            Box(
+                Modifier.align(Alignment.TopEnd).offset(x = 4.dp, y = (-4).dp)
+                    .size(20.dp).clip(CircleShape).background(Stage).padding(2.dp)
+                    .clip(CircleShape).background(DilarionRed),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("$badge", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
+// ── Sheets ─────────────────────────────────────────────────────────────
+
 @OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DarkSheet(onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = Panel,
+        contentColor = TextMain,
+        scrimColor = Color.Black.copy(alpha = 0.55f),
+        dragHandle = {
+            Box(
+                Modifier.padding(top = 10.dp, bottom = 6.dp).size(width = 40.dp, height = 4.dp)
+                    .clip(RoundedCornerShape(50)).background(Color.White.copy(alpha = 0.22f)),
+            )
+        },
+    ) {
+        Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 12.dp), content = content)
+    }
+}
+
+@Composable
+private fun SheetHeader(title: String, subtitle: String? = null, icon: ImageVector? = null) {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (icon != null) {
+            Box(
+                Modifier.size(40.dp).clip(RoundedCornerShape(13.dp)).background(DilarionRed.copy(alpha = 0.2f)),
+                contentAlignment = Alignment.Center,
+            ) { Icon(icon, null, tint = SoftRed, modifier = Modifier.size(20.dp)) }
+            Spacer(Modifier.width(12.dp))
+        }
+        Column {
+            Text(title, fontSize = 17.sp, fontWeight = FontWeight.Bold, color = TextMain)
+            if (subtitle != null) Text(subtitle, fontSize = 12.sp, color = TextMuted)
+        }
+    }
+}
+
+@Composable
+private fun SectionLabel(text: String, color: Color = TextMuted) {
+    Text(
+        text.uppercase(), color = color, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp,
+        modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+    )
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun MoreSheet(
+    state: GalleryUiState,
+    onDismiss: () -> Unit,
+    onChat: () -> Unit,
+    onWhiteboard: () -> Unit,
+    onStopWhiteboard: () -> Unit,
+    onBreakout: () -> Unit,
+    onPeople: () -> Unit,
+    onMinimize: () -> Unit,
+    onLeave: () -> Unit,
+) {
+    val meeting = !state.isAdHocCall
+    val iShareBoard = state.whiteboardOwner != null && state.whiteboardOwner == state.myUsername
+    DarkSheet(onDismiss) {
+        SheetHeader("More options")
+        FlowRow(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp),
+            maxItemsInEachRow = 3,
+        ) {
+            val cell = Modifier.weight(1f).padding(6.dp)
+            if (meeting) {
+                ActionTile(Icons.Default.Chat, "Chat", onClick = onChat, modifier = cell)
+                ActionTile(
+                    Icons.Default.Draw,
+                    when {
+                        state.whiteboardOwner == null -> "Whiteboard"
+                        iShareBoard -> "Open board"
+                        else -> "View board"
+                    },
+                    active = state.whiteboardOwner != null, onClick = onWhiteboard, modifier = cell,
+                )
+                if (iShareBoard) {
+                    ActionTile(Icons.Default.Close, "Stop board", onClick = onStopWhiteboard, modifier = cell)
+                }
+                if (state.isHost) {
+                    ActionTile(
+                        Icons.Default.CallSplit,
+                        if (state.breakoutActive) "End rooms" else "Breakout rooms",
+                        active = state.breakoutActive, onClick = onBreakout, modifier = cell,
+                    )
+                }
+            }
+            ActionTile(
+                Icons.Default.PersonAdd, "Add people", onClick = onPeople, modifier = cell,
+                badge = if (meeting) state.waiting.size else 0,
+            )
+            ActionTile(Icons.Default.PictureInPictureAlt, "Minimize", onClick = onMinimize, modifier = cell)
+        }
+        Spacer(Modifier.height(6.dp))
+        Box(
+            Modifier.padding(horizontal = 20.dp).fillMaxWidth().height(50.dp)
+                .clip(RoundedCornerShape(16.dp)).background(LeaveRed).clickable(onClick = onLeave),
+            contentAlignment = Alignment.Center,
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.CallEnd, null, tint = Color.White)
+                Spacer(Modifier.width(8.dp))
+                Text(if (meeting) "Leave meeting" else "Leave call", color = Color.White, fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ActionTile(
+    icon: ImageVector,
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    active: Boolean = false,
+    badge: Int = 0,
+) {
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(18.dp))
+            .background(if (active) DilarionRed.copy(alpha = 0.2f) else Card)
+            .border(1.dp, if (active) DilarionRed.copy(alpha = 0.55f) else Line, RoundedCornerShape(18.dp))
+            .clickable(onClick = onClick)
+            .padding(vertical = 16.dp, horizontal = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box {
+            Icon(icon, null, tint = if (active) SoftRed else TextMain, modifier = Modifier.size(26.dp))
+            if (badge > 0) {
+                Box(
+                    Modifier.align(Alignment.TopEnd).offset(x = 10.dp, y = (-6).dp)
+                        .size(18.dp).clip(CircleShape).background(DilarionRed),
+                    contentAlignment = Alignment.Center,
+                ) { Text("$badge", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold) }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            label, fontSize = 12.sp, color = TextMain, fontWeight = FontWeight.Medium,
+            maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
+        )
+    }
+}
+
+@Composable
+private fun SmallButton(text: String, onClick: () -> Unit, primary: Boolean = false, danger: Boolean = false, enabled: Boolean = true) {
+    val bg = when {
+        primary -> DilarionRed
+        danger -> LeaveRed.copy(alpha = 0.16f)
+        else -> Color.White.copy(alpha = 0.08f)
+    }
+    Text(
+        text,
+        color = when {
+            danger -> SoftRed
+            else -> Color.White
+        },
+        fontSize = 12.sp, fontWeight = FontWeight.Bold,
+        modifier = Modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(if (enabled) bg else bg.copy(alpha = 0.4f))
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 7.dp),
+    )
+}
+
+@Composable
+private fun PrimaryButton(text: String, onClick: () -> Unit, enabled: Boolean, modifier: Modifier = Modifier) {
+    Box(
+        modifier
+            .height(48.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(if (enabled) DilarionRed else DilarionRed.copy(alpha = 0.4f))
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 18.dp),
+        contentAlignment = Alignment.Center,
+    ) { Text(text, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp) }
+}
+
+@Composable
+private fun Avatar(name: String, size: Dp = 34.dp, highlighted: Boolean = true) {
+    Box(
+        Modifier.size(size).clip(CircleShape).background(
+            if (highlighted) Brush.linearGradient(listOf(DilarionRed, Color(0xFF6E1A12)))
+            else SolidColor(Color(0xFF3A2C2B)),
+        ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            name.take(1).uppercase(), color = Color.White, fontWeight = FontWeight.Bold,
+            fontSize = (size.value * 0.4f).sp,
+        )
+    }
+}
+
+@Composable
+private fun DarkField(value: String, onChange: (String) -> Unit, placeholder: String, modifier: Modifier = Modifier, leading: ImageVector? = null) {
+    Row(
+        modifier
+            .clip(RoundedCornerShape(14.dp))
+            .background(Color(0xFF0F0B0B))
+            .border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(14.dp))
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (leading != null) {
+            Icon(leading, null, tint = TextMuted, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+        }
+        Box(Modifier.weight(1f)) {
+            if (value.isEmpty()) Text(placeholder, color = TextMuted, fontSize = 14.sp)
+            BasicTextField(
+                value = value,
+                onValueChange = onChange,
+                singleLine = true,
+                textStyle = TextStyle(color = TextMain, fontSize = 14.sp),
+                cursorBrush = SolidColor(DilarionRed),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+}
+
 @Composable
 private fun ParticipantsSheet(
     state: GalleryUiState,
-    conferenceId: Int,
     onDismiss: () -> Unit,
     onSearchChange: (String) -> Unit,
     onInvite: (String) -> Unit,
@@ -434,71 +719,234 @@ private fun ParticipantsSheet(
             it.username.contains(state.addSearch, ignoreCase = true)
     }
 
-    ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
+    DarkSheet(onDismiss) {
+        SheetHeader("People", "${state.tiles.size} in this ${if (state.isAdHocCall) "call" else "meeting"}")
+        Column(Modifier.fillMaxWidth().heightIn(max = 560.dp).verticalScroll(rememberScrollState())) {
             if (!state.isAdHocCall && state.waiting.isNotEmpty()) {
-                Text(
-                    "Waiting to join (${state.waiting.size})",
-                    color = Color(0xFFEF4444),
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
-                )
+                SectionLabel("Waiting to join · ${state.waiting.size}", SoftRed)
                 state.waiting.forEach { guest ->
                     Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
+                        Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text(guest.username, modifier = Modifier.weight(1f))
-                        TextButton(onClick = { onAdmit(guest.userId) }, enabled = state.admitting == null) {
-                            Text("Admit")
-                        }
-                        TextButton(onClick = { onDeny(guest.userId) }, enabled = state.admitting == null) {
-                            Text("Deny")
-                        }
+                        Avatar(guest.username, highlighted = false)
+                        Spacer(Modifier.width(12.dp))
+                        Text(guest.username, fontSize = 14.sp, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        SmallButton("Deny", { onDeny(guest.userId) }, enabled = state.admitting == null)
+                        Spacer(Modifier.width(6.dp))
+                        SmallButton("Admit", { onAdmit(guest.userId) }, primary = true, enabled = state.admitting == null)
                     }
                 }
-                Divider(modifier = Modifier.padding(vertical = 10.dp))
             }
-            Text(
-                "Participants (${state.tiles.size})",
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
-            )
+
+            SectionLabel("In the ${if (state.isAdHocCall) "call" else "meeting"}")
             state.tiles.forEach { tile ->
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                    Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(tile.displayName + if (tile.isLocal) " (you)" else "")
-                    if (!tile.micOn) Text("muted", color = Color.Gray, fontSize = 12.sp)
+                    Avatar(tile.displayName)
+                    Spacer(Modifier.width(12.dp))
+                    Text(
+                        tile.displayName + if (tile.isLocal) " (You)" else "",
+                        fontSize = 14.sp, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
+                    if (tile.isSpeaking) Box(Modifier.size(8.dp).clip(CircleShape).background(Speaking))
+                    if (!tile.micOn) {
+                        Spacer(Modifier.width(8.dp))
+                        Icon(Icons.Default.MicOff, "Muted", tint = TextMuted, modifier = Modifier.size(18.dp))
+                    }
                 }
             }
-            Divider(modifier = Modifier.padding(vertical = 10.dp))
-            OutlinedTextField(
-                value = state.addSearch,
-                onValueChange = onSearchChange,
-                label = { Text("Add people to this call") },
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
-                singleLine = true,
+
+            SectionLabel("Add people")
+            DarkField(
+                value = state.addSearch, onChange = onSearchChange, placeholder = "Search by name",
+                leading = Icons.Default.Search, modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
             )
             state.addError?.let {
-                Text(it, color = Color(0xFFEF4444), fontSize = 12.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp))
+                Text(it, color = SoftRed, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp))
             }
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(6.dp))
             invitable.forEach { user: UserInfo ->
                 val username = user.username ?: return@forEach
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                    Modifier.fillMaxWidth()
+                        .clickable(enabled = state.inviting == null) { onInvite(username) }
+                        .padding(horizontal = 20.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(username)
-                    TextButton(onClick = { onInvite(username) }, enabled = state.inviting == null) {
-                        Text(if (state.inviting == username) "Inviting…" else "Invite")
+                    Avatar(username, highlighted = false)
+                    Spacer(Modifier.width(12.dp))
+                    Text(username, fontSize = 14.sp, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        if (state.inviting == username) "Inviting…" else "Invite",
+                        color = SoftRed, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                    )
+                }
+            }
+            if (state.addSearch.isNotEmpty() && invitable.isEmpty()) {
+                Text(
+                    "No one matches “${state.addSearch}”", color = TextMuted, fontSize = 13.sp,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun BreakoutSheet(
+    state: GalleryUiState,
+    onDismiss: () -> Unit,
+    onAuto: (Int) -> Unit,
+    onManual: (List<BreakoutGroupInput>) -> Unit,
+) {
+    val others = remember(state.tiles) { state.tiles.filter { !it.isLocal } }
+    val maxRooms = maxOf(2, state.tiles.size)
+    var numRooms by remember { mutableStateOf(2) }
+    var groups by remember {
+        mutableStateOf(
+            if (others.size >= 2) listOf("Room 1" to setOf<String>(), "Room 2" to setOf<String>())
+            else emptyList()
+        )
+    }
+    val assigned = groups.flatMap { it.second }.toSet()
+    val unassigned = others.count { it.identity !in assigned }
+
+    DarkSheet(onDismiss) {
+        SheetHeader(
+            "Breakout rooms",
+            "Split people into smaller groups. Bring everyone back any time.",
+            Icons.Default.CallSplit,
+        )
+        Column(
+            Modifier.fillMaxWidth().heightIn(max = 600.dp).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Spacer(Modifier.height(2.dp))
+            // Quick start
+            Column(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Card)
+                    .border(1.dp, Line, RoundedCornerShape(18.dp)).padding(16.dp),
+            ) {
+                Text("Shuffle everyone", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                Text("We split people evenly at random.", color = TextMuted, fontSize = 12.sp)
+                Spacer(Modifier.height(12.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        Modifier.clip(RoundedCornerShape(12.dp)).border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(12.dp)),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        IconButton(onClick = { numRooms = (numRooms - 1).coerceAtLeast(2) }, modifier = Modifier.size(44.dp)) {
+                            Icon(Icons.Default.Remove, "Fewer rooms", tint = TextMain)
+                        }
+                        Text("$numRooms", fontWeight = FontWeight.Bold, fontSize = 16.sp, modifier = Modifier.widthIn(min = 28.dp), textAlign = TextAlign.Center)
+                        IconButton(onClick = { numRooms = (numRooms + 1).coerceAtMost(maxRooms) }, modifier = Modifier.size(44.dp)) {
+                            Icon(Icons.Default.Add, "More rooms", tint = TextMain)
+                        }
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    PrimaryButton(
+                        if (state.breakoutBusy) "Opening…" else "Open $numRooms rooms",
+                        onClick = { onAuto(numRooms) },
+                        enabled = !state.breakoutBusy && others.isNotEmpty(),
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "OR CHOOSE WHO GOES WHERE", color = TextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp, modifier = Modifier.weight(1f),
+                )
+                if (others.isNotEmpty()) {
+                    Text(if (unassigned == 0) "Everyone placed" else "$unassigned not placed", color = TextMuted, fontSize = 12.sp)
+                }
+            }
+            if (others.isEmpty()) {
+                Text(
+                    "Rooms need at least one other person in the meeting.",
+                    color = TextMuted, fontSize = 13.sp, textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Card).padding(16.dp),
+                )
+            }
+
+            groups.forEachIndexed { gi, (name, members) ->
+                Column(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Card)
+                        .border(1.dp, Line, RoundedCornerShape(18.dp)).padding(14.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        BasicTextField(
+                            value = name,
+                            onValueChange = { v -> groups = groups.toMutableList().also { it[gi] = v to members } },
+                            singleLine = true,
+                            textStyle = TextStyle(color = TextMain, fontSize = 15.sp, fontWeight = FontWeight.Bold),
+                            cursorBrush = SolidColor(DilarionRed),
+                            modifier = Modifier.weight(1f),
+                        )
+                        Text(
+                            "${members.size} ${if (members.size == 1) "person" else "people"}",
+                            color = TextMuted, fontSize = 12.sp,
+                        )
+                        if (groups.size > 1) {
+                            IconButton(
+                                onClick = { groups = groups.filterIndexed { i, _ -> i != gi } },
+                                modifier = Modifier.size(32.dp),
+                            ) { Icon(Icons.Default.Close, "Remove room", tint = TextMuted, modifier = Modifier.size(16.dp)) }
+                        }
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        others.forEach { tile ->
+                            val checked = members.contains(tile.identity)
+                            Row(
+                                Modifier
+                                    .clip(RoundedCornerShape(50))
+                                    .background(if (checked) DilarionRed.copy(alpha = 0.25f) else Color.White.copy(alpha = 0.05f))
+                                    .border(
+                                        1.dp,
+                                        if (checked) DilarionRed.copy(alpha = 0.7f) else Color.White.copy(alpha = 0.14f),
+                                        RoundedCornerShape(50),
+                                    )
+                                    .clickable {
+                                        val next = if (checked) members - tile.identity else members + tile.identity
+                                        groups = groups.toMutableList().also { it[gi] = name to next }
+                                    }
+                                    .padding(start = 4.dp, end = 12.dp, top = 4.dp, bottom = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Avatar(tile.displayName, size = 24.dp, highlighted = checked)
+                                Spacer(Modifier.width(6.dp))
+                                Text(tile.displayName, fontSize = 13.sp, color = if (checked) Color.White else TextMain)
+                            }
+                        }
                     }
                 }
             }
+
+            Box(
+                Modifier.fillMaxWidth().height(46.dp).clip(RoundedCornerShape(14.dp))
+                    .border(1.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(14.dp))
+                    .clickable { groups = groups + ("Room ${groups.size + 1}" to emptySet()) },
+                contentAlignment = Alignment.Center,
+            ) { Text("+ Add a room", color = TextMuted, fontWeight = FontWeight.SemiBold) }
+
+            state.breakoutError?.let { Text(it, color = SoftRed, fontSize = 12.sp) }
+
+            PrimaryButton(
+                if (state.breakoutBusy) "Opening…" else "Open these rooms",
+                onClick = { onManual(groups.map { (n, u) -> BreakoutGroupInput(n, u.toList()) }) },
+                enabled = !state.breakoutBusy && groups.any { it.second.isNotEmpty() },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(6.dp))
         }
     }
 }
