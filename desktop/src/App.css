@@ -526,19 +526,19 @@ input  { font-family: inherit; outline: none; }
     align-items: flex-start !important;
   }
 
-  .gallery-toolbar > span {
+  .gallery-toolbar > .mtg-title {
     min-width: 0 !important;
     flex: 1 !important;
     flex-wrap: wrap !important;
   }
 
-  .gallery-toolbar > div {
+  .gallery-toolbar > .mtg-iconbar {
     max-width: 52vw !important;
     overflow-x: auto !important;
     scrollbar-width: none;
   }
 
-  .gallery-toolbar > div::-webkit-scrollbar { display: none; }
+  .gallery-toolbar > .mtg-iconbar::-webkit-scrollbar { display: none; }
 
   .gallery-two-up,
   .gallery-stage {
@@ -557,7 +557,6 @@ input  { font-family: inherit; outline: none; }
 
   .gallery-controls {
     max-width: 100vw !important;
-    justify-content: flex-start !important;
     overflow-x: auto !important;
     padding: 10px 12px max(12px, env(safe-area-inset-bottom)) !important;
     scrollbar-width: none;

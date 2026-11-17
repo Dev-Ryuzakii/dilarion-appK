@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import './meeting.css';
 import { CameraIcon } from './Icons';
 
 // Pre-join device setup — matches Meet/Teams: preview your own mic/camera and
@@ -59,96 +60,68 @@ export default function MeetingLobby({
 
   return (
     <div
-      className="meeting-lobby"
+      className="meeting-lobby mtg-scope"
       style={{
         position: 'fixed', inset: 0, zIndex: 900,
-        background: '#0b0b10',
-        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-        gap: 20, color: '#fff', padding: 24,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        color: '#fff', padding: 24, overflowY: 'auto',
       }}
     >
-      <div style={{ textAlign: 'center' }}>
-        <div style={{ fontSize: '1.1rem', fontWeight: 800 }}>{title}</div>
-        {subtitle && <div style={{ fontSize: '0.82rem', color: 'rgba(255,255,255,0.6)', marginTop: 4 }}>{subtitle}</div>}
-      </div>
-
-      <div
-        style={{
-          position: 'relative', width: 420, maxWidth: '90vw', aspectRatio: '16/9',
-          borderRadius: 16, overflow: 'hidden', background: '#1a1a22',
-        }}
-      >
-        {camOn ? (
-          <video ref={videoRef} autoPlay muted playsInline style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-        ) : (
-          <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <div style={{
-              width: 64, height: 64, borderRadius: '50%', background: 'var(--accent, #6d5efc)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}>
-              <CameraIcon size={28} color="#fff" />
+      <div className="mtg-lobby-card">
+        <div className="mtg-tile mtg-preview">
+          {camOn ? (
+            <video ref={videoRef} autoPlay muted playsInline style={{ width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(-1)' }} />
+          ) : (
+            <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'center', justifyContent: 'center' }}>
+              <div className="mtg-avatar" style={{ width: 76, height: 76, fontSize: '1.6rem' }}>
+                {displayName.trim() ? displayName.trim().slice(0, 1).toUpperCase() : <CameraIcon size={28} color="#fff" />}
+              </div>
+              <span className="mtg-sheet-sub">Camera is off</span>
             </div>
+          )}
+          {error && (
+            <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, textAlign: 'center', fontSize: '0.8rem', color: '#ff8a80', background: 'rgba(10,8,8,0.72)' }}>
+              {error}
+            </div>
+          )}
+          <div className="mtg-preview-ctrls">
+            <button className={`mtg-ctrl${micOn ? '' : ' off'}`} onClick={() => setMicOn(v => !v)} title={micOn ? 'Mute' : 'Unmute'}>
+              {micOn ? <MicIcon /> : <MicOffIcon />}
+            </button>
+            <button className={`mtg-ctrl${camOn ? '' : ' off'}`} onClick={() => setCamOn(v => !v)} title={camOn ? 'Stop video' : 'Start video'}>
+              {camOn ? <VideoIcon /> : <VideoOffIcon />}
+            </button>
           </div>
-        )}
-        {error && (
-          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, textAlign: 'center', fontSize: '0.78rem', color: '#ef4444', background: 'rgba(0,0,0,0.6)' }}>
-            {error}
+        </div>
+
+        <div className="mtg-lobby-side">
+          <span className="mtg-eyebrow">Ready to join?</span>
+          <div className="mtg-lobby-title">{title}</div>
+          {subtitle && <div className="mtg-sheet-sub" style={{ marginTop: -6 }}>{subtitle}</div>}
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 6 }}>
+            <span className="mtg-section-label">Your name in this call</span>
+            <input
+              className="mtg-input"
+              value={displayName}
+              onChange={e => setDisplayName(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') handleJoin(); }}
+              placeholder="Add your name"
+              maxLength={50}
+            />
+          </label>
+          <span className="mtg-sheet-sub">
+            {micOn ? 'Mic on' : 'Mic off'} · {camOn ? 'camera on' : 'camera off'}
+          </span>
+          <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
+            <button className="mtg-btn big" onClick={onCancel}>Cancel</button>
+            <button className="mtg-btn big primary" style={{ flex: 1 }} onClick={handleJoin}>Join now</button>
           </div>
-        )}
-      </div>
-
-      <div style={{ display: 'flex', gap: 14 }}>
-        <button onClick={() => setMicOn(v => !v)} title={micOn ? 'Mute' : 'Unmute'} style={ctrlBtnStyle(micOn)}>
-          {micOn ? <MicIcon /> : <MicOffIcon />}
-        </button>
-        <button onClick={() => setCamOn(v => !v)} title={camOn ? 'Stop Video' : 'Start Video'} style={ctrlBtnStyle(camOn)}>
-          {camOn ? <VideoIcon /> : <VideoOffIcon />}
-        </button>
-      </div>
-
-      <input
-        value={displayName}
-        onChange={e => setDisplayName(e.target.value)}
-        placeholder="Your name in this call"
-        maxLength={50}
-        style={{
-          width: 260, background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)',
-          borderRadius: 10, color: '#fff', fontSize: '0.85rem', padding: '9px 12px', textAlign: 'center',
-        }}
-      />
-
-      <div style={{ display: 'flex', gap: 12 }}>
-        <button
-          onClick={onCancel}
-          style={{ background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: 10, padding: '10px 20px', color: '#fff', fontSize: '0.85rem', cursor: 'pointer' }}
-        >
-          Cancel
-        </button>
-        <button
-          onClick={handleJoin}
-          style={{ background: 'var(--accent, #6d5efc)', border: 'none', borderRadius: 10, padding: '10px 24px', color: '#fff', fontSize: '0.85rem', fontWeight: 700, cursor: 'pointer' }}
-        >
-          Join now
-        </button>
+        </div>
       </div>
     </div>
   );
 }
 
-function ctrlBtnStyle(active: boolean): React.CSSProperties {
-  return {
-    background: active ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.05)',
-    border: '1px solid rgba(255,255,255,0.2)',
-    borderRadius: '50%',
-    color: '#fff',
-    width: 44,
-    height: 44,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    cursor: 'pointer',
-  };
-}
 
 function MicIcon() {
   return (

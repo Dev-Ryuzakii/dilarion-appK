@@ -16,6 +16,7 @@ import WhiteboardModal from './WhiteboardModal';
 import MeetingChatPanel from './MeetingChatPanel';
 import { userMessage } from '../services/errors';
 import MeetingNotesPanel from './MeetingNotesPanel';
+import './meeting.css';
 
 // Group video via self-hosted LiveKit — the SFU room every group call (2+
 // people) now renders through, replacing the old mesh-WebRTC conference path
@@ -758,41 +759,43 @@ export default function GalleryView({
         <MeetingNotesPanel token={token} recordingId={notesRecordingId} onClose={() => setNotesOpen(false)} />
       )}
       <div className="gallery-toolbar" style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16,
         padding: '14px 20px', flexShrink: 0,
       }}>
-        <span style={{ color: '#fff', fontWeight: 700, fontSize: '0.95rem', display: 'flex', alignItems: 'center', gap: 8 }}>
-          {inBreakoutName
-            ? `Breakout: ${inBreakoutName}`
+        <div className="mtg-title">
+          <span className="mtg-title-name">
+            {inBreakoutName
+              ? inBreakoutName
               : adHoc
-              ? `${(sessionCallType ?? (initialCamOn ? 'video' : 'voice')) === 'voice' ? 'Voice call' : 'Video call'}`
-              : (title || 'Group Video')} {tileList.length > 0 && `· ${tileList.length}`}
-          {inBreakoutName && (
-            <span style={{ background: 'rgba(124,58,237,0.25)', border: '1px solid rgba(124,58,237,0.5)', borderRadius: 20, padding: '2px 10px', fontSize: '0.68rem', color: '#c4b5fd', fontWeight: 700 }}>
-              in breakout room
+                ? `${(sessionCallType ?? (initialCamOn ? 'video' : 'voice')) === 'voice' ? 'Voice call' : 'Video call'}`
+                : (title || 'Meeting')}
+          </span>
+          <span className="mtg-meta">
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <span className="mtg-live-dot" />
+              {tileList.length} {tileList.length === 1 ? 'person' : 'people'}
             </span>
-          )}
-          {recording && (
-            <span style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.4)', borderRadius: 20, padding: '2px 10px', fontSize: '0.7rem', color: '#ef4444', fontWeight: 700 }}>
-              <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#ef4444' }} />
-              {transcribing ? 'Recording and transcribing' : 'REC'}
-            </span>
-          )}
-          {notesRecordingId != null && (
-            <button onClick={() => setNotesOpen(true)} style={{ marginLeft: 8, background: 'rgba(255,255,255,0.1)', border: 'none', color: '#fff', borderRadius: 20, padding: '2px 10px', fontSize: '0.7rem', cursor: 'pointer' }}>Notes</button>
-          )}
-        </span>
-        <div style={{ display: 'flex', gap: 8 }}>
+            {inBreakoutName && <span className="mtg-chip room">Breakout room</span>}
+            {recording && (
+              <span className="mtg-chip rec"><i />{transcribing ? 'Recording · transcribing' : 'Recording'}</span>
+            )}
+            {notesRecordingId != null && (
+              <button className="mtg-chip" onClick={() => setNotesOpen(true)}>Notes</button>
+            )}
+          </span>
+        </div>
+        <div className="mtg-iconbar">
           {showMeetingChrome && isHost && (
             <button
+              className={`mtg-icon-btn${recording ? ' on' : ''}`}
               onClick={toggleRecording}
               disabled={recordingBusy}
               title={recording ? 'Stop recording' : 'Start recording'}
-              style={{ background: recording ? 'rgba(239,68,68,0.25)' : 'rgba(255,255,255,0.1)', border: 'none', borderRadius: 8, color: '#fff', width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: recordingBusy ? 'wait' : 'pointer', opacity: recordingBusy ? 0.6 : 1 }}
             ><RecordIcon active={recording} /></button>
           )}
           {showMeetingChrome && isHost && (
             <button
+              className={`mtg-icon-btn${breakoutActive ? ' on' : ''}`}
               onClick={() => {
                 if (breakoutActive) { handleEndBreakout(); return; }
                 setBreakoutManualGroups(tileList.filter(t => !t.isScreenShare).length >= 2 ? [{ name: 'Room 1', usernames: [] }, { name: 'Room 2', usernames: [] }] : []);
@@ -801,60 +804,36 @@ export default function GalleryView({
               }}
               disabled={breakoutBusy}
               title={breakoutActive ? 'End breakout rooms' : 'Breakout rooms'}
-              style={{ background: breakoutActive ? 'rgba(239,68,68,0.35)' : 'rgba(255,255,255,0.1)', border: 'none', borderRadius: 8, color: '#fff', width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: breakoutBusy ? 'wait' : 'pointer' }}
             ><BreakoutIcon /></button>
           )}
-          <button
-            onClick={openParticipants}
-            title="Participants"
-            style={{ position: 'relative', background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: 8, color: '#fff', width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
-          >
+          <button className={`mtg-icon-btn${showParticipants ? ' on' : ''}`} onClick={openParticipants} title="Participants">
             <PeopleIcon />
-            {showMeetingChrome && waiting.length > 0 && (
-              <span style={{
-                position: 'absolute', top: -5, right: -5, minWidth: 16, height: 16, borderRadius: 8,
-                background: '#ef4444', color: '#fff', fontSize: '0.65rem', fontWeight: 700,
-                display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 4px',
-              }}>
-                {waiting.length}
-              </span>
-            )}
+            {showMeetingChrome && waiting.length > 0 && <span className="mtg-badge">{waiting.length}</span>}
           </button>
           {showMeetingChrome && (
-          <button
-            onClick={() => setShowChat(true)}
-            title="Chat"
-            style={{ background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: 8, color: '#fff', width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
-          ><ChatIcon /></button>
+            <button className={`mtg-icon-btn${showChat ? ' on' : ''}`} onClick={() => setShowChat(true)} title="Chat"><ChatIcon /></button>
           )}
           {showMeetingChrome && (
-          <button
-            onClick={toggleWhiteboard}
-            title={
-              whiteboardOwner === myUsername ? 'Stop sharing whiteboard'
-              : whiteboardOwner ? `${whiteboardOwner} is sharing the whiteboard`
-              : 'Share whiteboard'
-            }
-            style={{ background: whiteboardOwner ? 'rgba(109,94,252,0.35)' : 'rgba(255,255,255,0.1)', border: 'none', borderRadius: 8, color: '#fff', width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
-          ><WhiteboardIcon /></button>
+            <button
+              className={`mtg-icon-btn${whiteboardOwner ? ' on' : ''}`}
+              onClick={toggleWhiteboard}
+              title={
+                whiteboardOwner === myUsername ? 'Stop sharing whiteboard'
+                : whiteboardOwner ? `${whiteboardOwner} is sharing the whiteboard`
+                : 'Share whiteboard'
+              }
+            ><WhiteboardIcon /></button>
           )}
           <button
+            className={`mtg-icon-btn${(controllingUsername || controlledByUsername || showControlPanel) ? ' on' : ''}`}
             onClick={() => setShowControlPanel(v => !v)}
             title="Remote control"
-            style={{ background: (controllingUsername || controlledByUsername) ? 'rgba(239,68,68,0.35)' : 'rgba(255,255,255,0.1)', border: 'none', borderRadius: 8, color: '#fff', width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
           ><RemoteControlIcon /></button>
+          <span className="mtg-iconbar-sep" />
           {onMinimize && (
-            <button
-              onClick={onMinimize}
-              title="Minimize"
-              style={{ background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: 8, color: '#fff', width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
-            ><MinimizeIcon /></button>
+            <button className="mtg-icon-btn" onClick={onMinimize} title="Minimize"><MinimizeIcon /></button>
           )}
-          <button
-            onClick={leave}
-            title="Close"
-            style={{ background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: 8, color: '#fff', width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
-          ><CloseIcon /></button>
+          <button className="mtg-icon-btn" onClick={leave} title="Close"><CloseIcon /></button>
         </div>
       </div>
 
@@ -888,7 +867,7 @@ export default function GalleryView({
       {/* Incoming request — interrupts regardless of what else is open */}
       {pendingControlRequestFrom && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 3000, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: '#1e1e24', border: '1px solid #2a2a32', borderRadius: 14, padding: 22, width: 320, textAlign: 'center' }}>
+          <div style={{ background: '#171212', border: '1px solid rgba(255,255,255,0.14)', borderRadius: 14, padding: 22, width: 320, textAlign: 'center' }}>
             <div style={{ color: '#fff', fontSize: '0.95rem', fontWeight: 700, marginBottom: 6 }}>Control request</div>
             <div style={{ color: '#9ca3af', fontSize: '0.82rem', marginBottom: 18 }}>
               <strong style={{ color: '#fff' }}>{pendingControlRequestFrom}</strong> wants to control your screen. They'll be able to move your mouse and type until you revoke it.
@@ -909,7 +888,7 @@ export default function GalleryView({
 
       {/* Request-control panel — pick who to request control from */}
       {showControlPanel && (
-        <div style={{ position: 'absolute', top: 56, right: 16, zIndex: 2500, width: 260, background: '#1e1e24', border: '1px solid #2a2a32', borderRadius: 12, padding: 12, boxShadow: '0 12px 32px rgba(0,0,0,0.5)' }}>
+        <div style={{ position: 'absolute', top: 64, right: 20, zIndex: 2500, width: 260, background: '#171212', border: '1px solid rgba(255,255,255,0.14)', borderRadius: 12, padding: 12, boxShadow: '0 12px 32px rgba(0,0,0,0.5)' }}>
           <div style={{ color: '#fff', fontSize: '0.82rem', fontWeight: 700, marginBottom: 8 }}>Remote control</div>
           {controlError && <div style={{ color: '#fca5a5', fontSize: '0.72rem', marginBottom: 8 }}>{controlError}</div>}
           {controllingUsername ? (
@@ -955,7 +934,7 @@ export default function GalleryView({
         // Meet/Teams' adaptive layout, not a uniform grid.
         if (tileList.length <= 1) {
           return tileList[0] ? (
-            <div style={{ flex: 1, padding: 16, minHeight: 0 }}>
+            <div style={{ flex: 1, padding: '4px 20px 8px', minHeight: 0 }}>
               <TileCard
                 tile={tileList[0]} videoRefs={videoRefs} trackRefs={trackRefs} fill
                 capturingControl={tileList[0].identity === controllingUsername}
@@ -967,7 +946,7 @@ export default function GalleryView({
 
         if (tileList.length === 2) {
           return (
-            <div className="gallery-two-up" style={{ flex: 1, display: 'flex', gap: 10, padding: 16, minHeight: 0 }}>
+            <div className="gallery-two-up" style={{ flex: 1, display: 'flex', gap: 12, padding: '4px 20px 8px', minHeight: 0 }}>
               {tileList.map(tile => (
                 <div key={tile.identity} style={{ flex: 1, minWidth: 0 }}>
                   <TileCard
@@ -995,10 +974,10 @@ export default function GalleryView({
         const sideTiles = tileList.filter(t => t.identity !== mainTile?.identity);
 
         return (
-          <div className="gallery-stage" style={{ flex: 1, display: 'flex', gap: 10, padding: 16, overflow: 'hidden' }}>
+          <div className="gallery-stage" style={{ flex: 1, display: 'flex', gap: 12, padding: '4px 20px 8px', overflow: 'hidden' }}>
             {sideTiles.length > 0 && (
               <div className="gallery-strip" style={{
-                width: 150, flexShrink: 0, display: 'flex', flexDirection: 'column',
+                width: 180, flexShrink: 0, display: 'flex', flexDirection: 'column',
                 gap: 10, overflowY: 'auto',
               }}>
                 {sideTiles.map(tile => (
@@ -1047,7 +1026,7 @@ export default function GalleryView({
       {forceMutedNote && (
         <div style={{
           position: 'fixed', top: 18, left: '50%', transform: 'translateX(-50%)', zIndex: 970,
-          background: '#1a1a22', color: '#fff', border: '1px solid rgba(255,255,255,0.14)',
+          background: '#171212', color: '#fff', border: '1px solid rgba(255,255,255,0.14)',
           borderRadius: 10, padding: '9px 16px', fontSize: '0.85rem',
           boxShadow: '0 8px 24px rgba(0,0,0,0.45)',
         }}>{forceMutedNote}</div>
@@ -1064,82 +1043,99 @@ export default function GalleryView({
       </div>
 
       {!connecting && !error && (
-        <div className="gallery-controls" style={{ position: 'relative', display: 'flex', justifyContent: 'center', gap: 14, padding: '16px 0 24px' }}>
-          {showReactionPicker && (
-            <div
-              style={{
-                position: 'absolute', bottom: '100%', marginBottom: 8, left: '50%', transform: 'translateX(-50%)',
-                background: '#1a1a22', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 12,
-                padding: '8px 10px', display: 'flex', gap: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
-              }}
-            >
-              {REACTION_EMOJIS.map(e => (
-                <button
-                  key={e}
-                  onClick={() => sendReaction(e)}
-                  style={{ background: 'transparent', border: 'none', fontSize: '1.3rem', cursor: 'pointer', padding: 2 }}
-                >
-                  {e}
-                </button>
-              ))}
-            </div>
-          )}
-          <button onClick={toggleMic} title={micOn ? 'Mute' : 'Unmute'} style={ctrlBtnStyle(micOn)}>{micOn ? <MicIcon /> : <MicOffIcon />}</button>
-          <button onClick={toggleCam} title={camOn ? 'Stop Video' : 'Start Video'} style={ctrlBtnStyle(camOn)}>{camOn ? <VideoIcon /> : <VideoOffIcon />}</button>
-          <button onClick={toggleScreenShare} title={screenSharing ? 'Stop sharing' : 'Share screen'} style={ctrlBtnStyle(!screenSharing)}><ScreenShareIcon /></button>
-          <button onClick={() => setShowReactionPicker(v => !v)} title="React" style={ctrlBtnStyle(true)}><ReactionIcon /></button>
-          <button onClick={openParticipants} title="Add people" style={ctrlBtnStyle(true)}><PersonAddIcon /></button>
-          <button onClick={leave} title="Leave" style={{ ...ctrlBtnStyle(false), background: '#ef4444' }}><HangupIcon /></button>
+        <div className="gallery-controls" style={{ position: 'relative', display: 'flex', justifyContent: 'center', padding: '10px 16px 22px' }}>
+          <div className="mtg-dock" style={{ position: 'relative' }}>
+            {showReactionPicker && (
+              <div className="mtg-reactions">
+                {REACTION_EMOJIS.map(e => (
+                  <button key={e} onClick={() => sendReaction(e)}>{e}</button>
+                ))}
+              </div>
+            )}
+            <button className={`mtg-ctrl${micOn ? '' : ' off'}`} onClick={toggleMic} title={micOn ? 'Mute' : 'Unmute'}>{micOn ? <MicIcon /> : <MicOffIcon />}</button>
+            <button className={`mtg-ctrl${camOn ? '' : ' off'}`} onClick={toggleCam} title={camOn ? 'Stop video' : 'Start video'}>{camOn ? <VideoIcon /> : <VideoOffIcon />}</button>
+            <button className={`mtg-ctrl${screenSharing ? ' active' : ''}`} onClick={toggleScreenShare} title={screenSharing ? 'Stop sharing' : 'Share screen'}><ScreenShareIcon /></button>
+            <button className={`mtg-ctrl${showReactionPicker ? ' active' : ''}`} onClick={() => setShowReactionPicker(v => !v)} title="React"><ReactionIcon /></button>
+            <button className="mtg-ctrl" onClick={openParticipants} title="Add people"><PersonAddIcon /></button>
+            <span className="mtg-dock-sep" />
+            <button className="mtg-leave" onClick={leave} title="Leave"><HangupIcon /><span>Leave</span></button>
+          </div>
         </div>
       )}
 
-      {showMeetingChrome && showBreakoutPanel && (
+      {showMeetingChrome && showBreakoutPanel && (() => {
+        const people = tileList.filter(t => !t.isScreenShare);
+        const assignable = tileList.filter(t => !t.isLocal && !t.isScreenShare);
+        const maxRooms = Math.max(2, people.length);
+        const assigned = new Set(breakoutManualGroups.flatMap(g => g.usernames));
+        const unassigned = assignable.filter(t => !assigned.has(t.identity)).length;
+        return (
         <div
-          style={{ position: 'fixed', inset: 0, zIndex: 970, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          className="mtg-backdrop"
+          style={{ zIndex: 970 }}
           onClick={e => { if (e.target === e.currentTarget) setShowBreakoutPanel(false); }}
         >
-          <div style={{ width: 420, maxHeight: '80vh', overflowY: 'auto', background: '#16161c', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 14, padding: 20, display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <div style={{ color: '#fff', fontWeight: 700, fontSize: '0.95rem' }}>Breakout Rooms</div>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ color: '#ccc', fontSize: '0.8rem' }}>Auto-shuffle into</span>
-              <input
-                type="number" min={2} max={Math.max(2, tileList.filter(t => !t.isScreenShare).length)}
-                value={breakoutNumRooms}
-                onChange={e => setBreakoutNumRooms(Math.max(2, Number(e.target.value) || 2))}
-                style={{ width: 50, background: '#0f0f14', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 6, color: '#fff', padding: '4px 8px', fontSize: '0.8rem' }}
-              />
-              <span style={{ color: '#ccc', fontSize: '0.8rem' }}>rooms</span>
-              <button
-                onClick={handleStartAutoBreakout}
-                disabled={breakoutBusy}
-                style={{ marginLeft: 'auto', background: 'var(--accent, #6d5efc)', border: 'none', borderRadius: 8, color: '#fff', padding: '6px 12px', fontSize: '0.78rem', fontWeight: 700, cursor: breakoutBusy ? 'wait' : 'pointer' }}
-              >
-                Auto-start
-              </button>
+          <div className="mtg-sheet mtg-modal">
+            <div className="mtg-sheet-head">
+              <div className="mtg-sheet-icon"><BreakoutIcon /></div>
+              <div>
+                <div className="mtg-sheet-title">Breakout rooms</div>
+                <div className="mtg-sheet-sub">Split {people.length} {people.length === 1 ? 'person' : 'people'} into smaller groups. You can bring everyone back any time.</div>
+              </div>
+              <button className="mtg-x" onClick={() => setShowBreakoutPanel(false)} title="Close"><SharedCloseIcon size={15} color="#fff" /></button>
             </div>
 
-            <div style={{ borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: 12 }}>
-              <div style={{ color: '#ccc', fontSize: '0.8rem', marginBottom: 8 }}>Or assign manually:</div>
+            <div className="mtg-sheet-body">
+              <div className="mtg-section-label">Quick start</div>
+              <div className="mtg-card mtg-row" style={{ flexWrap: 'wrap' }}>
+                <div style={{ flex: 1, minWidth: 180 }}>
+                  <div style={{ fontWeight: 700, fontSize: '0.88rem' }}>Shuffle everyone</div>
+                  <div className="mtg-sheet-sub">We split people evenly at random.</div>
+                </div>
+                <div className="mtg-stepper">
+                  <button onClick={() => setBreakoutNumRooms(n => Math.max(2, n - 1))} title="Fewer rooms">−</button>
+                  <span>{breakoutNumRooms}</span>
+                  <button onClick={() => setBreakoutNumRooms(n => Math.min(maxRooms, n + 1))} title="More rooms">+</button>
+                </div>
+                <button className="mtg-btn primary" onClick={handleStartAutoBreakout} disabled={breakoutBusy}>
+                  Open {breakoutNumRooms} rooms
+                </button>
+              </div>
+
+              <div className="mtg-row" style={{ justifyContent: 'space-between' }}>
+                <div className="mtg-section-label">Or choose who goes where</div>
+                {assignable.length > 0 && (
+                  <span className="mtg-sheet-sub" style={{ marginTop: 0 }}>{unassigned === 0 ? 'Everyone has a room' : `${unassigned} not assigned`}</span>
+                )}
+              </div>
+              {assignable.length === 0 && (
+                <div className="mtg-card mtg-sheet-sub" style={{ marginTop: 0, textAlign: 'center' }}>Rooms need at least one other person in the meeting.</div>
+              )}
               {breakoutManualGroups.map((g, gi) => (
-                <div key={gi} style={{ marginBottom: 10 }}>
-                  <input
-                    value={g.name}
-                    onChange={e => setBreakoutManualGroups(prev => prev.map((x, i) => i === gi ? { ...x, name: e.target.value } : x))}
-                    style={{ background: '#0f0f14', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 6, color: '#fff', padding: '4px 8px', fontSize: '0.8rem', marginBottom: 6, width: '100%' }}
-                  />
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                    {tileList.filter(t => !t.isLocal && !t.isScreenShare).map(t => {
+                <div key={gi} className="mtg-card" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <div className="mtg-row">
+                    <input
+                      className="mtg-input bare"
+                      value={g.name}
+                      onChange={e => setBreakoutManualGroups(prev => prev.map((x, i) => i === gi ? { ...x, name: e.target.value } : x))}
+                      aria-label="Room name"
+                    />
+                    <span className="mtg-person-tag" style={{ flexShrink: 0 }}>{g.usernames.length} {g.usernames.length === 1 ? 'person' : 'people'}</span>
+                    {breakoutManualGroups.length > 1 && (
+                      <button
+                        className="mtg-x"
+                        style={{ marginLeft: 0, width: 28, height: 28 }}
+                        title="Remove room"
+                        onClick={() => setBreakoutManualGroups(prev => prev.filter((_, i) => i !== gi))}
+                      ><SharedCloseIcon size={12} color="#fff" /></button>
+                    )}
+                  </div>
+                  <div className="mtg-pills">
+                    {assignable.map(t => {
                       const checked = g.usernames.includes(t.identity);
                       return (
-                        <button
-                          key={t.identity}
-                          onClick={() => toggleManualAssignment(gi, t.identity)}
-                          style={{
-                            background: checked ? 'var(--accent, #6d5efc)' : 'rgba(255,255,255,0.08)',
-                            border: 'none', borderRadius: 14, color: '#fff', padding: '3px 10px', fontSize: '0.72rem', cursor: 'pointer',
-                          }}
-                        >
+                        <button key={t.identity} className={`mtg-pill${checked ? ' on' : ''}`} onClick={() => toggleManualAssignment(gi, t.identity)}>
+                          <span className="mtg-mini-av">{(t.displayName || t.identity).slice(0, 1).toUpperCase()}</span>
                           {t.displayName}
                         </button>
                       );
@@ -1148,28 +1144,25 @@ export default function GalleryView({
                 </div>
               ))}
               <button
+                className="mtg-btn ghost"
                 onClick={() => setBreakoutManualGroups(prev => [...prev, { name: `Room ${prev.length + 1}`, usernames: [] }])}
-                style={{ background: 'transparent', border: 'none', color: 'var(--accent, #6d5efc)', fontSize: '0.78rem', cursor: 'pointer', padding: 0 }}
-              >
-                + Add room
-              </button>
-              <button
-                onClick={handleStartManualBreakout}
-                disabled={breakoutBusy}
-                style={{ display: 'block', marginTop: 10, background: 'var(--accent, #6d5efc)', border: 'none', borderRadius: 8, color: '#fff', padding: '7px 14px', fontSize: '0.8rem', fontWeight: 700, cursor: breakoutBusy ? 'wait' : 'pointer' }}
-              >
-                Start manual rooms
-              </button>
+              >+ Add a room</button>
+              {breakoutError && <span className="mtg-error">{breakoutError}</span>}
             </div>
 
-            {breakoutError && <span style={{ fontSize: '0.75rem', color: '#ef4444' }}>{breakoutError}</span>}
-
-            <button onClick={() => setShowBreakoutPanel(false)} style={{ alignSelf: 'flex-end', background: 'transparent', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 8, color: '#ccc', padding: '6px 14px', fontSize: '0.78rem', cursor: 'pointer' }}>
-              Close
-            </button>
+            <div className="mtg-sheet-foot">
+              <button className="mtg-btn" onClick={() => setShowBreakoutPanel(false)}>Cancel</button>
+              <button
+                className="mtg-btn primary"
+                style={{ marginLeft: 'auto' }}
+                onClick={handleStartManualBreakout}
+                disabled={breakoutBusy || breakoutManualGroups.length === 0}
+              >Open these rooms</button>
+            </div>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {showMeetingChrome && showWhiteboard && (
         <WhiteboardModal
@@ -1194,89 +1187,76 @@ export default function GalleryView({
 
       {showParticipants && (
         <div
-          style={{ position: 'fixed', inset: 0, zIndex: 950, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'flex-end' }}
+          className="mtg-backdrop side"
           onClick={e => { if (e.target === e.currentTarget) setShowParticipants(false); }}
         >
-          <div style={{
-            width: 320, height: '100%', background: '#16161c',
-            display: 'flex', flexDirection: 'column', boxShadow: '-8px 0 30px rgba(0,0,0,0.4)',
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 18px', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
-              <span style={{ color: '#fff', fontWeight: 700, fontSize: '0.9rem' }}>Participants ({tileList.length})</span>
-              <button onClick={() => setShowParticipants(false)} style={{ background: 'transparent', border: 'none', color: '#aaa', cursor: 'pointer', display: 'flex' }}><SharedCloseIcon size={16} color="#aaa" /></button>
+          <div className="mtg-sheet mtg-drawer">
+            <div className="mtg-sheet-head">
+              <div>
+                <div className="mtg-sheet-title">People</div>
+                <div className="mtg-sheet-sub">{tileList.filter(t => !t.isScreenShare).length} in this {adHoc ? 'call' : 'meeting'}</div>
+              </div>
+              <button className="mtg-x" onClick={() => setShowParticipants(false)} title="Close"><SharedCloseIcon size={15} color="#fff" /></button>
             </div>
             {showMeetingChrome && waiting.length > 0 && (
-              <div style={{ padding: '10px 14px', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
-                <span style={{ color: '#ef4444', fontWeight: 700, fontSize: '0.78rem' }}>Waiting to join ({waiting.length})</span>
+              <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--mtg-line)' }}>
+                <div className="mtg-section-label" style={{ color: '#ff9b91', padding: '0 6px 6px' }}>Waiting to join · {waiting.length}</div>
                 {waiting.map(w => (
-                  <div key={w.user_id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 2px', color: '#e8e8ee', fontSize: '0.82rem' }}>
-                    <span style={{ flex: 1 }}>{w.username}</span>
-                    <button
-                      onClick={() => admitGuest(w.user_id)}
-                      disabled={admitting === w.user_id}
-                      style={{ background: 'var(--accent, #6d5efc)', border: 'none', borderRadius: 6, color: '#fff', padding: '4px 10px', fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer' }}
-                    >Admit</button>
-                    <button
-                      onClick={() => denyGuest(w.user_id)}
-                      disabled={admitting === w.user_id}
-                      style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 6, color: '#e8e8ee', padding: '4px 10px', fontSize: '0.72rem', cursor: 'pointer' }}
-                    >Deny</button>
+                  <div key={w.user_id} className="mtg-person">
+                    <span className="mtg-mini-av">{w.username.slice(0, 1).toUpperCase()}</span>
+                    <span className="mtg-person-name">{w.username}</span>
+                    <button className="mtg-btn small" onClick={() => denyGuest(w.user_id)} disabled={admitting === w.user_id}>Deny</button>
+                    <button className="mtg-btn small primary" onClick={() => admitGuest(w.user_id)} disabled={admitting === w.user_id}>Admit</button>
                   </div>
                 ))}
               </div>
             )}
-            <div style={{ padding: '10px 14px', maxHeight: '35%', overflowY: 'auto', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+            <div style={{ padding: '12px 14px', maxHeight: '40%', overflowY: 'auto', borderBottom: '1px solid var(--mtg-line)' }}>
+              <div className="mtg-section-label" style={{ padding: '0 6px 6px' }}>In the {adHoc ? 'call' : 'meeting'}</div>
               {tileList.filter(t => !t.isScreenShare).map(t => (
-                <div key={t.identity} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 2px', color: '#e8e8ee', fontSize: '0.82rem' }}>
-                  <span style={{ flex: 1 }}>{t.displayName}{t.isLocal ? ' (you)' : ''}</span>
-                  {!t.micOn && <span style={{ color: '#aaa', fontSize: '0.72rem' }}>muted</span>}
+                <div key={t.identity} className="mtg-person">
+                  <span className="mtg-mini-av">{(t.displayName || t.identity).slice(0, 1).toUpperCase()}</span>
+                  <span className="mtg-person-name">
+                    {t.displayName}{t.isLocal && <span className="mtg-person-tag"> (You)</span>}
+                  </span>
+                  {t.isSpeaking && <span className="mtg-live-dot" title="Speaking" />}
+                  {!t.micOn && <span className="mtg-person-tag">Muted</span>}
                   {canModerate && !t.isLocal && (
                     <button
+                      className={`mtg-btn small${t.micOn ? ' danger' : ''}`}
                       onClick={() => moderateParticipantMic(t.identity, t.micOn)}
                       title={t.micOn ? `Mute ${t.displayName}` : `Ask ${t.displayName} to unmute`}
-                      style={{
-                        background: t.micOn ? 'rgba(239,68,68,0.15)' : 'rgba(255,255,255,0.08)',
-                        border: '1px solid rgba(255,255,255,0.14)', color: t.micOn ? '#ef9a9a' : '#cfcfe0',
-                        borderRadius: 6, padding: '3px 8px', fontSize: '0.72rem', cursor: 'pointer',
-                      }}
-                    >{t.micOn ? 'Mute' : 'Unmute'}</button>
+                    >{t.micOn ? 'Mute' : 'Ask to unmute'}</button>
                   )}
                 </div>
               ))}
             </div>
-            <div style={{ padding: '12px 14px', flexShrink: 0 }}>
+            <div style={{ padding: '14px 20px 8px', flexShrink: 0 }}>
+              <div className="mtg-section-label" style={{ marginBottom: 8 }}>Add people</div>
               <input
                 autoFocus
+                className="mtg-input"
                 value={addSearch}
                 onChange={e => setAddSearch(e.target.value)}
-                placeholder="Add people to this call"
-                style={{
-                  width: '100%', background: '#0f0f14', border: '1px solid rgba(255,255,255,0.12)',
-                  borderRadius: 8, padding: '8px 10px', color: '#fff', fontSize: '0.8rem',
-                }}
+                placeholder="Search by name"
               />
             </div>
-            {addError && <div style={{ padding: '0 14px 8px', color: '#ef4444', fontSize: '0.75rem' }}>{addError}</div>}
-            <div style={{ flex: 1, overflowY: 'auto', padding: '0 8px 12px' }}>
+            {addError && <div className="mtg-error" style={{ padding: '0 20px 8px' }}>{addError}</div>}
+            <div style={{ flex: 1, overflowY: 'auto', padding: '0 14px 14px' }}>
               {invitable.map(u => (
                 <button
                   key={u.username}
+                  className="mtg-invite-row"
                   onClick={() => invite(u.username)}
                   disabled={inviting === u.username}
-                  style={{
-                    width: '100%', display: 'flex', alignItems: 'center', gap: 8,
-                    background: 'transparent', border: 'none', borderRadius: 8, padding: '8px 8px',
-                    color: '#e8e8ee', fontSize: '0.82rem', cursor: inviting ? 'default' : 'pointer', textAlign: 'left',
-                  }}
                 >
-                  <span style={{ flex: 1 }}>{u.username}</span>
-                  <span style={{ color: 'var(--accent, #6d5efc)', fontSize: '0.75rem', fontWeight: 700 }}>
-                    {inviting === u.username ? 'Inviting…' : 'Invite'}
-                  </span>
+                  <span className="mtg-mini-av" style={{ width: 30, height: 30, fontSize: '0.74rem' }}>{u.username.slice(0, 1).toUpperCase()}</span>
+                  <span className="mtg-person-name">{u.username}</span>
+                  <span className="mtg-invite-cta">{inviting === u.username ? 'Inviting…' : 'Invite'}</span>
                 </button>
               ))}
               {addSearch && invitable.length === 0 && (
-                <div style={{ padding: 10, color: '#888', fontSize: '0.78rem' }}>No matching users</div>
+                <div className="mtg-sheet-sub" style={{ padding: 10 }}>No one matches “{addSearch}”</div>
               )}
             </div>
           </div>
@@ -1307,11 +1287,8 @@ function TileCard({
   const lastMoveSentRef = useRef(0);
   return (
     <div
-      style={{
-        position: 'relative', background: '#1a1a22', borderRadius: 12, overflow: 'hidden',
-        outline: tile.isSpeaking ? '2px solid #25d366' : capturingControl ? '2px solid #ef4444' : 'none',
-        ...(fill ? { height: '100%' } : { aspectRatio: '16/9', flexShrink: 0 }),
-      }}
+      className={`mtg-tile${compact ? ' compact' : ''}${capturingControl ? ' controlling' : tile.isSpeaking ? ' speaking' : ''}`}
+      style={fill ? { height: '100%' } : { aspectRatio: '16/9', flexShrink: 0 }}
     >
       <video
         ref={el => {
@@ -1372,23 +1349,16 @@ function TileCard({
       )}
       {!tile.camOn && (
         <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{
-            width: compact ? 30 : 56, height: compact ? 30 : 56, borderRadius: '50%',
-            background: 'var(--accent, #6d5efc)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            color: '#fff', fontWeight: 700, fontSize: compact ? '0.7rem' : '1.1rem',
+          <div className="mtg-avatar" style={{
+            width: compact ? 34 : 88, height: compact ? 34 : 88,
+            fontSize: compact ? '0.78rem' : '1.9rem',
           }}>
             {tile.displayName.slice(0, 1).toUpperCase()}
           </div>
         </div>
       )}
       {!tile.micOn && !tile.isScreenShare && (
-        <div style={{
-          position: 'absolute', top: 6, right: 6,
-          width: compact ? 16 : 22, height: compact ? 16 : 22, borderRadius: '50%',
-          background: 'rgba(0,0,0,0.55)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}>
+        <div className="mtg-mic-off" style={{ width: compact ? 18 : 26, height: compact ? 18 : 26 }}>
           <svg width={compact ? 9 : 12} height={compact ? 9 : 12} viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round">
             <path d="M1 1l22 22M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V5a3 3 0 0 0-5.94-.6" />
             <path d="M17 16.95A7 7 0 0 1 5 12v-2M12 19v3" />
@@ -1396,12 +1366,8 @@ function TileCard({
         </div>
       )}
       {!compact && (
-        <div style={{
-          position: 'absolute', bottom: 8, left: 10,
-          color: '#fff', fontSize: '0.75rem', fontWeight: 600,
-          textShadow: '0 1px 3px rgba(0,0,0,0.8)',
-        }}>
-          {tile.displayName}{tile.isLocal ? ' (you)' : ''}
+        <div className="mtg-name">
+          {tile.displayName}{tile.isLocal ? ' (You)' : ''}
         </div>
       )}
     </div>
@@ -1411,33 +1377,18 @@ function TileCard({
 const miniPillStyle: React.CSSProperties = {
   position: 'fixed', bottom: 24, right: 24, zIndex: 2000,
   display: 'flex', alignItems: 'center', gap: 10,
-  background: '#111827', border: '1px solid #1f2937', borderRadius: 40,
+  background: 'rgba(24,18,18,0.94)', border: '1px solid rgba(255,255,255,0.14)', borderRadius: 40,
   padding: '10px 14px', boxShadow: '0 8px 32px rgba(0,0,0,0.7)',
   minWidth: 220, maxWidth: 320, cursor: 'default',
 };
 const miniAvatarStyle: React.CSSProperties = {
-  width: 36, height: 36, borderRadius: '50%', background: '#6d5efc', color: '#fff',
+  width: 36, height: 36, borderRadius: '50%', background: 'var(--accent, #c0392b)', color: '#fff',
   display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: '0.8rem', flexShrink: 0,
 };
 const miniBtnStyle: React.CSSProperties = {
-  width: 30, height: 30, borderRadius: '50%', background: '#374151', border: 'none', cursor: 'pointer',
+  width: 30, height: 30, borderRadius: '50%', background: 'rgba(255,255,255,0.12)', border: 'none', cursor: 'pointer',
   display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
 };
-
-function ctrlBtnStyle(active: boolean): React.CSSProperties {
-  return {
-    background: active ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.05)',
-    border: '1px solid rgba(255,255,255,0.2)',
-    borderRadius: '50%',
-    color: '#fff',
-    width: 46,
-    height: 46,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    cursor: 'pointer',
-  };
-}
 
 function MicIcon() {
   return (
@@ -1570,13 +1521,13 @@ function PinIcon() {
 }
 
 const pinHintStyle: React.CSSProperties = {
-  position: 'absolute', top: 6, right: 6, width: 22, height: 22, borderRadius: 6,
-  background: 'rgba(0,0,0,0.5)', color: '#fff', display: 'flex', alignItems: 'center',
+  position: 'absolute', top: 6, left: 6, width: 22, height: 22, borderRadius: 7,
+  background: 'rgba(10,8,8,0.6)', color: '#fff', display: 'flex', alignItems: 'center',
   justifyContent: 'center', opacity: 0.85, pointerEvents: 'none',
 };
 
 const unpinBtnStyle: React.CSSProperties = {
   position: 'absolute', top: 10, left: 10, zIndex: 5, display: 'flex', alignItems: 'center',
-  gap: 6, padding: '5px 10px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.2)',
-  background: 'rgba(0,0,0,0.55)', color: '#fff', fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer',
+  gap: 6, padding: '6px 12px', borderRadius: 999, border: '1px solid rgba(255,255,255,0.18)',
+  background: 'rgba(10,8,8,0.62)', color: '#fff', fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer',
 };

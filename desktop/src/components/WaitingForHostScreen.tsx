@@ -1,3 +1,4 @@
+import './meeting.css';
 import { useEffect } from 'react';
 import { presenceService, WsMessage } from '../services/presence';
 import waitingArt from '../assets/undraw_team-work_i1f3.svg';
@@ -29,10 +30,9 @@ export default function WaitingForHostScreen({
 
   return (
     <div
-      className="waiting-screen"
+      className="waiting-screen mtg-scope"
       style={{
         position: 'fixed', inset: 0, zIndex: 900,
-        background: '#0b0b10',
         display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
         gap: 18, color: '#fff',
       }}
@@ -45,19 +45,13 @@ export default function WaitingForHostScreen({
       />
       <div style={{
         width: 28, height: 28, borderRadius: '50%',
-        border: '3px solid rgba(255,255,255,0.15)', borderTopColor: 'var(--accent, #6d5efc)',
+        border: '3px solid rgba(255,255,255,0.15)', borderTopColor: 'var(--accent, #c0392b)',
         animation: 'spin 1s linear infinite',
       }} />
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       <div style={{ fontSize: '1rem', fontWeight: 700 }}>Waiting for the host to let you in…</div>
       <div style={{ fontSize: '0.82rem', color: 'rgba(255,255,255,0.6)' }}>You'll join automatically once admitted.</div>
-      <button
-        onClick={onCancel}
-        style={{
-          marginTop: 12, background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: 8,
-          padding: '8px 18px', color: '#fff', fontSize: '0.82rem', cursor: 'pointer',
-        }}
-      >
+      <button className="mtg-btn" style={{ marginTop: 12 }} onClick={onCancel}>
         Cancel
       </button>
     </div>
