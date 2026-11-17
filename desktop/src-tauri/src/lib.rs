@@ -222,23 +222,122 @@ fn list_running_processes() -> Vec<String> {
 }
 
 // ── RustDesk remote control ─────────────────────────────────────────────────
-// Drives an EXTERNAL RustDesk binary (installed, or DILARION_RUSTDESK_PATH) so
-// Dilarion stays separate from RustDesk's AGPL source. The controlled side mints
-// a one-time password and reports its RustDesk ID; the controller launches the
-// connection. Meeting A/V keeps running on LiveKit in parallel. enigo remains the
-// fallback when RustDesk isn't available.
+// Drives an EXTERNAL RustDesk binary (installed, beside the app, or
+// DILARION_RUSTDESK_PATH) so Dilarion stays separate from RustDesk's AGPL
+// source. Every PC is pinned to the Dilarion relay by writing RustDesk's own
+// config before a session. Nobody pastes the server or key. The controlled
+// side mints a one-time password and reports its RustDesk ID; the controller
+// launches the connection. Meeting A/V keeps running on LiveKit in parallel.
+// enigo remains the fallback when RustDesk isn't available.
+
+const RUSTDESK_HOST: &str = "41.242.60.238";
+const RUSTDESK_KEY: &str = "WjADFIs30VvCOCxut8DRWBX2wbacCvM2JJAP0cK6bvU=";
+
+fn rustdesk_config_path() -> Result<std::path::PathBuf, String> {
+    #[cfg(target_os = "windows")]
+    {
+        let base = std::env::var("APPDATA").map_err(|_| "APPDATA is not set".to_string())?;
+        return Ok(std::path::PathBuf::from(base).join("RustDesk").join("config").join("RustDesk2.toml"));
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let home = std::env::var("HOME").map_err(|_| "HOME is not set".to_string())?;
+        return Ok(std::path::PathBuf::from(home).join("Library/Preferences/com.carriez.RustDesk/RustDesk2.toml"));
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let home = std::env::var("HOME").map_err(|_| "HOME is not set".to_string())?;
+        Ok(std::path::PathBuf::from(home).join(".config/rustdesk/RustDesk2.toml"))
+    }
+}
+
+fn set_toml_key(lines: &mut Vec<String>, section: Option<&str>, key: &str, value: &str) {
+    let rendered = format!("{key} = '{value}'");
+    let header = section.map(|name| format!("[{name}]"));
+    let mut in_section = section.is_none();
+    let mut found = false;
+    for line in lines.iter_mut() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') {
+            in_section = header.as_deref() == Some(trimmed);
+        }
+        let existing = trimmed.split_once('=').map(|(name, _)| name.trim());
+        if in_section && existing == Some(key) {
+            *line = rendered.clone();
+            found = true;
+        }
+    }
+    if found {
+        return;
+    }
+    if let Some(header) = header {
+        if let Some(idx) = lines.iter().position(|line| line.trim() == header) {
+            let mut insert_at = idx + 1;
+            while insert_at < lines.len() && !lines[insert_at].trim().starts_with('[') {
+                insert_at += 1;
+            }
+            lines.insert(insert_at, rendered);
+            return;
+        }
+        if lines.last().is_some_and(|line| !line.is_empty()) {
+            lines.push(String::new());
+        }
+        lines.push(header);
+        lines.push(rendered);
+    } else {
+        lines.insert(0, rendered);
+    }
+}
+
+fn ensure_rustdesk_relay() -> Result<(), String> {
+    let path = rustdesk_config_path()?;
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| format!("Could not create RustDesk config directory: {e}"))?;
+    }
+    let existing = std::fs::read_to_string(&path).unwrap_or_default();
+    let mut lines: Vec<String> = existing.lines().map(str::to_string).collect();
+    set_toml_key(&mut lines, None, "rendezvous_server", &format!("{RUSTDESK_HOST}:21116"));
+    set_toml_key(&mut lines, Some("options"), "custom-rendezvous-server", RUSTDESK_HOST);
+    set_toml_key(&mut lines, Some("options"), "relay-server", RUSTDESK_HOST);
+    set_toml_key(&mut lines, Some("options"), "key", RUSTDESK_KEY);
+    std::fs::write(&path, lines.join("\n") + "\n")
+        .map_err(|e| format!("Could not write RustDesk relay config: {e}"))
+}
+
+fn rustdesk_candidate_exists(path: &std::path::Path) -> Option<String> {
+    path.is_file().then(|| path.to_string_lossy().into_owned())
+}
 
 fn rustdesk_bin() -> String {
     if let Ok(p) = std::env::var("DILARION_RUSTDESK_PATH") {
-        if !p.trim().is_empty() {
-            return p;
+        let path = std::path::PathBuf::from(p.trim());
+        if let Some(found) = rustdesk_candidate_exists(&path) {
+            return found;
+        }
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            for name in ["rustdesk", "rustdesk.exe", "RustDesk", "RustDesk.exe"] {
+                if let Some(found) = rustdesk_candidate_exists(&dir.join(name)) {
+                    return found;
+                }
+            }
         }
     }
     #[cfg(target_os = "macos")]
     {
         let app = "/Applications/RustDesk.app/Contents/MacOS/RustDesk";
-        if std::path::Path::new(app).exists() {
+        if std::path::Path::new(app).is_file() {
             return app.to_string();
+        }
+    }
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(program_files) = std::env::var("ProgramFiles") {
+            let installed = std::path::PathBuf::from(program_files).join("RustDesk").join("rustdesk.exe");
+            if let Some(found) = rustdesk_candidate_exists(&installed) {
+                return found;
+            }
         }
     }
     "rustdesk".to_string()
@@ -262,6 +361,7 @@ struct RustdeskSession {
 
 #[tauri::command]
 fn rustdesk_prepare() -> Result<RustdeskSession, String> {
+    ensure_rustdesk_relay()?;
     let bin = rustdesk_bin();
     // RustDesk ID of this (controlled) machine.
     let out = std::process::Command::new(&bin)
@@ -290,6 +390,7 @@ fn rustdesk_connect(id: String, _otp: String) -> Result<(), String> {
     // Launch the RustDesk client against the target's ID. Password automation
     // over the CLI isn't reliable across versions, so the controller enters the
     // OTP (shown in Dilarion) in RustDesk's connect dialog.
+    ensure_rustdesk_relay()?;
     let bin = rustdesk_bin();
     std::process::Command::new(&bin)
         .arg("--connect")
@@ -303,6 +404,7 @@ fn rustdesk_connect(id: String, _otp: String) -> Result<(), String> {
 fn rustdesk_reset_password() -> Result<(), String> {
     // Invalidate the OTP by rotating to a fresh random password the control
     // session can no longer use.
+    ensure_rustdesk_relay()?;
     let bin = rustdesk_bin();
     let _ = std::process::Command::new(&bin)
         .arg("--password")
