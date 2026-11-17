@@ -138,6 +138,14 @@ const DECOY_KIND_LABELS: [DecoyKind, string][] = [
   ['memo', 'Memo'],
 ];
 
+// Stable, readable avatar tint per username for the flat message layout.
+const AVATAR_TINTS = ['#c0392b', '#b45309', '#0f766e', '#1d4ed8', '#7c3aed', '#be185d', '#4d7c0f', '#0369a1'];
+export function avatarTint(name: string): string {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) | 0;
+  return AVATAR_TINTS[Math.abs(h) % AVATAR_TINTS.length];
+}
+
 function initials(name: string): string {
   return name
     .split(/[\s_-]+/)
@@ -510,6 +518,8 @@ export function LockedContent({ apiToken, masterToken, onMasterTokenSaved, isMin
 interface MessageBubbleProps {
   msg: ChatMessage;
   isMine: boolean;
+  /** First message in a run from one sender: show avatar, name and time. */
+  showHeader?: boolean;
   token: string;
   masterToken: string | null;
   onDecrypt: (masterToken: string, messageId: number) => Promise<string>;
@@ -528,9 +538,13 @@ interface MessageBubbleProps {
 }
 
 function MessageBubble({
-  msg, isMine, token, masterToken, onDecrypt, onMasterTokenSaved, onJoinMeeting,
+  msg, isMine: isMineReal, showHeader = true, token, masterToken, onDecrypt, onMasterTokenSaved, onJoinMeeting,
   replyToMsg, onReact, onReply, onForward, onPinToggle, onStarToggle, onEdit, onDelete, onTranslate, isStarred,
 }: MessageBubbleProps) {
+  // Flat layout: every message is left-aligned on a neutral card, so the
+  // visual "mine" styling is off. Ownership still drives edit, delete and
+  // read receipts through isMineReal.
+  const isMine = false;
   const ct = msg.content_type;
   const mediaId = msg.content;
   const [hovered, setHovered] = useState(false);
@@ -638,22 +652,27 @@ function MessageBubble({
     ? { background: isMine ? '#1a1218' : '#111827', border: '1px solid #374151' }
     : {};
 
+  const sender = msg.sender || '?';
   return (
     <div
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: isMine ? 'flex-end' : 'flex-start',
-        marginBottom: 4,
-        position: 'relative',
-      }}
+      style={{ ...ms.row, marginTop: showHeader ? 14 : 2, background: hovered ? 'var(--item-hover)' : 'transparent' }}
     >
+      <div style={ms.avatarCol}>
+        {showHeader && <div style={{ ...ms.avatar, background: avatarTint(sender) }}>{initials(sender)}</div>}
+      </div>
+      <div style={ms.content}>
+      {showHeader && (
+        <div style={ms.header}>
+          <span style={ms.senderName}>{sender}</span>
+          <span style={ms.headerTime}>{fmtTime(msg.timestamp)}</span>
+        </div>
+      )}
       {hovered && (
-        <div style={{ position: 'absolute', top: -10, [isMine ? 'right' : 'left']: -10, zIndex: 15 } as React.CSSProperties}>
+        <div style={{ position: 'absolute', top: -14, right: 12, zIndex: 15 }}>
           <MessageMenuTrigger
-            isMine={isMine}
+            isMine={isMineReal}
             onReact={onReact}
             onReply={onReply}
             onForward={onForward}
@@ -661,7 +680,7 @@ function MessageBubble({
             onInfo={() => setShowInfo(v => !v)}
             onPinToggle={onPinToggle}
             onStarToggle={onStarToggle}
-            onEdit={isMine ? onEdit : undefined}
+            onEdit={isMineReal ? onEdit : undefined}
             onDelete={onDelete}
             onTranslate={isTextish ? handleTranslateClick : undefined}
             isPinned={!!msg.is_pinned}
@@ -715,12 +734,13 @@ function MessageBubble({
 
       <MessageReactionPills reactions={msg.reactions} onToggle={onReact} />
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 3, marginTop: 3, justifyContent: isMine ? 'flex-end' : 'flex-start' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 3, marginTop: 2, minHeight: 0 }}>
         {msg.is_pinned && <span title="Pinned" style={{ display: 'inline-flex' }}><PinIcon size={11} color={isMine ? 'rgba(255,255,255,0.75)' : '#6b7280'} /></span>}
         {isStarred && <span title="Starred" style={{ display: 'inline-flex', color: '#f59e0b', fontSize: '0.72rem', lineHeight: 1 }}>★</span>}
         {msg.is_edited && <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>edited</span>}
-        <span style={ms.ts}>{fmtTime(msg.timestamp)}</span>
-        {isMine && <MsgStatusIcon delivered={msg.delivered} read={msg.read} />}
+        {!showHeader && <span style={ms.ts}>{fmtTime(msg.timestamp)}</span>}
+        {isMineReal && <MsgStatusIcon delivered={msg.delivered} read={msg.read} />}
+      </div>
       </div>
     </div>
   );
@@ -731,8 +751,8 @@ function MessageBubble({
 export function PendingBubble({ content, timestamp, kind = 'text', filename }: { content: string; timestamp: string; kind?: PendingMsg['kind']; filename?: string }) {
   const isMedia = kind && kind !== 'text';
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', marginBottom: 4 }}>
-      <div style={{ ...ms.bubbleMine, opacity: 0.65, ...(isMedia ? { display: 'flex', alignItems: 'center', gap: 8 } : {}) }}>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', margin: '2px 0', paddingLeft: 60 }}>
+      <div style={{ ...ms.bubbleTheirs, opacity: 0.65, ...(isMedia ? { display: 'flex', alignItems: 'center', gap: 8 } : {}) }}>
         {isMedia ? (
           <>
             {kind === 'image' && <CameraIcon size={20} color="#9ca3af" />}
@@ -1378,11 +1398,15 @@ export default function ChatPanel({
           <>
             {messages.map((msg, i) => {
               const showSep = i === 0 || !isSameDay(msg.timestamp, messages[i - 1].timestamp);
+              const prev = messages[i - 1];
+              const showHeader = showSep || !prev || prev.sender !== msg.sender
+                || new Date(msg.timestamp).getTime() - new Date(prev.timestamp).getTime() > 5 * 60_000;
               return (
                 <React.Fragment key={msg.id}>
                   {showSep && <DateSeparator ts={msg.timestamp} />}
                   <MessageBubble
                     msg={msg}
+                    showHeader={showHeader}
                     isMine={msg.sender === myUsername}
                     token={token}
                     masterToken={masterToken}
@@ -1537,13 +1561,6 @@ export default function ChatPanel({
           onChange={handleFileChange}
         />
 
-        <button
-          style={cs.iconBtn}
-          onClick={() => setShowMediaPicker(v => !v)}
-          title="Emoji, GIFs & stickers"
-        >
-          <SmileyIcon />
-        </button>
         {showMediaPicker && (
           <MediaPicker
             token={token}
@@ -1554,60 +1571,54 @@ export default function ChatPanel({
             onPickSticker={stickerId => { setShowMediaPicker(false); handleSendSpecial(`sticker:${stickerId}`, 'sticker'); }}
           />
         )}
-
-        <button
-          style={cs.iconBtn}
-          onClick={() => fileInputRef.current?.click()}
-          title="Attach file"
-        >
-          <PaperclipIconSvg size={18} color="#6b7280" />
-        </button>
-
-        <button
-          style={cs.iconBtn}
-          onClick={handleSuggestReply}
-          disabled={suggestLoading}
-          title="Suggest a reply"
-        >
-          <SparkleIcon size={17} color="#6b7280" />
-        </button>
-
-        {recording ? (
-          <div style={cs.recIndicator}>
-            <div style={cs.recDot} />
-            <span style={{ fontSize: '0.83rem', color: '#ef4444', fontWeight: 600 }}>
-              Recording {fmtRec(recSeconds)}
-            </span>
+        <div style={cs.composer}>
+          <div style={cs.toolbar}>
+            <button style={cs.iconBtn} onClick={() => setShowMediaPicker(v => !v)} title="Emoji, GIFs & stickers">
+              <SmileyIcon />
+            </button>
+            <button style={cs.iconBtn} onClick={() => fileInputRef.current?.click()} title="Attach file">
+              <PaperclipIconSvg size={18} color="var(--text-secondary)" />
+            </button>
+            <button
+              style={{ ...cs.iconBtn, color: recording ? '#ef4444' : 'var(--text-secondary)' }}
+              onClick={toggleRecording}
+              title={recording ? 'Stop recording' : 'Record voice note'}
+            >
+              {recording ? <StopIcon /> : <MicIconSvg size={18} color={recording ? '#ef4444' : 'var(--text-secondary)'} />}
+            </button>
+            <span style={cs.toolbarDivider} />
+            <button style={cs.iconBtn} onClick={handleSuggestReply} disabled={suggestLoading} title="Suggest a reply">
+              <SparkleIcon size={17} color="var(--text-secondary)" />
+            </button>
           </div>
-        ) : (
-          <textarea
-            style={cs.textInput}
-            placeholder="Type a message"
-            value={text}
-            onChange={e => { setText(e.target.value); sendTypingStart(); }}
-            onKeyDown={handleKeyDown}
-            rows={1}
-          />
-        )}
-
-        <button
-          style={{ ...cs.iconBtn, color: recording ? '#ef4444' : '#6b7280' }}
-          onClick={toggleRecording}
-          title={recording ? 'Stop recording' : 'Record voice note'}
-        >
-          {recording ? <StopIcon /> : <MicIconSvg size={18} color={recording ? '#ef4444' : '#6b7280'} />}
-        </button>
-
-        {text.trim() && !recording && (
-          <button
-            style={cs.sendBtn}
-            onClick={handleSend}
-            disabled={isSending}
-            title="Send"
-          >
-            <SendIcon />
-          </button>
-        )}
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8 }}>
+            {recording ? (
+              <div style={cs.recIndicator}>
+                <div style={cs.recDot} />
+                <span style={{ fontSize: '0.83rem', color: '#ef4444', fontWeight: 600 }}>
+                  Recording {fmtRec(recSeconds)}
+                </span>
+              </div>
+            ) : (
+              <textarea
+                style={cs.textInput}
+                placeholder={`Message ${partner}`}
+                value={text}
+                onChange={e => { setText(e.target.value); sendTypingStart(); }}
+                onKeyDown={handleKeyDown}
+                rows={1}
+              />
+            )}
+            <button
+              style={{ ...cs.sendBtn, opacity: text.trim() && !recording ? 1 : 0.35, cursor: text.trim() && !recording ? 'pointer' : 'default' }}
+              onClick={handleSend}
+              disabled={isSending || !text.trim() || recording}
+              title="Send"
+            >
+              <SendIcon />
+            </button>
+          </div>
+        </div>
       </div>
 
       {deleteTarget && (
@@ -1649,6 +1660,7 @@ export default function ChatPanel({
       {showContactInfo && (
         <ContactInfoPanel
           username={partner}
+          online={partnerOnline}
           mediaCount={messages.filter(m => isImage(m.content_type) || isMedia(m.content_type)).length}
           starredCount={starredIds.size}
           isMuted={!!isMuted}
@@ -1725,20 +1737,37 @@ function SendIcon() {
 
 // ── Styles ─────────────────────────────────────────────────────────────────────
 
-const ms: Record<string, React.CSSProperties> = {
+export const ms: Record<string, React.CSSProperties> = {
+  row: { display: 'flex', gap: 12, padding: '2px 12px', borderRadius: 10, position: 'relative', transition: 'background 0.1s' },
+  avatarCol: { width: 36, flexShrink: 0 },
+  avatar: {
+    width: 36, height: 36, borderRadius: '50%', color: '#fff', display: 'flex', alignItems: 'center',
+    justifyContent: 'center', fontWeight: 700, fontSize: '0.72rem',
+  },
+  content: { flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-start' },
+  header: { display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 4 },
+  senderName: { fontSize: '0.92rem', fontWeight: 650, color: 'var(--text-primary)' },
+  headerTime: { fontSize: '0.78rem', color: 'var(--text-muted)' },
+  // Shared with GroupPanel's composer.
+  composer: {
+    display: 'flex', flexDirection: 'column', gap: 4, border: '1.5px solid var(--border-color)', borderRadius: 14,
+    padding: '6px 8px 8px 8px', background: 'var(--input-field-bg)', boxShadow: '0 1px 2px rgba(0,0,0,0.04)', flex: 1,
+  },
+  toolbar: { display: 'flex', alignItems: 'center', gap: 2, paddingBottom: 4, borderBottom: '1px solid var(--border-color)' },
+  toolbarDivider: { width: 1, height: 18, background: 'var(--border-color)', margin: '0 6px' },
   bubbleMine: {
-    background: 'var(--bubble-mine-bg)',
-    borderRadius: '18px 18px 4px 18px',
-    padding: '10px 14px',
-    maxWidth: '68%',
-    color: 'var(--bubble-mine-text)',
+    background: 'var(--bubble-theirs-bg)',
+    borderRadius: 10,
+    padding: '8px 12px',
+    maxWidth: '85%',
+    color: 'var(--bubble-theirs-text)',
     wordBreak: 'break-word',
   },
   bubbleTheirs: {
     background: 'var(--bubble-theirs-bg)',
-    borderRadius: '18px 18px 18px 4px',
-    padding: '10px 14px',
-    maxWidth: '68%',
+    borderRadius: 10,
+    padding: '8px 12px',
+    maxWidth: '85%',
     color: 'var(--bubble-theirs-text)',
     wordBreak: 'break-word',
   },
@@ -1764,7 +1793,8 @@ const cs: Record<string, React.CSSProperties> = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: '12px 20px',
+    padding: '12px 24px',
+    minHeight: 64,
     borderBottom: '1px solid var(--border-color)',
     background: 'var(--header-bg)',
     flexShrink: 0,
@@ -1786,8 +1816,8 @@ const cs: Record<string, React.CSSProperties> = {
     flexShrink: 0,
   },
   avatar: {
-    width: 42,
-    height: 42,
+    width: 34,
+    height: 34,
     borderRadius: '50%',
     background: 'var(--accent)',
     color: '#fff',
@@ -1813,7 +1843,7 @@ const cs: Record<string, React.CSSProperties> = {
   messagesArea: {
     flex: 1,
     overflowY: 'auto',
-    padding: '16px 24px',
+    padding: '12px 12px 16px',
     display: 'flex',
     flexDirection: 'column',
     gap: 2,
@@ -1832,34 +1862,46 @@ const cs: Record<string, React.CSSProperties> = {
   },
 
   inputBar: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 8,
-    padding: '10px 16px',
-    borderTop: '1px solid var(--border-color)',
+    padding: '8px 24px 20px',
     background: 'var(--input-bar-bg)',
     flexShrink: 0,
-    minHeight: 60,
   },
+  composer: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 4,
+    border: '1.5px solid var(--border-color)',
+    borderRadius: 14,
+    padding: '6px 8px 8px 8px',
+    background: 'var(--input-field-bg)',
+    boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
+  },
+  toolbar: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 2,
+    paddingBottom: 4,
+    borderBottom: '1px solid var(--border-color)',
+  },
+  toolbarDivider: { width: 1, height: 18, background: 'var(--border-color)', margin: '0 6px' },
   textInput: {
     flex: 1,
-    background: 'var(--input-field-bg)',
-    border: '1px solid var(--border-color)',
-    borderRadius: 24,
+    background: 'transparent',
+    border: 'none',
     color: 'var(--text-primary)',
-    fontSize: '0.88rem',
-    padding: '10px 16px',
+    fontSize: '0.92rem',
+    padding: '8px 6px',
     resize: 'none',
-    lineHeight: 1.4,
-    maxHeight: 120,
+    lineHeight: 1.45,
+    maxHeight: 160,
     overflowY: 'auto',
     fontFamily: 'inherit',
   },
   iconBtn: {
     background: 'transparent',
-    color: '#6b7280',
-    padding: 8,
-    borderRadius: '50%',
+    color: 'var(--text-secondary)',
+    padding: 7,
+    borderRadius: 8,
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
@@ -1879,9 +1921,9 @@ const cs: Record<string, React.CSSProperties> = {
   sendBtn: {
     background: 'var(--accent)',
     color: '#fff',
-    width: 40,
-    height: 40,
-    borderRadius: '50%',
+    width: 36,
+    height: 36,
+    borderRadius: 10,
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
@@ -1894,10 +1936,7 @@ const cs: Record<string, React.CSSProperties> = {
     display: 'flex',
     alignItems: 'center',
     gap: 10,
-    padding: '10px 16px',
-    background: 'var(--input-field-bg)',
-    border: '1px solid var(--border-color)',
-    borderRadius: 24,
+    padding: '8px 6px',
   },
   callBtn: {
     background: 'transparent',

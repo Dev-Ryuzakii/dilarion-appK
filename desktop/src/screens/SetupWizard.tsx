@@ -152,7 +152,7 @@ function VoiceStep({ token, onDone, onSkip }: { token: string; onDone: () => voi
       <p style={s.sub}>Record a short voice sample (a few seconds of normal speech). It powers Dilarion's voice features and decoy protection.</p>
       <div style={s.mediaBox}>
         <span style={{ fontSize: '2rem' }}>{recording ? '🔴' : blob ? '✅' : '🎙️'}</span>
-        <div style={{ fontSize: '0.85rem', color: '#9ca3af', marginTop: 6 }}>
+        <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: 6 }}>
           {recording ? `Recording… ${secs}s` : blob ? 'Recorded' : 'Not recorded yet'}
         </div>
       </div>
@@ -258,19 +258,19 @@ function TwoFaStep({ token, presetMaster, onDone, onSkip }: { token: string; pre
 }
 
 const s: Record<string, React.CSSProperties> = {
-  root: { minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, background: 'var(--bg, #0c0c0c)', padding: 24, boxSizing: 'border-box' },
-  logoWrap: { width: 72, height: 72, borderRadius: '50%', overflow: 'hidden', background: '#1e1e1e', display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  root: { minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, background: 'var(--frame-bg)', padding: 24, boxSizing: 'border-box' },
+  logoWrap: { width: 72, height: 72, borderRadius: '50%', overflow: 'hidden', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' },
   logo: { width: '100%', height: '100%', objectFit: 'cover' },
-  heading: { margin: '6px 0 0', fontSize: '1.35rem', fontWeight: 700, color: 'var(--text-primary, #f3f4f6)', textAlign: 'center' },
-  card: { width: 420, maxWidth: '100%', background: 'var(--bg-panel, #141414)', border: '1px solid var(--border-color, #262626)', borderRadius: 14, padding: '26px 24px', display: 'flex', flexDirection: 'column', gap: 10, marginTop: 6 },
-  progress: { fontSize: '0.72rem', color: '#6b7280', textAlign: 'center', letterSpacing: '0.04em', textTransform: 'uppercase' },
+  heading: { margin: '6px 0 0', fontSize: '1.35rem', fontWeight: 700, color: '#fff', textAlign: 'center' },
+  card: { width: 420, maxWidth: '100%', background: 'var(--bg-panel, #141414)', border: '1px solid var(--border-color, #262626)', borderRadius: 18, boxShadow: '0 24px 60px rgba(0,0,0,0.28)', padding: '26px 24px', display: 'flex', flexDirection: 'column', gap: 10, marginTop: 6 },
+  progress: { fontSize: '0.72rem', color: 'rgba(255,255,255,0.75)', textAlign: 'center', letterSpacing: '0.04em', textTransform: 'uppercase' },
   title: { margin: 0, fontSize: '1.2rem', color: 'var(--text-primary, #f3f4f6)', textAlign: 'center' },
-  sub: { margin: '0 0 6px', fontSize: '0.8rem', color: '#9ca3af', textAlign: 'center', lineHeight: 1.5 },
-  mediaBox: { alignSelf: 'center', width: 220, height: 110, borderRadius: 12, background: '#0b0b0b', border: '1px solid var(--border-color, #262626)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' },
-  input: { background: 'var(--input-bg, #0f0f0f)', border: '1px solid var(--border-color, #262626)', borderRadius: 8, color: 'var(--text-primary, #f3f4f6)', fontSize: '0.85rem', padding: '9px 12px', fontFamily: 'inherit' },
+  sub: { margin: '0 0 6px', fontSize: '0.8rem', color: 'var(--text-muted)', textAlign: 'center', lineHeight: 1.5 },
+  mediaBox: { alignSelf: 'center', width: 220, height: 110, borderRadius: 12, background: 'var(--bg-card)', border: '1px solid var(--border-color, #262626)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' },
+  input: { background: 'var(--input-bg, #0f0f0f)', border: '1px solid var(--border-color, #262626)', borderRadius: 10, color: 'var(--text-primary, #f3f4f6)', fontSize: '0.88rem', padding: '10px 12px', fontFamily: 'inherit' },
   btn: { background: 'var(--accent, #c0392b)', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 16px', fontSize: '0.82rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' },
   ghost: { background: 'transparent', color: 'var(--text-primary, #f3f4f6)', border: '1px solid var(--border-color, #333)', borderRadius: 8, padding: '8px 16px', fontSize: '0.82rem', cursor: 'pointer', fontFamily: 'inherit' },
-  link: { background: 'none', border: 'none', color: '#9ca3af', fontSize: '0.78rem', cursor: 'pointer', fontFamily: 'inherit' },
-  hint: { margin: 0, fontSize: '0.72rem', color: '#6b7280', textAlign: 'center' },
+  link: { background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: '0.78rem', cursor: 'pointer', fontFamily: 'inherit' },
+  hint: { margin: 0, fontSize: '0.72rem', color: 'var(--text-muted)', textAlign: 'center' },
   error: { margin: 0, fontSize: '0.78rem', color: '#ef4444' },
 };

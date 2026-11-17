@@ -257,7 +257,7 @@ export default function LoginScreen({ onLogin, onBack, initialView = 'login', no
               value={forgotReason}
               onChange={e => setForgotReason(e.target.value)}
             />
-            {forgotMessage && <p style={{ ...s.error, color: '#93c5fd' }}>{forgotMessage}</p>}
+            {forgotMessage && <p style={{ ...s.error, color: 'var(--accent)' }}>{forgotMessage}</p>}
             <button style={s.btn} type="submit" disabled={forgotLoading || !forgotPhone.trim()}>
               {forgotLoading ? 'Submitting…' : 'Submit Request'}
             </button>
@@ -347,7 +347,7 @@ export default function LoginScreen({ onLogin, onBack, initialView = 'login', no
 
         {view === 'activate' && (
           <form onSubmit={handleActivate} style={s.form}>
-            <p style={{ fontSize: '0.75rem', color: '#9ca3af', margin: '0 0 4px', lineHeight: 1.5 }}>
+            <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: '0 0 4px', lineHeight: 1.5 }}>
               Your organization sent you an activation code by email or SMS. Enter it, then choose your private login token.
             </p>
             <input
@@ -474,15 +474,15 @@ function EyeOffIcon() {
 const s: Record<string, React.CSSProperties> = {
   divider: {
     display: 'flex', alignItems: 'center', width: '100%',
-    margin: '0.25rem 0', color: '#3a3a3a',
-    borderTop: '1px solid #1e1e1e', position: 'relative',
+    margin: '0.25rem 0', color: 'var(--text-muted)',
+    borderTop: '1px solid var(--border-color)', position: 'relative',
   },
   dividerText: {
     position: 'absolute', left: '50%', top: -10, transform: 'translateX(-50%)',
-    background: '#141414', padding: '0 10px', fontSize: '0.72rem', color: '#6b7280',
+    background: 'var(--bg-panel)', padding: '0 10px', fontSize: '0.72rem', color: 'var(--text-muted)',
   },
   linkBtn: {
-    background: 'transparent', color: '#93c5fd', border: '1px solid #1e1e1e',
+    background: 'transparent', color: 'var(--accent)', border: '1px solid var(--border-color)',
     borderRadius: 10, padding: '10px 0', width: '100%', fontSize: '0.85rem',
     fontWeight: 600, cursor: 'pointer',
   },
@@ -491,13 +491,14 @@ const s: Record<string, React.CSSProperties> = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    background: '#0c0c0c',
+    background: 'var(--frame-bg)',
     padding: '1.5rem',
     height: '100vh',
   },
   card: {
-    background: '#141414',
-    border: '1px solid #1e1e1e',
+    background: 'var(--bg-panel)',
+    border: '1px solid var(--border-color)',
+    boxShadow: '0 24px 60px rgba(0,0,0,0.28)',
     borderRadius: 20,
     padding: '2.5rem 2rem',
     width: '100%',
@@ -512,18 +513,18 @@ const s: Record<string, React.CSSProperties> = {
     height: 72,
     borderRadius: 18,
     overflow: 'hidden',
-    border: '1px solid #2a2a2a',
+    border: '1px solid var(--border-color)',
     marginBottom: '0.75rem',
-    background: '#1e1e1e',
+    background: 'var(--bg-card)',
   },
   logo: { width: '100%', height: '100%', objectFit: 'cover' },
   title: {
     fontSize: '1.6rem',
     fontWeight: 800,
     letterSpacing: '-0.04em',
-    color: '#fff',
+    color: 'var(--text-primary)',
   },
-  sub: { fontSize: '0.8rem', color: '#6b7280', marginBottom: '1rem' },
+  sub: { fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '1rem' },
   form: {
     width: '100%',
     display: 'flex',
@@ -531,11 +532,11 @@ const s: Record<string, React.CSSProperties> = {
     gap: '0.75rem',
   },
   input: {
-    background: '#0c0c0c',
-    border: '1px solid #2a2a2a',
+    background: 'var(--input-bg)',
+    border: '1px solid var(--border-color)',
     borderRadius: 12,
     padding: '0.75rem 1rem',
-    color: '#fff',
+    color: 'var(--text-primary)',
     fontSize: '0.9rem',
     width: '100%',
   },
@@ -546,11 +547,11 @@ const s: Record<string, React.CSSProperties> = {
     alignItems: 'center',
   },
   tokenInput: {
-    background: '#0c0c0c',
-    border: '1px solid #2a2a2a',
+    background: 'var(--input-bg)',
+    border: '1px solid var(--border-color)',
     borderRadius: 12,
     padding: '0.75rem 2.8rem 0.75rem 1rem',
-    color: '#fff',
+    color: 'var(--text-primary)',
     fontSize: '0.9rem',
     width: '100%',
     fontFamily: 'inherit',
@@ -561,7 +562,7 @@ const s: Record<string, React.CSSProperties> = {
     right: 12,
     background: 'transparent',
     border: 'none',
-    color: '#6b7280',
+    color: 'var(--text-muted)',
     cursor: 'pointer',
     padding: 4,
     display: 'flex',
@@ -581,14 +582,14 @@ const s: Record<string, React.CSSProperties> = {
     fontSize: '0.78rem',
     color: 'var(--text-secondary, #9ca3af)',
     textAlign: 'center',
-    background: 'rgba(255,255,255,0.05)',
-    border: '1px solid rgba(255,255,255,0.09)',
+    background: 'var(--bg-card)',
+    border: '1px solid var(--border-color)',
     borderRadius: 10,
     padding: '8px 12px',
     lineHeight: 1.4,
   },
   btn: {
-    background: '#c0392b',
+    background: 'var(--accent)',
     color: '#fff',
     borderRadius: 12,
     padding: '0.85rem',
@@ -601,11 +602,11 @@ const s: Record<string, React.CSSProperties> = {
   },
   codeBox: {
     width: '100%',
-    background: '#0c0c0c',
-    border: '1px dashed #c0392b',
+    background: 'var(--input-bg)',
+    border: '1px dashed var(--accent)',
     borderRadius: 12,
     padding: '1rem',
-    color: '#fff',
+    color: 'var(--text-primary)',
     fontSize: '1.15rem',
     fontWeight: 700,
     letterSpacing: '0.06em',
@@ -618,7 +619,7 @@ const s: Record<string, React.CSSProperties> = {
     alignItems: 'center',
     gap: 8,
     fontSize: '0.8rem',
-    color: '#9ca3af',
+    color: 'var(--text-muted)',
     width: '100%',
     marginBottom: '0.25rem',
   },

@@ -113,7 +113,7 @@ export default function LinkDeviceScreen({ onLinked, onUsePassword, onActivate }
                 fontSize: '0.9rem',
                 textAlign: 'center',
                 padding: '0 16px',
-                color: phase === 'error' ? '#ef4444' : phase === 'expired' ? '#f59e0b' : phase === 'approved' ? '#25d366' : '#6b7280',
+                color: phase === 'error' ? '#ef4444' : phase === 'expired' ? '#f59e0b' : phase === 'approved' ? '#25d366' : 'var(--text-muted)',
               }}>
                 {phase === 'starting' ? 'Generating code…'
                   : phase === 'approved' ? 'Linked! Opening…'
@@ -162,27 +162,27 @@ function Spinner({ size = 34 }: { size?: number }) {
 const s: Record<string, React.CSSProperties> = {
   root: {
     flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
-    background: '#0c0c0c', padding: '1.5rem', height: '100vh',
+    background: 'var(--frame-bg)', padding: '1.5rem', height: '100vh',
   },
   card: {
-    background: '#141414', border: '1px solid #1e1e1e', borderRadius: 20,
+    background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 20, boxShadow: '0 24px 60px rgba(0,0,0,0.28)',
     padding: '2.5rem 2rem', width: '100%', maxWidth: 380,
     display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem',
   },
-  title: { fontSize: '1.4rem', fontWeight: 700, color: '#fff', margin: 0 },
-  sub: { fontSize: '0.85rem', color: '#9ca3af', textAlign: 'center', lineHeight: 1.5, margin: 0 },
+  title: { fontSize: '1.4rem', fontWeight: 700, color: 'var(--text-primary)', margin: 0 },
+  sub: { fontSize: '0.85rem', color: 'var(--text-muted)', textAlign: 'center', lineHeight: 1.5, margin: 0 },
   qrBox: {
-    width: 280, height: 280, background: '#fff', borderRadius: 12,
+    width: 280, height: 280, background: '#fff', borderRadius: 12, border: '1px solid var(--border-color)',
     display: 'flex', alignItems: 'center', justifyContent: 'center',
   },
-  muted: { fontSize: '0.9rem', color: '#6b7280' },
-  hint: { fontSize: '0.8rem', color: '#9ca3af', margin: 0 },
+  muted: { fontSize: '0.9rem', color: 'var(--text-muted)' },
+  hint: { fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 },
   btn: {
     background: 'var(--accent, #c0392b)', color: '#fff', border: 'none',
     borderRadius: 10, padding: '10px 20px', fontSize: '0.9rem', fontWeight: 600, cursor: 'pointer',
   },
   linkBtn: {
-    background: 'transparent', color: '#9ca3af', border: 'none',
+    background: 'transparent', color: 'var(--text-muted)', border: 'none',
     fontSize: '0.82rem', cursor: 'pointer', textDecoration: 'underline',
   },
 };

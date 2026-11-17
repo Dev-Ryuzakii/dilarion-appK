@@ -4,6 +4,10 @@ import App from "./App";
 import CallWindowApp from "./callWindow/CallWindowApp";
 import { isCallWindow } from "./services/presence";
 import { isTauri } from "./services/platform";
+import { applyAppearance, loadAppearance } from "./theme";
+
+// Theme tokens before first paint, for auth and onboarding too.
+applyAppearance(loadAppearance());
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>

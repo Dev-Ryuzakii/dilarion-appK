@@ -29,19 +29,19 @@ export default function UpdateRequiredScreen({ version, onUpdate }: {
 
   return (
     <div style={{
-      position: 'fixed', inset: 0, background: 'var(--bg)', display: 'flex',
+      position: 'fixed', inset: 0, background: 'var(--frame-bg)', display: 'flex',
       alignItems: 'center', justifyContent: 'center', padding: 24, zIndex: 10000,
     }}>
-      <div style={{ width: 380, maxWidth: '100%', textAlign: 'center', display: 'flex', flexDirection: 'column', gap: 16, alignItems: 'center' }}>
-        <div style={{ color: 'var(--text)', fontWeight: 700, fontSize: '1.35rem' }}>There is an update</div>
-        <div style={{ color: 'var(--muted)', fontSize: '0.95rem' }}>Version {version}</div>
+      <div style={{ width: 380, maxWidth: '100%', textAlign: 'center', display: 'flex', flexDirection: 'column', gap: 16, alignItems: 'center', background: 'var(--bg-panel)', borderRadius: 18, padding: '32px 28px', boxShadow: '0 24px 60px rgba(0,0,0,0.28)' }}>
+        <div style={{ color: 'var(--text-primary)', fontWeight: 700, fontSize: '1.35rem' }}>There is an update</div>
+        <div style={{ color: 'var(--text-muted)', fontSize: '0.95rem' }}>Version {version}</div>
         {error && <div style={{ color: '#ef4444', fontSize: '0.85rem', lineHeight: 1.4 }}>{error}</div>}
         <button
           type="button"
           onClick={update}
           disabled={busy}
           style={{
-            background: 'var(--red)', color: '#fff', border: 'none', borderRadius: 10,
+            background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 10,
             padding: '12px 28px', fontSize: '0.95rem', fontWeight: 700, minWidth: 180,
             cursor: busy ? 'wait' : 'pointer', opacity: busy ? 0.8 : 1, fontFamily: 'inherit',
           }}

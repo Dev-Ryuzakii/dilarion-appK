@@ -52,7 +52,8 @@ function loadAnchor(): Anchor {
       if (typeof a?.right === 'number' && typeof a?.bottom === 'number') return clampAnchor(a);
     }
   } catch { /* storage unavailable — fall back to default corner */ }
-  return { right: 24, bottom: 24 };
+  // Sit above the message box so it never covers the send button.
+  return { right: 36, bottom: 150 };
 }
 
 export default function CopilotWidget({ token, onScheduleDraft }: {

@@ -108,7 +108,7 @@ export default function OnboardingScreen({ sessionToken, username, onDone, onCan
           ) : photo ? (
             <img src={photo.dataUrl} alt="Your photo" style={o.media} />
           ) : (
-            <span style={{ color: '#6b7280', fontSize: '0.8rem' }}>No photo yet</span>
+            <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>No photo yet</span>
           )}
         </div>
         <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
@@ -140,16 +140,16 @@ export default function OnboardingScreen({ sessionToken, username, onDone, onCan
 }
 
 const o: Record<string, React.CSSProperties> = {
-  root: { minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg, #0c0c0c)', padding: 16, boxSizing: 'border-box' },
-  card: { width: 420, maxWidth: '100%', background: 'var(--bg-panel, #141414)', border: '1px solid var(--border-color, #262626)', borderRadius: 14, padding: '26px 24px', display: 'flex', flexDirection: 'column', gap: 10 },
+  root: { minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--frame-bg)', padding: 16, boxSizing: 'border-box' },
+  card: { width: 420, maxWidth: '100%', background: 'var(--bg-panel, #141414)', border: '1px solid var(--border-color, #262626)', borderRadius: 18, boxShadow: '0 24px 60px rgba(0,0,0,0.28)', padding: '26px 24px', display: 'flex', flexDirection: 'column', gap: 10 },
   title: { margin: 0, fontSize: '1.2rem', color: 'var(--text-primary, #f3f4f6)', textAlign: 'center' },
-  sub: { margin: '0 0 6px', fontSize: '0.8rem', color: '#9ca3af', textAlign: 'center', lineHeight: 1.5 },
+  sub: { margin: '0 0 6px', fontSize: '0.8rem', color: 'var(--text-muted)', textAlign: 'center', lineHeight: 1.5 },
   photoBox: { alignSelf: 'center', width: 220, height: 165, borderRadius: 12, overflow: 'hidden', background: '#0b0b0b', border: '1px solid var(--border-color, #262626)', display: 'flex', alignItems: 'center', justifyContent: 'center' },
   media: { width: '100%', height: '100%', objectFit: 'cover' },
-  input: { background: 'var(--input-bg, #0f0f0f)', border: '1px solid var(--border-color, #262626)', borderRadius: 8, color: 'var(--text-primary, #f3f4f6)', fontSize: '0.85rem', padding: '9px 12px', fontFamily: 'inherit' },
+  input: { background: 'var(--input-bg, #0f0f0f)', border: '1px solid var(--border-color, #262626)', borderRadius: 10, color: 'var(--text-primary, #f3f4f6)', fontSize: '0.88rem', padding: '10px 12px', fontFamily: 'inherit' },
   btn: { background: 'var(--accent, #c0392b)', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 16px', fontSize: '0.82rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' },
   ghost: { background: 'transparent', color: 'var(--text-primary, #f3f4f6)', border: '1px solid var(--border-color, #333)', borderRadius: 8, padding: '8px 16px', fontSize: '0.82rem', cursor: 'pointer', fontFamily: 'inherit' },
-  link: { background: 'none', border: 'none', color: '#9ca3af', fontSize: '0.78rem', cursor: 'pointer', fontFamily: 'inherit' },
-  hint: { margin: 0, fontSize: '0.72rem', color: '#6b7280', textAlign: 'center' },
+  link: { background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: '0.78rem', cursor: 'pointer', fontFamily: 'inherit' },
+  hint: { margin: 0, fontSize: '0.72rem', color: 'var(--text-muted)', textAlign: 'center' },
   error: { margin: 0, fontSize: '0.78rem', color: '#ef4444' },
 };

@@ -34,7 +34,7 @@ export default function IdleLockScreen({ username, onUnlocked, onSwitchAccount }
 
   return (
     <div style={{
-      position: 'fixed', inset: 0, background: 'var(--bg)', display: 'flex',
+      position: 'fixed', inset: 0, background: 'var(--frame-bg)', display: 'flex',
       alignItems: 'center', justifyContent: 'center', padding: 16,
     }}>
       <form onSubmit={submit} style={{

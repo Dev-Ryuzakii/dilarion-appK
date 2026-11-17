@@ -1,3 +1,4 @@
+import { ACCENT_COLORS, DARK_VARIANTS, FONT_SIZES, AppearancePrefs, loadAppearance, applyAppearance, saveAppearance } from '../theme';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -179,7 +180,7 @@ function ContactSkeleton() {
 
 function ChatTabIcon({ active }: { active: boolean }) {
   return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={active ? 'var(--accent)' : '#4b5563'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={active ? 'var(--accent)' : 'var(--text-secondary)'} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
     </svg>
   );
@@ -187,7 +188,7 @@ function ChatTabIcon({ active }: { active: boolean }) {
 
 function GroupTabIcon({ active }: { active: boolean }) {
   return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={active ? 'var(--accent)' : '#4b5563'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={active ? 'var(--accent)' : 'var(--text-secondary)'} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
       <circle cx="9" cy="7" r="4" />
       <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
@@ -198,7 +199,7 @@ function GroupTabIcon({ active }: { active: boolean }) {
 
 function MeetingsTabIcon({ active }: { active: boolean }) {
   return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={active ? 'var(--accent)' : '#4b5563'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={active ? 'var(--accent)' : 'var(--text-secondary)'} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <path d="M23 7l-7 5 7 5V7z" /><rect x="1" y="5" width="15" height="14" rx="2" />
     </svg>
   );
@@ -206,7 +207,7 @@ function MeetingsTabIcon({ active }: { active: boolean }) {
 
 function CalendarTabIcon({ active }: { active: boolean }) {
   return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={active ? 'var(--accent)' : '#4b5563'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={active ? 'var(--accent)' : 'var(--text-secondary)'} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <rect x="3" y="4" width="18" height="18" rx="2" />
       <line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" />
     </svg>
@@ -215,7 +216,7 @@ function CalendarTabIcon({ active }: { active: boolean }) {
 
 function TasksTabIcon({ active }: { active: boolean }) {
   return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={active ? 'var(--accent)' : '#4b5563'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={active ? 'var(--accent)' : 'var(--text-secondary)'} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
     </svg>
   );
@@ -223,7 +224,7 @@ function TasksTabIcon({ active }: { active: boolean }) {
 
 function CallTabIcon({ active }: { active: boolean }) {
   return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={active ? 'var(--accent)' : '#4b5563'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={active ? 'var(--accent)' : 'var(--text-secondary)'} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 1h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.64a16 16 0 0 0 6 6l.95-.95a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z" />
     </svg>
   );
@@ -231,7 +232,7 @@ function CallTabIcon({ active }: { active: boolean }) {
 
 function SettingsTabIcon({ active }: { active: boolean }) {
   return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={active ? 'var(--accent)' : '#4b5563'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={active ? 'var(--accent)' : 'var(--text-secondary)'} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <circle cx="12" cy="12" r="3" />
       <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
     </svg>
@@ -239,6 +240,39 @@ function SettingsTabIcon({ active }: { active: boolean }) {
 }
 
 // ── Placeholder panels ─────────────────────────────────────────────────────────
+
+const SECTION_TITLES: Record<Tab, string> = {
+  chats: 'Direct messages', groups: 'Groups', channels: 'Your channels', meetings: 'Upcoming',
+  calendar: 'Calendar', tasks: 'Tasks', calls: 'Recent calls', settings: 'Settings',
+};
+
+function HashIcon({ active }: { active: boolean }) {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={active ? 'var(--accent)' : 'var(--text-secondary)'} strokeWidth="1.8" strokeLinecap="round">
+      <line x1="4" y1="9" x2="20" y2="9" /><line x1="4" y1="15" x2="20" y2="15" /><line x1="10" y1="3" x2="8" y2="21" /><line x1="16" y1="3" x2="14" y2="21" />
+    </svg>
+  );
+}
+
+function LockGlyph() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" />
+    </svg>
+  );
+}
+
+function SidebarSection({ title, open, onToggle, children }: { title: string; open: boolean; onToggle: () => void; children: React.ReactNode }) {
+  return (
+    <section style={{ marginTop: 14 }}>
+      <button onClick={onToggle} style={hs.sectionHeader} aria-expanded={open}>
+        <span>{title}</span>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" style={{ transform: open ? 'none' : 'rotate(-90deg)', transition: 'transform 0.15s' }}><polyline points="6 9 12 15 18 9" /></svg>
+      </button>
+      {open && <div>{children}</div>}
+    </section>
+  );
+}
 
 function NavRow({ icon, label, active, badge, onClick, style }: {
   icon: React.ReactNode; label: string; active: boolean; badge?: number; onClick: () => void; style?: React.CSSProperties;
@@ -364,164 +398,62 @@ function ColumnResizer({ width, range, onChange }: {
 
 // ── Appearance ─────────────────────────────────────────────────────────────────
 
-const ACCENT_COLORS = [
-  { name: 'Red',    value: '#c0392b' },
-  { name: 'Blue',   value: '#1565c0' },
-  { name: 'Green',  value: '#16a34a' },
-  { name: 'Purple', value: '#7c3aed' },
-  { name: 'Orange', value: '#ea580c' },
-  { name: 'Pink',   value: '#db2777' },
-];
-
-interface ThemeColors {
-  bg: string; panel: string; card: string;
-  textPrimary: string; textSecondary: string; textMuted: string;
-  border: string; inputBg: string; avatarBg: string; avatarText: string; itemHover: string;
-  itemActiveBg: string; tabActiveBg: string;
-  chatBg: string; chatBgImage: string;
-  bubbleMineBg: string; bubbleTheirsBg: string; bubbleText: string;
-  headerBg: string; inputBarBg: string; inputFieldBg: string;
-}
-
-const DARK_VARIANTS: { name: string; colors: ThemeColors }[] = [
-  { name: 'Dark', colors: {
-    bg: '#0e0e0e', panel: '#111111', card: '#1a1a1a',
-    textPrimary: '#f1f5f9', textSecondary: '#d1d5db', textMuted: '#6b7280',
-    border: '#1e1e1e', inputBg: '#1a1a1a', avatarBg: '#2a2a2a', avatarText: '#d1d5db',
-    itemHover: 'rgba(255,255,255,0.04)', itemActiveBg: '#1e1e1e', tabActiveBg: '#1a0d0d',
-    chatBg: '#0e0e0e', chatBgImage: 'url(/chat_bg.png)',
-    bubbleMineBg: '#2a1515', bubbleTheirsBg: '#1a1a1a', bubbleText: '#f1f5f9',
-    headerBg: '#141414', inputBarBg: '#141414', inputFieldBg: '#1a1a1a',
-  }},
-  { name: 'Pitch Black', colors: {
-    bg: '#000000', panel: '#0a0a0a', card: '#101010',
-    textPrimary: '#f1f5f9', textSecondary: '#d1d5db', textMuted: '#6b7280',
-    border: '#1a1a1a', inputBg: '#111111', avatarBg: '#1f1f1f', avatarText: '#d1d5db',
-    itemHover: 'rgba(255,255,255,0.03)', itemActiveBg: '#151515', tabActiveBg: '#100808',
-    chatBg: '#000000', chatBgImage: 'url(/chat_bg.png)',
-    bubbleMineBg: '#1a0a0a', bubbleTheirsBg: '#111111', bubbleText: '#f1f5f9',
-    headerBg: '#0a0a0a', inputBarBg: '#0a0a0a', inputFieldBg: '#111111',
-  }},
-  { name: 'Slate', colors: {
-    bg: '#0f172a', panel: '#1e293b', card: '#293548',
-    textPrimary: '#e2e8f0', textSecondary: '#cbd5e1', textMuted: '#64748b',
-    border: '#334155', inputBg: '#1e293b', avatarBg: '#334155', avatarText: '#cbd5e1',
-    itemHover: 'rgba(255,255,255,0.05)', itemActiveBg: '#293548', tabActiveBg: '#0d1b2e',
-    chatBg: '#0f172a', chatBgImage: 'url(/chat_bg.png)',
-    bubbleMineBg: '#1e3a5f', bubbleTheirsBg: '#1e293b', bubbleText: '#e2e8f0',
-    headerBg: '#1e293b', inputBarBg: '#1e293b', inputFieldBg: '#293548',
-  }},
-];
-
-const LIGHT_THEME: ThemeColors = {
-  bg: '#f0f2f5', panel: '#ffffff', card: '#f7f8fa',
-  textPrimary: '#111827', textSecondary: '#374151', textMuted: '#9ca3af',
-  border: '#e5e7eb', inputBg: '#f0f2f5', avatarBg: '#dce1e7', avatarText: '#374151',
-  itemHover: 'rgba(0,0,0,0.05)', itemActiveBg: '#ebebeb', tabActiveBg: 'rgba(0,0,0,0.07)',
-  chatBg: '#e5ddd5', chatBgImage: 'url(/chat_bg_light.png)',
-  bubbleMineBg: '#dcf8c6', bubbleTheirsBg: '#ffffff', bubbleText: '#111827',
-  headerBg: '#f0f2f5', inputBarBg: '#f0f2f5', inputFieldBg: '#ffffff',
-};
-
-const FONT_SIZES = [
-  { name: 'S', label: 'Small',  value: '13px' },
-  { name: 'M', label: 'Medium', value: '14px' },
-  { name: 'L', label: 'Large',  value: '16px' },
-];
-
-interface AppearancePrefs {
-  accent: string;
-  colorMode: 'system' | 'dark' | 'light';
-  darkVariant: number;
-  fontSize: string;
-}
-
-function loadAppearance(): AppearancePrefs {
-  try {
-    const s = localStorage.getItem('dilarion_appearance');
-    if (s) {
-      const stored = JSON.parse(s);
-      return {
-        accent:      stored.accent      ?? '#c0392b',
-        colorMode:   stored.colorMode   ?? 'dark',
-        darkVariant: stored.darkVariant ?? stored.themeIdx ?? 0,
-        fontSize:    stored.fontSize    ?? '14px',
-      };
-    }
-  } catch {}
-  return { accent: '#c0392b', colorMode: 'dark', darkVariant: 0, fontSize: '14px' };
-}
-
-function resolveThemeColors(p: AppearancePrefs): ThemeColors {
-  const prefersDark = typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches;
-  const isDark = p.colorMode === 'system' ? prefersDark : p.colorMode === 'dark';
-  return isDark ? (DARK_VARIANTS[p.darkVariant]?.colors ?? DARK_VARIANTS[0].colors) : LIGHT_THEME;
-}
-
-function applyAppearance(p: AppearancePrefs) {
-  const t = resolveThemeColors(p);
-  const prefersDark = typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches;
-  const isDark = p.colorMode === 'system' ? prefersDark : p.colorMode === 'dark';
-  const r = document.documentElement;
-  r.style.setProperty('--accent',            p.accent);
-  r.style.setProperty('--bg-base',           t.bg);
-  r.style.setProperty('--bg-panel',          t.panel);
-  r.style.setProperty('--bg-card',           t.card);
-  r.style.setProperty('--text-primary',      t.textPrimary);
-  r.style.setProperty('--text-secondary',    t.textSecondary);
-  r.style.setProperty('--text-muted',        t.textMuted);
-  r.style.setProperty('--border-color',      t.border);
-  r.style.setProperty('--input-bg',          t.inputBg);
-  r.style.setProperty('--avatar-bg',         t.avatarBg);
-  r.style.setProperty('--avatar-text',       t.avatarText);
-  r.style.setProperty('--item-hover',        t.itemHover);
-  r.style.setProperty('--item-active-bg',    t.itemActiveBg);
-  r.style.setProperty('--tab-active-bg',     t.tabActiveBg);
-  r.style.setProperty('--chat-bg',           t.chatBg);
-  r.style.setProperty('--chat-bg-image',     t.chatBgImage);
-  r.style.setProperty('--bubble-mine-bg',    isDark ? t.bubbleMineBg : p.accent);
-  r.style.setProperty('--bubble-mine-text',  '#fff');
-  r.style.setProperty('--bubble-theirs-bg',  t.bubbleTheirsBg);
-  r.style.setProperty('--bubble-theirs-text',t.bubbleText);
-  r.style.setProperty('--header-bg',         t.headerBg);
-  r.style.setProperty('--input-bar-bg',      t.inputBarBg);
-  r.style.setProperty('--input-field-bg',    t.inputFieldBg);
-  r.style.fontSize = p.fontSize;
-}
-
-// Apply on module load — runs before first render, no flash
-applyAppearance(loadAppearance());
-
 // ── Settings Panel ─────────────────────────────────────────────────────────────
 
-function SettingsListPanel({ selected, onSelect }: { selected: 'account' | 'appearance'; onSelect: (p: 'account' | 'appearance') => void }) {
-  const pages: { id: 'account' | 'appearance'; label: string }[] = [
-    { id: 'account', label: 'Account' },
-    { id: 'appearance', label: 'Appearance' },
-  ];
+const settingsPageStyle: React.CSSProperties = {
+  flex: 1, overflowY: 'auto', padding: '36px max(40px, calc((100% - 760px) / 2)) 48px',
+  display: 'flex', flexDirection: 'column', gap: 20, background: 'var(--bg-base)',
+};
+
+type SettingsPage = 'profile' | 'notifications' | 'security' | 'voice' | 'appearance' | 'account';
+
+const SETTINGS_PAGES: { id: SettingsPage; label: string; hint: string; icon: string }[] = [
+  { id: 'profile',       label: 'Profile',        hint: 'Photo, status and username',          icon: 'M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2|C12 7 4' },
+  { id: 'notifications', label: 'Notifications',  hint: 'Alerts, quiet hours, disappearing',   icon: 'M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9|M13.73 21a2 2 0 0 1-3.46 0' },
+  { id: 'security',      label: 'Security',       hint: 'Master token, 2FA, encryption key',   icon: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z' },
+  { id: 'voice',         label: 'Voice decoy',    hint: 'Your enrolled voice sample',           icon: 'M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z|M19 10v2a7 7 0 0 1-14 0v-2|M12 19v4' },
+  { id: 'appearance',    label: 'Appearance',     hint: 'Light or dark, accent, text size',    icon: 'C12 12 9|M12 3a9 9 0 0 0 0 18z' },
+  { id: 'account',       label: 'Account',        hint: 'Delete account, log out',             icon: 'M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4|M16 17l5-5-5-5|M21 12H9' },
+];
+
+function SettingsGlyph({ spec }: { spec: string }) {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column' }}>
-      {pages.map(p => (
-        <button
-          key={p.id}
-          onClick={() => onSelect(p.id)}
-          style={{
-            padding: '14px 20px',
-            color: selected === p.id ? 'var(--accent)' : 'var(--text-secondary)',
-            background: selected === p.id ? 'var(--item-active-bg)' : 'transparent',
-            borderLeft: `3px solid ${selected === p.id ? 'var(--accent)' : 'transparent'}`,
-            fontSize: '0.88rem',
-            fontWeight: selected === p.id ? 700 : 400,
-            borderTop: 'none', borderRight: 'none',
-            borderBottom: '1px solid var(--border-color)',
-            textAlign: 'left',
-            cursor: 'pointer',
-            fontFamily: 'inherit',
-          }}
-        >
-          {p.label}
-        </button>
-      ))}
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      {spec.split('|').map((d, i) => {
+        if (d.startsWith('C')) { const [x, y, r] = d.slice(1).split(' ').map(Number); return <circle key={i} cx={x} cy={y} r={r} />; }
+        return <path key={i} d={d} />;
+      })}
+    </svg>
+  );
+}
+
+function SettingsListPanel({ selected, onSelect }: { selected: SettingsPage; onSelect: (p: SettingsPage) => void }) {
+  return (
+    <section style={{ marginTop: 14 }}>
+      <div style={{ ...hs.sectionHeader, cursor: 'default' }}>Settings</div>
+      {SETTINGS_PAGES.map(p => {
+        const active = selected === p.id;
+        return (
+          <button
+            key={p.id}
+            onClick={() => onSelect(p.id)}
+            style={{ ...hs.sideRow, background: active ? 'var(--item-active-bg)' : 'transparent', color: active ? 'var(--text-primary)' : 'var(--text-secondary)', fontWeight: active ? 600 : 500 }}
+          >
+            <span style={{ display: 'inline-flex', color: active ? 'var(--accent)' : 'var(--text-muted)' }}><SettingsGlyph spec={p.icon} /></span>
+            <span style={hs.sideRowLabel}>{p.label}</span>
+          </button>
+        );
+      })}
+    </section>
+  );
+}
+
+function SettingsPageHeader({ page }: { page: SettingsPage }) {
+  const meta = SETTINGS_PAGES.find(p => p.id === page)!;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, paddingBottom: 4 }}>
+      <div style={{ fontSize: '1.45rem', fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '-0.02em' }}>{meta.label}</div>
+      <div style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>{meta.hint}</div>
     </div>
   );
 }
@@ -570,8 +502,8 @@ export function DevicePolicySection({ token }: { token: string }) {
   }
 
   return (
-    <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 12, padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Organization Device Policy</div>
+    <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 14, padding: '20px 22px', boxShadow: '0 1px 2px rgba(0,0,0,0.03)', display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div style={{ fontSize: '1rem', fontWeight: 650, color: 'var(--text-primary)' }}>Organization Device Policy</div>
       <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 8, padding: '10px 14px' }}>
         <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
           When enabled, this device checks its own running apps against your organization's list of
@@ -669,8 +601,8 @@ function DisappearingMessagesSection({ token }: { token: string }) {
   const labelStyle: React.CSSProperties = { fontSize: '0.85rem', color: 'var(--text-secondary)' };
 
   return (
-    <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 12, padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Disappearing Messages</div>
+    <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 14, padding: '20px 22px', boxShadow: '0 1px 2px rgba(0,0,0,0.03)', display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div style={{ fontSize: '1rem', fontWeight: 650, color: 'var(--text-primary)' }}>Disappearing Messages</div>
       <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 8, padding: '10px 14px' }}>
         <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
           Applied automatically to everything you send from now on. Leave a field blank to keep that kind on forever.
@@ -763,9 +695,9 @@ function AccountIdentitySection({ token, username, onLogout }: { token: string; 
   }
 
   return (
-    <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 12, padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 18 }}>
+    <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 14, padding: '20px 22px', boxShadow: '0 1px 2px rgba(0,0,0,0.03)', display: 'flex', flexDirection: 'column', gap: 18 }}>
       <div>
-        <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>Username</div>
+        <div style={{ fontSize: '1rem', fontWeight: 650, color: 'var(--text-primary)', marginBottom: 10 }}>Username</div>
         {done ? (
           <span style={{ fontSize: '0.85rem', color: '#25d366' }}>Username updated — signing you out to apply everywhere…</span>
         ) : (
@@ -789,7 +721,7 @@ function AccountIdentitySection({ token, username, onLogout }: { token: string; 
       </div>
 
       <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: 16 }}>
-        <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>Recovery Code</div>
+        <div style={{ fontSize: '1rem', fontWeight: 650, color: 'var(--text-primary)', marginBottom: 8 }}>Recovery Code</div>
         <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: 1.5, margin: '0 0 10px' }}>
           Lets you reset your access token yourself if you forget it, without an admin. Generating a new
           one invalidates any earlier code — do this if you're not sure your old one is still safe.
@@ -874,8 +806,8 @@ function EncryptionKeySection({ token, username }: { token: string; username: st
   }
 
   return (
-    <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 12, padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Encryption Key</div>
+    <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 14, padding: '20px 22px', boxShadow: '0 1px 2px rgba(0,0,0,0.03)', display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div style={{ fontSize: '1rem', fontWeight: 650, color: 'var(--text-primary)' }}>Encryption Key</div>
 
       {kp ? (
         <>
@@ -957,7 +889,7 @@ interface SettingsMainProps {
   onSetMasterToken: (t: string) => void;
   onClearMasterToken: () => void;
   onLogout: () => void;
-  page: 'account' | 'appearance';
+  page: SettingsPage;
 }
 
 const hourSelectStyle: React.CSSProperties = {
@@ -1074,8 +1006,7 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
   function updateAppearance(patch: Partial<AppearancePrefs>) {
     setAppearanceState(prev => {
       const next: AppearancePrefs = { ...prev, ...patch };
-      applyAppearance(next);
-      localStorage.setItem('dilarion_appearance', JSON.stringify(next));
+      saveAppearance(next);
       return next;
     });
   }
@@ -1425,10 +1356,10 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
 
   if (page === 'appearance') {
     return (
-      <div className="settings-scroll-page" style={{ flex: 1, overflowY: 'auto', padding: '32px 40px', display: 'flex', flexDirection: 'column', gap: 28, background: 'var(--bg-base)' }}>
-        <div style={{ fontSize: '1.1rem', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.03em' }}>Appearance</div>
+      <div className="settings-scroll-page" style={settingsPageStyle}>
+        <SettingsPageHeader page="appearance" />
 
-        <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 12, padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 18 }}>
+        <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 14, padding: '20px 22px', boxShadow: '0 1px 2px rgba(0,0,0,0.03)', display: 'flex', flexDirection: 'column', gap: 18 }}>
           {/* Color mode */}
           <div>
             <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 8 }}>Color Mode</div>
@@ -1530,9 +1461,10 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
 
   // Account page (default)
   return (
-    <div className="settings-scroll-page" style={{ flex: 1, overflowY: 'auto', padding: '32px 40px', display: 'flex', flexDirection: 'column', gap: 28, background: 'var(--bg-base)' }}>
+    <div className="settings-scroll-page" style={settingsPageStyle}>
+      <SettingsPageHeader page={page} />
       {/* Profile */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
+      <div style={{ display: page === 'profile' ? 'flex' : 'none', alignItems: 'center', gap: 20 }}>
         <div
           onClick={() => !pfpUploading && pfpInputRef.current?.click()}
           title="Change profile picture"
@@ -1578,9 +1510,10 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
         </div>
       </div>
 
-      {/* Availability status */}
-      <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 12, padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Status</div>
+      {page === 'profile' && (<>
+{/* Availability status */}
+      <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 14, padding: '20px 22px', boxShadow: '0 1px 2px rgba(0,0,0,0.03)', display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div style={{ fontSize: '1rem', fontWeight: 650, color: 'var(--text-primary)' }}>Status</div>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           {(['available', 'busy', 'dnd', 'away'] as AvailabilityStatus[]).map(s => (
             <button
@@ -1617,10 +1550,13 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
         {statusError && <span style={{ fontSize: '0.72rem', color: '#ef4444' }}>{statusError}</span>}
       </div>
 
-      {/* Notifications */}
+      </>)}
+
+      {page === 'notifications' && (<>
+{/* Notifications */}
       {notif && (
-        <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 12, padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Notifications</div>
+        <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 14, padding: '20px 22px', boxShadow: '0 1px 2px rgba(0,0,0,0.03)', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ fontSize: '1rem', fontWeight: 650, color: 'var(--text-primary)' }}>Notifications</div>
 
           <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, cursor: 'pointer' }}>
             <span>
@@ -1654,9 +1590,12 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
         </div>
       )}
 
-      {/* Master token section */}
-      <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 12, padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Master Token</div>
+      </>)}
+
+      {page === 'security' && (<>
+{/* Master token section */}
+      <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 14, padding: '20px 22px', boxShadow: '0 1px 2px rgba(0,0,0,0.03)', display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div style={{ fontSize: '1rem', fontWeight: 650, color: 'var(--text-primary)' }}>Master Token</div>
 
         <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 8, padding: '10px 14px' }}>
           <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
@@ -1764,8 +1703,8 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
       </div>
 
       {/* Master-token 2FA section */}
-      <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 12, padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Master Token 2FA</div>
+      <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 14, padding: '20px 22px', boxShadow: '0 1px 2px rgba(0,0,0,0.03)', display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div style={{ fontSize: '1rem', fontWeight: 650, color: 'var(--text-primary)' }}>Master Token 2FA</div>
         <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 8, padding: '10px 14px' }}>
           <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
             Requires a second password to create or replace your master token, so a stolen login session alone can't reset it.
@@ -1863,9 +1802,12 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
         {twoFaError && <span style={{ fontSize: '0.75rem', color: '#ef4444' }}>{twoFaError}</span>}
       </div>
 
-      {/* AI Voice Decoy section */}
-      <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 12, padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>AI Voice Decoy</div>
+      </>)}
+
+      {page === 'voice' && (<>
+{/* AI Voice Decoy section */}
+      <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 14, padding: '20px 22px', boxShadow: '0 1px 2px rgba(0,0,0,0.03)', display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div style={{ fontSize: '1rem', fontWeight: 650, color: 'var(--text-primary)' }}>AI Voice Decoy</div>
         <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 8, padding: '10px 14px' }}>
           <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
             Record a short sample of your own voice. Decoy voice notes use it, and you can type English text to preview speech in that voice. Another account cannot download the sample or the clips.
@@ -1945,21 +1887,24 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
         )}
       </div>
 
+      </>)}
+
       {/* Username + recovery code */}
-      <AccountIdentitySection token={token} username={username} onLogout={onLogout} />
+      {page === 'profile' && <AccountIdentitySection token={token} username={username} onLogout={onLogout} />}
 
       {/* Disappearing message defaults */}
-      <DisappearingMessagesSection token={token} />
+      {page === 'notifications' && <DisappearingMessagesSection token={token} />}
 
       {/* Org device-policy monitoring consent — hidden from Settings UI, all
           desktop devices are org-owned. Component/backend logic left intact. */}
 
       {/* Encryption key section */}
-      <EncryptionKeySection token={token} username={username} />
+      {page === 'security' && <EncryptionKeySection token={token} username={username} />}
 
-      {/* Danger zone: account deletion request */}
+      {page === 'account' && (<>
+{/* Danger zone: account deletion request */}
       <div style={{ background: 'var(--bg-panel)', border: '1px solid #ef4444', borderRadius: 12, padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#ef4444', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Danger Zone</div>
+        <div style={{ fontSize: '1rem', fontWeight: 650, color: '#dc2626' }}>Danger Zone</div>
 
         {deletionStatus && deletionStatus.status ? (
           <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 8, padding: '10px 14px' }}>
@@ -2009,8 +1954,10 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
         )}
       </div>
 
+      </>)}
+
       {/* Logout */}
-      <div style={{ marginTop: 'auto' }}>
+      <div style={{ display: page === 'account' ? 'block' : 'none' }}>
         <button
           onClick={onLogout}
           style={{ width: '100%', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 10, padding: '12px 0', fontSize: '0.9rem', fontWeight: 700, cursor: 'pointer', letterSpacing: '-0.01em', fontFamily: 'inherit' }}
@@ -2319,6 +2266,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
   const [channels, setChannels] = useState<ChannelSummary[]>([]);
+  const [sectionsOpen, setSectionsOpen] = useState({ channels: true, list: true });
   const [selectedChannel, setSelectedChannel] = useState<number | null>(null);
   const [showChannelBrowse, setShowChannelBrowse] = useState(false);
   const [calls, setCalls] = useState<CallRecord[]>([]);
@@ -2354,7 +2302,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
   const [unread, setUnread] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState('');
   const [typingUsers, setTypingUsers] = useState<Set<string>>(new Set());
-  const [settingsPage, setSettingsPage] = useState<'account' | 'appearance'>('account');
+  const [settingsPage, setSettingsPage] = useState<SettingsPage>('profile');
 
   // ── Per-chat settings: archive / mute / lock / delete-for-me ────────────────
   const [chatSettings, setChatSettings] = useState<ChatSettingsItem[]>([]);
@@ -3249,75 +3197,23 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
   // ── List Panel content ───────────────────────────────────────────────────────
 
   function renderListHeader() {
-    const titles: Record<Tab, string> = {
-      chats: 'Chats',
-      groups: 'Groups',
-      channels: 'Channels',
-      meetings: 'Meetings',
-      calendar: 'Calendar',
-      tasks: 'Tasks',
-      calls: 'Calls',
-      settings: 'Settings',
-    };
     return (
       <div style={hs.listHeader}>
-        <span style={hs.listHeaderTitle}>{titles[activeTab]}</span>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{
-            width: 7, height: 7, borderRadius: '50%',
-            background: connected ? '#25d366' : '#f59e0b',
-            boxShadow: connected ? '0 0 5px #25d366' : 'none',
-          }} />
-          <button
-            onClick={() => setShowSearch(true)}
-            title="Search people, channels and files"
-            style={{
-              background: 'var(--bg-card)', border: '1px solid var(--border-color)',
-              borderRadius: '50%', width: 28, height: 28, display: 'flex', alignItems: 'center',
-              justifyContent: 'center', cursor: 'pointer', flexShrink: 0, color: 'var(--text-muted)',
-            }}
-          >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>
+        <button style={hs.workspacePill} onClick={() => switchTab('settings')} title="Workspace settings">
+          <span style={hs.listHeaderTitle}>Dilarion</span>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9" /></svg>
+        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <span
+            title={connected ? 'Connected' : 'Reconnecting…'}
+            style={{ width: 8, height: 8, borderRadius: '50%', margin: '0 6px', background: connected ? '#22c55e' : '#f59e0b' }}
+          />
+          <button style={hs.headerIconBtn} onClick={() => setShowSearch(true)} title="Search">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>
           </button>
-          {canBroadcast && (
-            <button
-              onClick={() => { setBroadcastState({ sending: false, error: '', notice: '' }); setShowBroadcastCompose(true); }}
-              title="Send an official broadcast to all staff"
-              style={{
-                background: 'rgba(124,58,237,0.15)', border: '1px solid rgba(124,58,237,0.4)',
-                borderRadius: '50%', width: 28, height: 28, display: 'flex', alignItems: 'center',
-                justifyContent: 'center', cursor: 'pointer', flexShrink: 0, color: '#a78bfa',
-              }}
-            >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
-                <path d="m3 11 14-6v14L3 13z"/><path d="M3 11v2a2 2 0 0 0 2 2h1"/><path d="M11 18.5 9 19a2 2 0 0 1-2-2v-2"/>
-              </svg>
-            </button>
-          )}
-          {activeTab === 'chats' && (
-            <>
-              <button
-                onClick={openNewChat}
-                title="New chat"
-                style={{
-                  background: 'var(--accent)',
-                  border: 'none',
-                  borderRadius: '50%',
-                  width: 28,
-                  height: 28,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  cursor: 'pointer',
-                  flexShrink: 0,
-                }}
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round">
-                  <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-                </svg>
-              </button>
-            </>
-          )}
+          <button style={hs.headerIconBtn} onClick={() => { switchTab('chats'); openNewChat(); }} title="New message">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
+          </button>
         </div>
       </div>
     );
@@ -3368,7 +3264,6 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
                       ...hs.listItem,
                       cursor: 'pointer',
                       background: isActive ? 'var(--item-active-bg)' : 'transparent',
-                      borderLeft: `3px solid ${isActive ? 'var(--accent)' : 'transparent'}`,
                       opacity: cs?.is_archived ? 0.6 : 1,
                     }}
                     onClick={() => openContact(c.username)}
@@ -3376,23 +3271,19 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
                     <div style={{ position: 'relative', flexShrink: 0 }}>
                       <div style={hs.contactAvatar}>{initials(c.username)}</div>
                       <div style={{
-                        position: 'absolute', bottom: 1, right: 1,
-                        width: 11, height: 11, borderRadius: '50%',
-                        background: c.is_active ? '#25d366' : '#374151',
-                        border: '2px solid #111',
+                        position: 'absolute', bottom: -1, right: -1,
+                        width: 9, height: 9, borderRadius: '50%',
+                        background: c.is_active ? '#22c55e' : 'transparent',
+                        border: c.is_active ? '2px solid var(--bg-panel)' : '1.5px solid var(--text-muted)',
                       }} />
                     </div>
                     <div style={hs.itemInfo}>
-                      <span style={hs.itemName}>
+                      <span style={{ ...hs.itemName, fontWeight: hasUnread ? 650 : 500, color: hasUnread || isActive ? 'var(--text-primary)' : 'var(--text-secondary)' }}>
                         {c.username}
                         {cs?.is_locked && <LockBadge />}
                       </span>
-                      {isTyping ? (
-                        <span style={{ fontSize: '0.72rem', color: '#25d366', fontStyle: 'italic' }}>typing…</span>
-                      ) : (
-                        <span style={{ fontSize: '0.72rem', color: c.is_active ? '#25d366' : '#6b7280' }}>
-                          {c.is_active ? 'online' : 'offline'}
-                        </span>
+                      {isTyping && (
+                        <span style={{ fontSize: '0.72rem', color: '#16a34a', fontStyle: 'italic' }}>typing…</span>
                       )}
                     </div>
                     {cs?.is_muted && <MuteBadge />}
@@ -3418,19 +3309,26 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
     if (activeTab === 'channels') {
       return (
         <>
-          <div style={{ display: 'flex', gap: 8, padding: '8px 12px' }}>
-            <button onClick={() => setShowChannelBrowse(true)} style={{ flex: 1, background: 'transparent', border: '1px solid var(--border-color)', borderRadius: 8, padding: 8, color: 'var(--text-primary)', cursor: 'pointer' }}>Browse</button>
-          </div>
-          {channels.map(c => (
-            <button key={c.id} onClick={() => { setSelectedChannel(c.id); setMobilePane('main'); }} style={{ display: 'flex', width: '100%', textAlign: 'left', gap: 8, padding: '10px 12px', background: selectedChannel === c.id ? 'var(--bg-card)' : 'transparent', border: 'none', color: 'var(--text-primary)', cursor: 'pointer' }}>
-              <span>#</span>
-              <span style={{ flex: 1 }}>
-                <span style={{ display: 'block', fontWeight: 600 }}>{c.name}</span>
-                <span style={{ display: 'block', fontSize: '0.72rem', color: 'var(--text-muted)' }}>{c.topic || `${c.member_count} members`}</span>
-              </span>
-              {(c.unread_count || 0) > 0 && <span style={{ fontSize: '0.7rem' }}>{c.unread_count}</span>}
-            </button>
-          ))}
+          {channels.map(c => {
+            const unreadN = c.unread_count || 0;
+            const active = selectedChannel === c.id;
+            return (
+              <button
+                key={c.id}
+                onClick={() => { setSelectedChannel(c.id); setMobilePane('main'); }}
+                title={c.topic || `${c.member_count} members`}
+                style={{ ...hs.sideRow, background: active ? 'var(--item-active-bg)' : 'transparent', opacity: c.is_archived ? 0.55 : 1 }}
+              >
+                <span style={hs.sideRowIcon}>{c.visibility === 'private' ? <LockGlyph /> : '#'}</span>
+                <span style={{ ...hs.sideRowLabel, fontWeight: unreadN > 0 || active ? 600 : 500, color: unreadN > 0 || active ? 'var(--text-primary)' : 'var(--text-secondary)' }}>{c.name}</span>
+                {unreadN > 0 && <span style={hs.tabBtnBadge}>{unreadN > 99 ? '99+' : unreadN}</span>}
+              </button>
+            );
+          })}
+          <button style={{ ...hs.sideRow, color: 'var(--text-muted)' }} onClick={() => setShowChannelBrowse(true)}>
+            <span style={hs.sideRowIcon}>+</span>
+            <span style={hs.sideRowLabel}>Browse channels</span>
+          </button>
           {channels.length === 0 && <div style={{ padding: 16, color: 'var(--text-muted)', fontSize: '0.8rem' }}>No channels yet.</div>}
           {showChannelBrowse && <ChannelBrowse token={token} onClose={() => setShowChannelBrowse(false)} onJoined={() => { setShowChannelBrowse(false); refreshChannels(); }} />}
         </>
@@ -3915,80 +3813,103 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
         </div>
       )}
 
-      {/* ── SIDEBAR (WhatsApp Desktop-style, labeled rows) ─────────────── */}
-      <nav className="app-tab-bar" aria-label="Primary navigation" style={{ ...hs.tabBar, width: layout.nav }}>
-        <NavRow icon={<ChatTabIcon active={activeTab === 'chats'} />} label="Chats" active={activeTab === 'chats'} badge={unread.size} onClick={() => switchTab('chats')} />
-        <NavRow icon={<GroupTabIcon active={activeTab === 'groups'} />} label="Groups" active={activeTab === 'groups'} onClick={() => switchTab('groups')} />
-        <NavRow icon={<GroupTabIcon active={activeTab === 'channels'} />} label="Channels" active={activeTab === 'channels'} onClick={() => switchTab('channels')} />
-        <NavRow icon={<MeetingsTabIcon active={activeTab === 'meetings'} />} label="Meetings" active={activeTab === 'meetings'} onClick={() => switchTab('meetings')} />
-        <NavRow icon={<CalendarTabIcon active={activeTab === 'calendar'} />} label="Calendar" active={activeTab === 'calendar'} onClick={() => switchTab('calendar')} />
-        <NavRow icon={<TasksTabIcon active={activeTab === 'tasks'} />} label="Tasks" active={activeTab === 'tasks'} onClick={() => switchTab('tasks')} />
-        <NavRow icon={<CallTabIcon active={activeTab === 'calls'} />} label="Calls" active={activeTab === 'calls'} onClick={() => switchTab('calls')} />
-        <div className="mobile-settings-tab">
-          <NavRow icon={<SettingsTabIcon active={activeTab === 'settings'} />} label="Settings" active={activeTab === 'settings'} onClick={() => switchTab('settings')} />
+      {/* ── RAIL: brand frame column, app-level actions only ────────────── */}
+      <nav className="app-tab-bar" aria-label="App" style={hs.rail}>
+        <div style={hs.railLogo} title="Dilarion">
+          <img src="/logo.jpg" alt="Dilarion" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
         </div>
-
-        {/* Profile row + logout pinned to the bottom, WhatsApp-style */}
-        <div className="desktop-profile-actions" style={{ marginTop: 'auto', width: '100%', borderTop: '1px solid var(--border-color)', paddingTop: 8 }}>
+        <button style={{ ...hs.railBtn, ...(activeTab !== 'settings' ? hs.railBtnActive : {}) }} title="Home" onClick={() => switchTab('chats')}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>
+        </button>
+        <button style={hs.railBtn} title="Search people, channels and files" onClick={() => setShowSearch(true)}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>
+        </button>
+        <button style={{ ...hs.railBtn, ...hs.railBtnAdd }} title="New chat" onClick={() => { switchTab('chats'); openNewChat(); }}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        </button>
+        {canBroadcast && (
           <button
-            onClick={() => switchTab('settings')}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 12,
-              width: 'calc(100% - 16px)', margin: '0 8px', padding: '10px 12px',
-              borderRadius: 10, background: activeTab === 'settings' ? 'var(--tab-active-bg)' : 'transparent',
-              border: 'none', cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit',
-            }}
+            style={hs.railBtn}
+            title="Send an official broadcast to all staff"
+            onClick={() => { setBroadcastState({ sending: false, error: '', notice: '' }); setShowBroadcastCompose(true); }}
           >
-            <div style={{
-              width: 30, height: 30, borderRadius: '50%', background: 'var(--accent)', color: '#fff',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '0.68rem', flexShrink: 0,
-            }}>
-              {initials(username)}
-            </div>
-            <span className="profile-username" style={{ flex: 1, fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {username}
-            </span>
-            <SettingsTabIcon active={activeTab === 'settings'} />
-          </button>
-          <button
-            onClick={() => { if (window.confirm('Log out of Dilarion on this device?')) onLogout(); }}
-            title="Log out"
-            style={{
-              display: 'flex', alignItems: 'center', gap: 12,
-              width: 'calc(100% - 16px)', margin: '4px 8px 8px', padding: '9px 12px',
-              borderRadius: 10, background: 'transparent', border: 'none', cursor: 'pointer',
-              textAlign: 'left', fontFamily: 'inherit', color: '#ef4444', fontSize: '0.85rem', fontWeight: 600,
-            }}
-          >
-            <span style={{ width: 30, display: 'flex', justifyContent: 'center', flexShrink: 0 }}>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" />
-              </svg>
-            </span>
-            Log out
-          </button>
-        </div>
-      </nav>
-
-      <ColumnResizer width={layout.nav} range={NAV_WIDTH} onChange={nav => setLayout(l => ({ ...l, nav }))} />
-
-      {/* ── LIST PANEL (resizable, 320px default) ───────────────────────── */}
-      <aside className="app-list-panel" style={{ ...hs.listPanel, width: layout.list }}>
-        {renderListHeader()}
-        {renderListContent()}
-      </aside>
-
-      <ColumnResizer width={layout.list} range={LIST_WIDTH} onChange={list => setLayout(l => ({ ...l, list }))} />
-
-      {/* ── MAIN PANEL (flex 1) ─────────────────────────────────────────── */}
-      <main className="app-main-panel" style={hs.mainPanel}>
-        {(activeTab === 'calls' || activeTab === 'settings') && mobilePane === 'main' && (
-          <button className="mobile-pane-back" onClick={() => setMobilePane('list')}>
-            <span aria-hidden="true">‹</span> {activeTab === 'calls' ? 'Calls' : 'Settings'}
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="m3 11 14-6v14L3 13z"/><path d="M3 11v2a2 2 0 0 0 2 2h1"/><path d="M11 18.5 9 19a2 2 0 0 1-2-2v-2"/></svg>
           </button>
         )}
-        {renderMainContent()}
-      </main>
+        <div style={{ flex: 1 }} />
+        <button style={{ ...hs.railBtn, ...(activeTab === 'settings' ? hs.railBtnActive : {}) }} title="Settings" onClick={() => switchTab('settings')}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        </button>
+        <button
+          style={hs.railBtn}
+          title="Log out"
+          onClick={() => { if (window.confirm('Log out of Dilarion on this device?')) onLogout(); }}
+        >
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        </button>
+        <button style={hs.railAvatarBtn} title={username} onClick={() => switchTab('settings')}>
+          <span style={hs.railAvatar}>{initials(username)}</span>
+          <span style={{ ...hs.railPresence, background: connected ? '#22c55e' : '#f59e0b' }} />
+        </button>
+      </nav>
+
+      {/* ── CONTENT CARD: sidebar + main, white rounded sheet ───────────── */}
+      <div className="app-card" style={hs.card}>
+        <aside className="app-list-panel" style={{ ...hs.listPanel, width: layout.list }}>
+          {renderListHeader()}
+          <div style={hs.sidebarScroll}>
+            <div style={hs.navGroup}>
+              <NavRow icon={<ChatTabIcon active={activeTab === 'chats'} />} label="Direct messages" active={activeTab === 'chats'} badge={unread.size} onClick={() => switchTab('chats')} />
+              <NavRow icon={<GroupTabIcon active={activeTab === 'groups'} />} label="Groups" active={activeTab === 'groups'} onClick={() => switchTab('groups')} />
+              <NavRow icon={<HashIcon active={activeTab === 'channels'} />} label="Channels" active={activeTab === 'channels'} badge={channels.reduce((n, c) => n + (c.unread_count || 0), 0)} onClick={() => switchTab('channels')} />
+              <NavRow icon={<MeetingsTabIcon active={activeTab === 'meetings'} />} label="Meetings" active={activeTab === 'meetings'} onClick={() => switchTab('meetings')} />
+              <NavRow icon={<CalendarTabIcon active={activeTab === 'calendar'} />} label="Calendar" active={activeTab === 'calendar'} onClick={() => switchTab('calendar')} />
+              <NavRow icon={<TasksTabIcon active={activeTab === 'tasks'} />} label="Tasks" active={activeTab === 'tasks'} onClick={() => switchTab('tasks')} />
+              <NavRow icon={<CallTabIcon active={activeTab === 'calls'} />} label="Calls" active={activeTab === 'calls'} onClick={() => switchTab('calls')} />
+              <div className="mobile-settings-tab">
+                <NavRow icon={<SettingsTabIcon active={activeTab === 'settings'} />} label="Settings" active={activeTab === 'settings'} onClick={() => switchTab('settings')} />
+              </div>
+            </div>
+            {activeTab === 'chats' && channels.length > 0 && (
+              <SidebarSection title="Channels" open={sectionsOpen.channels} onToggle={() => setSectionsOpen(o => ({ ...o, channels: !o.channels }))}>
+                {channels.filter(c => !c.is_archived).map(c => (
+                  <button
+                    key={c.id}
+                    style={hs.sideRow}
+                    onClick={() => { setSelectedChannel(c.id); switchTab('channels'); setSelectedChannel(c.id); setMobilePane('main'); }}
+                  >
+                    <span style={hs.sideRowIcon}>{c.visibility === 'private' ? <LockGlyph /> : '#'}</span>
+                    <span style={{ ...hs.sideRowLabel, fontWeight: (c.unread_count || 0) > 0 ? 650 : 500, color: (c.unread_count || 0) > 0 ? 'var(--text-primary)' : 'var(--text-secondary)' }}>{c.name}</span>
+                    {(c.unread_count || 0) > 0 && <span style={hs.tabBtnBadge}>{c.unread_count! > 99 ? '99+' : c.unread_count}</span>}
+                  </button>
+                ))}
+                <button style={{ ...hs.sideRow, color: 'var(--text-muted)' }} onClick={() => { switchTab('channels'); setShowChannelBrowse(true); }}>
+                  <span style={hs.sideRowIcon}>+</span>
+                  <span style={hs.sideRowLabel}>Add channels</span>
+                </button>
+              </SidebarSection>
+            )}
+            {activeTab !== 'settings' && (
+              <SidebarSection title={SECTION_TITLES[activeTab]} open={sectionsOpen.list} onToggle={() => setSectionsOpen(o => ({ ...o, list: !o.list }))}>
+                {renderListContent()}
+              </SidebarSection>
+            )}
+            {activeTab === 'settings' && renderListContent()}
+          </div>
+        </aside>
+
+        <ColumnResizer width={layout.list} range={LIST_WIDTH} onChange={list => setLayout(l => ({ ...l, list }))} />
+
+        {/* ── MAIN PANEL (flex 1) ─────────────────────────────────────────── */}
+        <main className="app-main-panel" style={hs.mainPanel}>
+          {(activeTab === 'calls' || activeTab === 'settings') && mobilePane === 'main' && (
+            <button className="mobile-pane-back" onClick={() => setMobilePane('list')}>
+              <span aria-hidden="true">‹</span> {activeTab === 'calls' ? 'Calls' : 'Settings'}
+            </button>
+          )}
+          {renderMainContent()}
+        </main>
+      </div>
 
       {chatJoinError && (
         <div
@@ -4881,44 +4802,90 @@ const ci: Record<string, React.CSSProperties> = {
 };
 
 const hs: Record<string, React.CSSProperties> = {
+  // Brand frame: rail on the tinted background, white sheet beside it.
   root: {
     display: 'flex',
     flexDirection: 'row',
     height: '100vh',
-    background: 'var(--bg-base)',
+    background: 'var(--frame-bg)',
     overflow: 'hidden',
+    padding: '10px 10px 10px 0',
   },
-
-  // Tab bar — WhatsApp Desktop-style: wide, labeled rows rather than a
-  // narrow icon rail, full-width active highlight, profile row pinned to
-  // the very bottom.
-  tabBar: {
-    width: NAV_WIDTH.def,
-    minWidth: NAV_WIDTH.min,
-    flexShrink: 1,
+  rail: {
+    width: 68,
+    minWidth: 68,
+    flexShrink: 0,
     display: 'flex',
     flexDirection: 'column',
-    paddingTop: 10,
-    paddingBottom: 10,
-    gap: 2,
-    background: 'var(--bg-base)',
-    borderRight: '1px solid var(--border-color)',
+    alignItems: 'center',
+    gap: 10,
+    padding: '6px 0 4px',
+    color: 'var(--rail-fg)',
   },
+  railLogo: {
+    width: 42, height: 42, borderRadius: 12, overflow: 'hidden', marginBottom: 8,
+    background: 'rgba(255,255,255,0.9)', boxShadow: '0 4px 14px rgba(0,0,0,0.25)', flexShrink: 0,
+  },
+  railBtn: {
+    width: 44, height: 44, borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center',
+    background: 'var(--rail-tile)', color: 'var(--rail-fg)', border: 'none', cursor: 'pointer',
+    transition: 'background 0.15s, color 0.15s', flexShrink: 0,
+  },
+  railBtnActive: { background: 'var(--rail-tile-active)', color: '#fff', boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.18)' },
+  railBtnAdd: { background: 'rgba(255,255,255,0.08)', border: '1px dashed rgba(255,255,255,0.35)' },
+  railAvatarBtn: { position: 'relative', background: 'transparent', border: 'none', padding: 0, cursor: 'pointer', marginTop: 4 },
+  railAvatar: {
+    width: 40, height: 40, borderRadius: '50%', background: '#fff', color: 'var(--accent)', display: 'flex',
+    alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '0.8rem',
+    boxShadow: '0 0 0 2px rgba(255,255,255,0.5)',
+  },
+  railPresence: { position: 'absolute', right: 0, bottom: 0, width: 11, height: 11, borderRadius: '50%', border: '2px solid #7a1d14' },
+  card: {
+    flex: 1,
+    minWidth: 0,
+    display: 'flex',
+    background: 'var(--bg-panel)',
+    borderRadius: 18,
+    overflow: 'hidden',
+    border: '1px solid var(--border-color)',
+    boxShadow: '0 10px 40px rgba(0,0,0,0.22)',
+  },
+  sidebarScroll: { flex: 1, overflowY: 'auto', padding: '2px 10px 16px' },
+  navGroup: { display: 'flex', flexDirection: 'column', gap: 1 },
+  sectionHeader: {
+    display: 'flex', alignItems: 'center', gap: 6, background: 'transparent', border: 'none', cursor: 'pointer',
+    color: 'var(--text-muted)', fontSize: '0.8rem', fontWeight: 500, padding: '4px 10px 6px', fontFamily: 'inherit',
+  },
+  sideRow: {
+    display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '7px 10px', borderRadius: 8,
+    background: 'transparent', border: 'none', cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit',
+    color: 'var(--text-secondary)', fontSize: '0.9rem',
+  },
+  sideRowIcon: { width: 18, display: 'inline-flex', justifyContent: 'center', color: 'var(--text-muted)', fontSize: '1.05rem', flexShrink: 0 },
+  sideRowLabel: { flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  workspacePill: {
+    display: 'flex', alignItems: 'center', gap: 8, background: 'var(--bg-card)', border: 'none', borderRadius: 10,
+    padding: '7px 12px', cursor: 'pointer', color: 'var(--text-primary)', fontFamily: 'inherit',
+  },
+  headerIconBtn: {
+    width: 32, height: 32, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center',
+    background: 'transparent', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer',
+  },
+
   tabBtn: {
     display: 'flex',
     alignItems: 'center',
-    gap: 14,
-    width: 'calc(100% - 16px)',
-    margin: '0 8px',
-    padding: '10px 12px',
-    borderRadius: 10,
+    gap: 12,
+    width: '100%',
+    padding: '7px 10px',
+    borderRadius: 8,
     background: 'transparent',
     border: 'none',
     cursor: 'pointer',
     transition: 'background 0.12s',
-    color: 'var(--text-secondary, #4b5563)',
-    fontSize: '0.88rem',
-    fontWeight: 600,
+    color: 'var(--text-secondary)',
+    fontSize: '0.9rem',
+    fontWeight: 500,
     fontFamily: 'inherit',
     textAlign: 'left',
     flexShrink: 0,
@@ -4926,6 +4893,7 @@ const hs: Record<string, React.CSSProperties> = {
   tabBtnActive: {
     background: 'var(--tab-active-bg)',
     color: 'var(--text-primary)',
+    fontWeight: 600,
   },
   tabBtnLabel: {
     flex: 1,
@@ -4934,7 +4902,7 @@ const hs: Record<string, React.CSSProperties> = {
     whiteSpace: 'nowrap',
   },
   tabBtnBadge: {
-    background: 'var(--accent)',
+    background: '#ef4444',
     color: '#fff',
     borderRadius: 10,
     minWidth: 20,
@@ -4963,24 +4931,23 @@ const hs: Record<string, React.CSSProperties> = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: '16px 20px 10px',
+    padding: '16px 14px 12px 14px',
     flexShrink: 0,
   },
   listHeaderTitle: {
-    fontSize: '1.1rem',
-    fontWeight: 800,
+    fontSize: '0.95rem',
+    fontWeight: 600,
     color: 'var(--text-primary)',
-    letterSpacing: '-0.03em',
   },
   searchWrap: {
     display: 'flex',
     alignItems: 'center',
     gap: 8,
-    margin: '4px 12px 8px',
+    margin: '2px 0 6px',
     background: 'var(--bg-card)',
-    border: '1px solid var(--border-color)',
-    borderRadius: 10,
-    padding: '8px 12px',
+    border: '1px solid transparent',
+    borderRadius: 8,
+    padding: '6px 10px',
     flexShrink: 0,
   },
   searchInput: {
@@ -4990,10 +4957,7 @@ const hs: Record<string, React.CSSProperties> = {
     color: 'var(--text-primary)',
     fontSize: '0.85rem',
   },
-  listItems: {
-    flex: 1,
-    overflowY: 'auto',
-  },
+  listItems: {},
   emptyList: {
     padding: '24px 16px',
     textAlign: 'center',
@@ -5022,9 +4986,10 @@ const hs: Record<string, React.CSSProperties> = {
   listItem: {
     display: 'flex',
     alignItems: 'center',
-    gap: 12,
+    gap: 10,
     width: '100%',
-    padding: '10px 16px',
+    padding: '6px 10px',
+    borderRadius: 8,
     textAlign: 'left',
     cursor: 'pointer',
     transition: 'background 0.12s',
@@ -5033,8 +4998,8 @@ const hs: Record<string, React.CSSProperties> = {
     background: 'transparent',
   },
   contactAvatar: {
-    width: 46,
-    height: 46,
+    width: 26,
+    height: 26,
     borderRadius: '50%',
     background: 'var(--avatar-bg)',
     color: 'var(--avatar-text)',
@@ -5042,12 +5007,12 @@ const hs: Record<string, React.CSSProperties> = {
     alignItems: 'center',
     justifyContent: 'center',
     fontWeight: 700,
-    fontSize: '0.82rem',
+    fontSize: '0.6rem',
     flexShrink: 0,
   },
   groupAvatar: {
-    width: 46,
-    height: 46,
+    width: 26,
+    height: 26,
     borderRadius: '50%',
     color: '#fff',
     display: 'flex',
@@ -5065,15 +5030,15 @@ const hs: Record<string, React.CSSProperties> = {
     minWidth: 0,
   },
   itemName: {
-    fontSize: '0.88rem',
-    fontWeight: 600,
+    fontSize: '0.9rem',
+    fontWeight: 500,
     color: 'var(--text-primary)',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
   },
   unreadBadge: {
-    background: 'var(--accent)',
+    background: '#ef4444',
     color: '#fff',
     fontSize: '0.65rem',
     fontWeight: 700,
@@ -5091,6 +5056,6 @@ const hs: Record<string, React.CSSProperties> = {
     display: 'flex',
     flexDirection: 'column',
     overflow: 'hidden',
-    background: 'var(--bg-base)',
+    background: 'var(--bg-panel)',
   },
 };

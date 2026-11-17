@@ -37,7 +37,7 @@ import { loadKeypair } from '../services/keys';
 import { presenceService, WsMessage } from '../services/presence';
 import { PaperclipIcon as PaperclipIconSvg, CloseIcon, PinIcon, SparkleIcon, UsersIcon } from '../components/Icons';
 import MediaBubble, { DocumentBubble } from '../components/MediaBubble';
-import { PendingBubble, PendingMsg, buildRecipientKeys } from './ChatPanel';
+import { PendingBubble, PendingMsg, buildRecipientKeys, avatarTint, ms as flatBase } from './ChatPanel';
 import MeetingCard, { JoinMeetingHandler } from '../components/MeetingCard';
 import { MessageMenuTrigger, MessageReactionPills, SmileyIcon } from '../components/MessageMenu';
 import MediaPicker from '../components/MediaPicker';
@@ -348,6 +348,8 @@ function PrivateTagBubble({ recipient }: { recipient: string }) {
 interface GroupMsgBubbleProps {
   msg: ChatMessage;
   isMine: boolean;
+  /** First message in a run from one sender: show avatar, name and time. */
+  showHeader?: boolean;
   myUsername: string;
   token: string;
   masterToken: string | null;
@@ -367,10 +369,13 @@ interface GroupMsgBubbleProps {
 }
 
 function GroupMsgBubble({
-  msg, isMine, myUsername, token, masterToken, onDecrypt, onMasterTokenSaved, onJoinMeeting,
+  msg, isMine: isMineReal, showHeader = true, myUsername, token, masterToken, onDecrypt, onMasterTokenSaved, onJoinMeeting,
   replyToMsg, onReact, onReply, onForward, onPinToggle, onStarToggle, onEdit, onDelete, onTranslate,
   isStarred,
 }: GroupMsgBubbleProps) {
+  // Flat layout: neutral cards on the left for everyone. Ownership still
+  // drives the edit/delete menu through isMineReal.
+  const isMine = false;
   const ct = msg.content_type;
   const mediaId = msg.content;
   const isPrivateTagged = ct === 'private_tagged';
@@ -479,22 +484,30 @@ function GroupMsgBubble({
     ? { background: 'var(--bg-card)', border: '1px solid var(--border-color)' }
     : {};
 
+  const sender = msg.sender || '?';
   return (
     <div
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: isMine ? 'flex-end' : 'flex-start',
-        marginBottom: 4,
-        position: 'relative',
-      }}
+      style={{ ...flat.row, marginTop: showHeader ? 14 : 2, background: hovered ? 'var(--item-hover)' : 'transparent' }}
     >
+      <div style={flat.avatarCol}>
+        {showHeader && <div style={{ ...flat.avatar, background: avatarTint(sender) }}>{initials(sender)}</div>}
+      </div>
+      <div style={flat.content}>
+      {showHeader && (
+        <div style={flat.header}>
+          <span style={flat.senderName}>{sender}</span>
+          <span style={flat.headerTime}>{fmtTime(msg.timestamp)}</span>
+          {hasRecipient && !isPrivateTagged && (
+            <span style={{ fontSize: '0.75rem', color: '#7c3aed' }}>→ @{msg.recipient}</span>
+          )}
+        </div>
+      )}
       {hovered && (
-        <div style={{ position: 'absolute', top: -10, [isMine ? 'right' : 'left']: -10, zIndex: 15 } as React.CSSProperties}>
+        <div style={{ position: 'absolute', top: -14, right: 12, zIndex: 15 }}>
           <MessageMenuTrigger
-            isMine={isMine}
+            isMine={isMineReal}
             onReact={onReact}
             onReply={onReply}
             onForward={onForward}
@@ -502,7 +515,7 @@ function GroupMsgBubble({
             onInfo={() => setShowInfo(v => !v)}
             onPinToggle={onPinToggle}
             onStarToggle={onStarToggle}
-            onEdit={isMine ? onEdit : undefined}
+            onEdit={isMineReal ? onEdit : undefined}
             onDelete={onDelete}
             onTranslate={isTextish ? handleTranslateClick : undefined}
             isPinned={!!msg.is_pinned}
@@ -529,20 +542,7 @@ function GroupMsgBubble({
         </div>
       )}
 
-      {!isMine && (
-        <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginBottom: 2, marginLeft: 4 }}>
-          {msg.sender}
-          {hasRecipient && !isPrivateTagged && (
-            <span style={{ marginLeft: 4, color: '#a78bfa' }}>→ @{msg.recipient}</span>
-          )}
-        </span>
-      )}
-      {isMine && hasRecipient && !isPrivateTagged && (
-        <span style={{ fontSize: '0.67rem', color: '#a78bfa', marginBottom: 2, marginRight: 4 }}>
-          → @{msg.recipient}
-        </span>
-      )}
-      {isForMe && !isMine && (
+      {isForMe && !isMineReal && (
         <span style={{ fontSize: '0.67rem', color: '#a78bfa', marginBottom: 2, marginLeft: 4, display: 'flex', alignItems: 'center', gap: 3 }}>
           Only you can read this
         </span>
@@ -573,10 +573,11 @@ function GroupMsgBubble({
 
       <MessageReactionPills reactions={msg.reactions} onToggle={onReact} />
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 3, marginTop: 3 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 3, marginTop: 2 }}>
         {msg.is_pinned && <span title="Pinned" style={{ display: 'inline-flex' }}><PinIcon size={11} color={isMine ? 'rgba(255,255,255,0.75)' : '#6b7280'} /></span>}
         {msg.is_edited && <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>edited</span>}
-        <span style={ms.ts}>{fmtTime(msg.timestamp)}</span>
+        {!showHeader && <span style={ms.ts}>{fmtTime(msg.timestamp)}</span>}
+      </div>
       </div>
     </div>
   );
@@ -1086,15 +1087,22 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
               </svg>
             </button>
           )}
-          <div style={{ ...gs.avatar, background: avatarBg }}>{initials(group.name)}</div>
-          <div>
-            <div style={gs.groupName}>{isChannel ? `#${group.name}` : group.name}</div>
-            <div style={gs.groupMeta}>
-              {group.topic ? `${group.topic} · ` : ''}
-              {members.length || group.member_count} members
-              {group.disappear_after_hours ? ` · Disappearing: ${formatDisappear(group.disappear_after_hours)}` : ''}
-            </div>
-          </div>
+          <button style={gs.titlePill} onClick={() => setShowMembers(true)} title={isChannel ? 'Channel details' : 'Group details'}>
+            {isChannel
+              ? <span style={{ color: 'var(--text-muted)', fontSize: '1.05rem', fontWeight: 500 }}>{group.visibility === 'private'
+                ? <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg>
+                : '#'}</span>
+              : <span style={{ ...gs.avatar, background: avatarBg }}>{initials(group.name)}</span>}
+            <span style={gs.groupName}>{group.name}</span>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--text-muted)' }}><polyline points="6 9 12 15 18 9" /></svg>
+          </button>
+          {(group.topic || group.disappear_after_hours) && (
+            <span style={gs.groupMeta}>
+              {group.topic || ''}
+              {group.topic && group.disappear_after_hours ? ' · ' : ''}
+              {group.disappear_after_hours ? `Disappearing: ${formatDisappear(group.disappear_after_hours)}` : ''}
+            </span>
+          )}
         </div>
         <div className="chat-header-actions" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
         {onStartGroupCall && (
@@ -1116,8 +1124,12 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
           </button>
         )}
-        <button onClick={() => setShowMembers(true)} style={gs.iconBtn} title="Group info">
-          <UsersIcon size={18} color="#9ca3af" />
+        <button onClick={() => setShowMembers(true)} style={gs.memberStack} title={`${members.length || group.member_count || 0} members`}>
+          {members.slice(0, 3).map((m, i) => (
+            <span key={m.user_id} style={{ ...gs.stackAvatar, background: avatarTint(m.username), marginLeft: i ? -8 : 0, zIndex: 3 - i }}>{initials(m.username)}</span>
+          ))}
+          {members.length === 0 && <UsersIcon size={18} color="var(--text-secondary)" />}
+          <span style={gs.stackCount}>{members.length || group.member_count || 0}</span>
         </button>
         <button onClick={handleSummarize} style={gs.iconBtn} title="Summarize thread">
           <SparkleIcon size={17} color="#9ca3af" />
@@ -1168,10 +1180,15 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
             if (dateKey !== prevKey) {
               acc.push(<DateSeparator key={`sep-${dateKey}`} label={fmtDateLabel(msg.timestamp)} />);
             }
+            const prevMsg = i > 0 ? timeline[i - 1] : null;
+            const showHeader = dateKey !== prevKey || !prevMsg || prevMsg.sender !== msg.sender
+              || (prevMsg.thread_reply_count || 0) > 0
+              || new Date(msg.timestamp).getTime() - new Date(prevMsg.timestamp).getTime() > 5 * 60_000;
             acc.push(
               <GroupMsgBubble
                 key={msg.id}
                 msg={msg}
+                showHeader={showHeader}
                 isMine={msg.sender === myUsername}
                 myUsername={myUsername}
                 token={token}
@@ -1193,8 +1210,9 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
             );
             if (isChannel && (msg.thread_reply_count || 0) > 0) {
               acc.push(
-                <button key={`thread-${msg.id}`} onClick={() => setThreadRoot(msg.id)} style={{ margin: '0 12px 8px', background: 'transparent', border: 'none', color: 'var(--accent)', fontSize: '0.75rem', cursor: 'pointer', textAlign: 'left' }}>
-                  {msg.thread_reply_count} {msg.thread_reply_count === 1 ? 'reply' : 'replies'}
+                <button key={`thread-${msg.id}`} onClick={() => setThreadRoot(msg.id)} style={flat.threadChip}>
+                  <span style={{ fontWeight: 600, color: 'var(--accent)' }}>{msg.thread_reply_count} {msg.thread_reply_count === 1 ? 'reply' : 'replies'}</span>
+                  {msg.thread_last_reply_at && <span style={{ color: 'var(--text-muted)' }}>Last reply {fmtTime(msg.thread_last_reply_at)}</span>}
                 </button>
               );
             }
@@ -1371,7 +1389,7 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
             ><CloseIcon size={12} color="var(--text-muted)" /></button>
           </div>
         )}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, position: 'relative' }}>
+        <div style={{ ...flatBase.composer, position: 'relative', opacity: channelLocked ? 0.6 : 1 }}>
           <input
             ref={fileInputRef}
             type="file"
@@ -1379,10 +1397,12 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
             style={{ display: 'none' }}
             onChange={handleFileChange}
           />
+          <div style={flatBase.toolbar}>
           <button
             style={gs.iconBtn}
             onClick={() => setShowMediaPicker(v => !v)}
             title="Emoji, GIFs & stickers"
+            disabled={channelLocked}
           >
             <SmileyIcon />
           </button>
@@ -1400,32 +1420,48 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
             style={gs.iconBtn}
             onClick={() => fileInputRef.current?.click()}
             title="Attach file"
+            disabled={channelLocked}
           >
-            <PaperclipIconSvg size={18} color="#6b7280" />
+            <PaperclipIconSvg size={18} color="var(--text-secondary)" />
           </button>
           <button
             style={gs.iconBtn}
+            onClick={() => { setText(t => (t.endsWith(' ') || !t ? t : t + ' ') + '@'); inputRef.current?.focus(); }}
+            title="Mention someone"
+            disabled={channelLocked}
+          >
+            <span style={{ fontSize: '1.02rem', fontWeight: 600, lineHeight: 1, color: 'var(--text-secondary)' }}>@</span>
+          </button>
+          <span style={flatBase.toolbarDivider} />
+          <button
+            style={gs.iconBtn}
             onClick={handleSuggestReply}
-            disabled={suggestLoading}
+            disabled={suggestLoading || channelLocked}
             title="Suggest a reply"
           >
-            <SparkleIcon size={17} color="#6b7280" />
+            <SparkleIcon size={17} color="var(--text-secondary)" />
           </button>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8 }}>
           <textarea
             ref={inputRef}
             style={gs.textInput}
-            placeholder={channelLocked ? lockHint : threadRoot ? 'Reply in thread' : taggedUser ? `Private message to @${taggedUser}…` : 'Type a message or @ to tag someone'}
+            placeholder={channelLocked ? lockHint : threadRoot ? 'Reply in thread' : taggedUser ? `Private message to @${taggedUser}…` : isChannel ? `Message #${group.name}` : `Message ${group.name}`}
             value={text}
             onChange={handleTextChange}
             onKeyDown={handleKeyDown}
             rows={1}
             disabled={channelLocked}
           />
-          {text.trim() && (
-            <button style={gs.sendBtn} onClick={handleSend} disabled={sending} title="Send">
-              <SendIcon />
-            </button>
-          )}
+          <button
+            style={{ ...gs.sendBtn, opacity: text.trim() ? 1 : 0.35, cursor: text.trim() ? 'pointer' : 'default' }}
+            onClick={handleSend}
+            disabled={sending || !text.trim() || channelLocked}
+            title="Send"
+          >
+            <SendIcon />
+          </button>
+          </div>
         </div>
       </div>
 
@@ -1537,20 +1573,29 @@ function SendIcon() {
 
 // ── Styles ─────────────────────────────────────────────────────────────────────
 
+const flat: Record<string, React.CSSProperties> = {
+  ...flatBase,
+  threadChip: {
+    display: 'flex', alignItems: 'center', gap: 10, margin: '2px 12px 6px 60px', padding: '4px 8px',
+    background: 'transparent', border: '1px solid var(--border-color)', borderRadius: 8,
+    fontSize: '0.78rem', cursor: 'pointer', fontFamily: 'inherit', alignSelf: 'flex-start',
+  },
+};
+
 const ms: Record<string, React.CSSProperties> = {
   bubbleMine: {
-    background: 'var(--bubble-mine-bg)',
-    borderRadius: '18px 18px 4px 18px',
-    padding: '10px 14px',
-    maxWidth: '68%',
-    color: 'var(--bubble-mine-text)',
+    background: 'var(--bubble-theirs-bg)',
+    borderRadius: 10,
+    padding: '8px 12px',
+    maxWidth: '85%',
+    color: 'var(--bubble-theirs-text)',
     wordBreak: 'break-word',
   },
   bubbleTheirs: {
     background: 'var(--bubble-theirs-bg)',
-    borderRadius: '18px 18px 18px 4px',
-    padding: '10px 14px',
-    maxWidth: '68%',
+    borderRadius: 10,
+    padding: '8px 12px',
+    maxWidth: '85%',
     color: 'var(--bubble-theirs-text)',
     wordBreak: 'break-word',
   },
@@ -1576,7 +1621,8 @@ const gs: Record<string, React.CSSProperties> = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: '12px 20px',
+    padding: '12px 24px',
+    minHeight: 64,
     borderBottom: '1px solid var(--border-color)',
     background: 'var(--header-bg)',
     flexShrink: 0,
@@ -1598,31 +1644,50 @@ const gs: Record<string, React.CSSProperties> = {
     gap: 12,
   },
   avatar: {
-    width: 42,
-    height: 42,
-    borderRadius: '50%',
+    width: 24,
+    height: 24,
+    borderRadius: 7,
     color: '#fff',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
     fontWeight: 700,
-    fontSize: '0.85rem',
+    fontSize: '0.6rem',
     flexShrink: 0,
   },
+  titlePill: {
+    display: 'flex', alignItems: 'center', gap: 8, background: 'var(--bg-card)', border: 'none', borderRadius: 10,
+    padding: '6px 12px', cursor: 'pointer', fontFamily: 'inherit',
+  },
   groupName: {
-    fontSize: '0.92rem',
-    fontWeight: 700,
+    fontSize: '0.95rem',
+    fontWeight: 600,
     color: 'var(--text-primary)',
   },
   groupMeta: {
-    fontSize: '0.72rem',
+    fontSize: '0.8rem',
     color: 'var(--text-muted)',
-    marginTop: 2,
+    maxWidth: 360,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  memberStack: {
+    display: 'flex', alignItems: 'center', background: 'transparent', border: 'none', cursor: 'pointer',
+    padding: '2px 4px', marginLeft: 6, fontFamily: 'inherit',
+  },
+  stackAvatar: {
+    width: 30, height: 30, borderRadius: '50%', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+    fontSize: '0.62rem', fontWeight: 700, border: '2px solid var(--bg-panel)', position: 'relative',
+  },
+  stackCount: {
+    marginLeft: 4, minWidth: 30, height: 30, borderRadius: 15, background: 'var(--bg-card)', color: 'var(--text-secondary)',
+    fontSize: '0.75rem', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 6px',
   },
   messagesArea: {
     flex: 1,
     overflowY: 'auto',
-    padding: '16px 24px',
+    padding: '12px 12px 16px',
     display: 'flex',
     flexDirection: 'column',
     gap: 2,
@@ -1637,34 +1702,29 @@ const gs: Record<string, React.CSSProperties> = {
   },
   inputBar: {
     display: 'flex',
-    alignItems: 'center',
-    gap: 8,
-    padding: '10px 16px',
-    borderTop: '1px solid var(--border-color)',
+    padding: '8px 24px 20px',
     background: 'var(--input-bar-bg)',
     flexShrink: 0,
-    minHeight: 60,
   },
   textInput: {
     flex: 1,
-    background: 'var(--input-field-bg)',
-    border: '1px solid var(--border-color)',
-    borderRadius: 24,
+    background: 'transparent',
+    border: 'none',
     color: 'var(--text-primary)',
-    fontSize: '0.88rem',
-    padding: '10px 16px',
+    fontSize: '0.92rem',
+    padding: '8px 6px',
     resize: 'none',
-    lineHeight: 1.4,
-    maxHeight: 120,
+    lineHeight: 1.45,
+    maxHeight: 160,
     overflowY: 'auto',
     fontFamily: 'inherit',
   },
   sendBtn: {
     background: 'var(--accent)',
     color: '#fff',
-    width: 40,
-    height: 40,
-    borderRadius: '50%',
+    width: 36,
+    height: 36,
+    borderRadius: 10,
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
@@ -1675,9 +1735,9 @@ const gs: Record<string, React.CSSProperties> = {
   },
   iconBtn: {
     background: 'transparent',
-    color: '#6b7280',
-    padding: 8,
-    borderRadius: '50%',
+    color: 'var(--text-secondary)',
+    padding: 7,
+    borderRadius: 8,
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
