@@ -244,3 +244,23 @@ button.mtg-chip:hover { background: rgba(255, 255, 255, 0.12); }
   .mtg-lobby-card { grid-template-columns: 1fr; padding: 16px; gap: 18px; }
   .mtg-lobby-title { font-size: 1.2rem; }
 }
+
+/* ── Live transcript ───────────────────────────────────── */
+.mtg-captions {
+  position: absolute; left: 50%; bottom: 104px; transform: translateX(-50%); z-index: 940;
+  width: min(760px, calc(100% - 32px)); display: flex; flex-direction: column; gap: 6px;
+  pointer-events: none;
+}
+.mtg-caption-line {
+  align-self: center; max-width: 100%; padding: 8px 14px; border-radius: 12px;
+  background: rgba(8, 6, 6, 0.78); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  color: #fff; font-size: 0.98rem; line-height: 1.45; text-align: center;
+  animation: mtg-caption-in 0.18s ease-out;
+}
+.mtg-caption-line.muted { color: var(--mtg-muted); font-size: 0.82rem; }
+.mtg-caption-name { color: #ffb4a8; font-weight: 700; margin-right: 8px; }
+@keyframes mtg-caption-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@media (max-width: 720px) {
+  .mtg-captions { bottom: 88px; }
+  .mtg-caption-line { font-size: 0.88rem; }
+}

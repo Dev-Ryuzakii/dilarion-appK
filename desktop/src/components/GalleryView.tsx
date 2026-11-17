@@ -17,6 +17,7 @@ import MeetingChatPanel from './MeetingChatPanel';
 import { userMessage } from '../services/errors';
 import MeetingNotesPanel from './MeetingNotesPanel';
 import './meeting.css';
+import { CaptionsOverlay, TranscriptDrawer, useLiveCaptions } from './LiveCaptions';
 
 // Group video via self-hosted LiveKit — the SFU room every group call (2+
 // people) now renders through, replacing the old mesh-WebRTC conference path
@@ -167,6 +168,11 @@ export default function GalleryView({
   // instead of the parent conferenceId prop. Orchestration calls always
   // target the parent (conferenceId), never wherever the host currently is.
   const [activeConferenceId, setActiveConferenceId] = useState(conferenceId);
+  // Live transcript follows the room you're actually in (breakout rooms are
+  // their own conferences).
+  const captions = useLiveCaptions(token, activeConferenceId, showMeetingChrome && !connecting);
+  const [showCaptions, setShowCaptions] = useState(true);
+  const [showTranscript, setShowTranscript] = useState(false);
   const [inBreakoutName, setInBreakoutName] = useState<string | null>(null);
   const [breakoutActive, setBreakoutActive] = useState(false);
   const [showBreakoutPanel, setShowBreakoutPanel] = useState(false);
@@ -782,6 +788,11 @@ export default function GalleryView({
             {notesRecordingId != null && (
               <button className="mtg-chip" onClick={() => setNotesOpen(true)}>Notes</button>
             )}
+            {showMeetingChrome && (captions.state.enabled || captions.segments.length > 0) && (
+              <button className="mtg-chip" onClick={() => setShowTranscript(true)}>
+                {captions.state.enabled ? (captions.state.status === 'starting' ? 'Transcript starting…' : 'Live transcript') : 'Transcript'}
+              </button>
+            )}
           </span>
         </div>
         <div className="mtg-iconbar">
@@ -812,6 +823,16 @@ export default function GalleryView({
           </button>
           {showMeetingChrome && (
             <button className={`mtg-icon-btn${showChat ? ' on' : ''}`} onClick={() => setShowChat(true)} title="Chat"><ChatIcon /></button>
+          )}
+          {showMeetingChrome && (
+            <button
+              className={`mtg-icon-btn${captions.state.enabled && showCaptions ? ' on' : ''}`}
+              onClick={() => {
+                if (captions.state.enabled) setShowCaptions(v => !v);
+                else setShowTranscript(true);
+              }}
+              title={captions.state.enabled ? (showCaptions ? 'Hide captions' : 'Show captions') : 'Live transcript'}
+            ><CaptionsIcon /></button>
           )}
           {showMeetingChrome && (
             <button
@@ -1041,6 +1062,24 @@ export default function GalleryView({
           </div>
         ))}
       </div>
+
+      {showMeetingChrome && !connecting && !error && captions.state.enabled && showCaptions && (
+        <CaptionsOverlay segments={captions.segments} starting={captions.state.status === 'starting'} />
+      )}
+
+      {showMeetingChrome && showTranscript && (
+        <TranscriptDrawer
+          segments={captions.segments}
+          state={captions.state}
+          isHost={isHost}
+          busy={captions.busy}
+          error={captions.error}
+          available={captions.available}
+          onStart={() => { setShowCaptions(true); captions.start(); }}
+          onStop={captions.stop}
+          onClose={() => setShowTranscript(false)}
+        />
+      )}
 
       {!connecting && !error && (
         <div className="gallery-controls" style={{ position: 'relative', display: 'flex', justifyContent: 'center', padding: '10px 16px 22px' }}>
@@ -1531,3 +1570,12 @@ const unpinBtnStyle: React.CSSProperties = {
   gap: 6, padding: '6px 12px', borderRadius: 999, border: '1px solid rgba(255,255,255,0.18)',
   background: 'rgba(10,8,8,0.62)', color: '#fff', fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer',
 };
+
+function CaptionsIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2" y="5" width="20" height="14" rx="3" />
+      <path d="M10 10.5a2 2 0 1 0 0 3M17 10.5a2 2 0 1 0 0 3" />
+    </svg>
+  );
+}
