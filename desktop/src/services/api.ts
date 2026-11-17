@@ -106,6 +106,18 @@ export interface ActivationResult {
   recovery_code?: string | null;
 }
 
+/** FastAPI sends `detail` as a string, or as a list of field errors on a 422. */
+function detailText(body: any, fallback: string): string {
+  const d = body?.detail;
+  if (typeof d === 'string' && d.trim()) return d;
+  if (Array.isArray(d) && d.length) {
+    const field = String(d[0]?.loc?.[d[0].loc.length - 1] ?? '');
+    if (field === 'invitation_code') return "That isn't a valid activation code. Use the code from your invitation email or SMS.";
+    if (typeof d[0]?.msg === 'string') return d[0].msg;
+  }
+  return fallback;
+}
+
 /** Activate an invited account with the code from the email/SMS and a login token the user chooses. */
 export async function activateAccount(code: string, loginToken: string): Promise<ActivationResult> {
   const res = await apiFetch(`${BASE}/auth/activate`, {
@@ -114,7 +126,7 @@ export async function activateAccount(code: string, loginToken: string): Promise
     body: JSON.stringify({ invitation_code: code.trim(), token: loginToken }),
   });
   const body = await res.json().catch(() => null);
-  if (!res.ok) throw new Error(body?.detail || 'Activation failed');
+  if (!res.ok) throw new Error(detailText(body, 'Activation failed'));
   return body;
 }
 
@@ -146,7 +158,7 @@ export async function completeOnboarding(sessionToken: string, p: OnboardingProf
   if (res.status === 409) return; // already completed
   if (!res.ok) {
     const body = await res.json().catch(() => null);
-    throw new Error(body?.detail || 'Could not save your profile');
+    throw new Error(detailText(body, 'Could not save your profile'));
   }
 }
 

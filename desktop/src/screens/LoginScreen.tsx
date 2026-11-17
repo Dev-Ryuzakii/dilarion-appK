@@ -155,6 +155,8 @@ export default function LoginScreen({ onLogin, onBack, initialView = 'login', no
     e.preventDefault();
     setActError('');
     if (!actCode.trim()) return setActError('Enter the activation code from your email or SMS');
+    // Codes are long random strings; a username here is the usual mix-up.
+    if (actCode.trim().length < 20 && !actCode.includes('code=')) return setActError("That isn't an activation code. Use the long code from your invitation email or SMS, not your username.");
     if (actToken.length < 8) return setActError('Your login token must be at least 8 characters');
     if (actToken !== actConfirm) return setActError('The two tokens do not match');
     setActLoading(true);
