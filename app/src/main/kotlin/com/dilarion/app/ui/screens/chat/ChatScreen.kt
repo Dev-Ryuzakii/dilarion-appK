@@ -164,6 +164,10 @@ fun ChatScreen(
     onGroupCall: ((groupId: Int, groupName: String, callType: String) -> Unit)? = null,
     /** Join tapped on a group-call card in the thread. */
     onJoinGroupCall: ((conferenceId: Int, groupId: Int, groupName: String, callType: String, startedBy: String) -> Unit)? = null,
+    /** Join tapped on an instant-meeting card in the thread. */
+    onJoinMeeting: ((conferenceId: Int, invitedBy: String) -> Unit)? = null,
+    /** Join tapped on a scheduled-meeting card in the thread. */
+    onJoinScheduledMeeting: ((joinCode: String, title: String?) -> Unit)? = null,
     viewModel: ChatViewModel = hiltViewModel(),
 ) {
     val context = LocalContext.current
@@ -554,6 +558,8 @@ fun ChatScreen(
                                     onJoinGroupCall = { confId, gId, gName, type ->
                                         onJoinGroupCall?.invoke(confId, gId, gName, type, message.sender ?: "")
                                     },
+                                    onJoinMeeting = onJoinMeeting,
+                                    onJoinScheduledMeeting = onJoinScheduledMeeting,
                                 )
                             }
                             is ChatItem.MediaMessage -> {
@@ -1714,17 +1720,22 @@ private fun MessageBubble(
     onTranslate: ((String) -> Unit)? = null,
     isStarred: Boolean = false,
     onJoinGroupCall: ((conferenceId: Int, groupId: Int, groupName: String, callType: String) -> Unit)? = null,
+    onJoinMeeting: ((conferenceId: Int, invitedBy: String) -> Unit)? = null,
+    onJoinScheduledMeeting: ((joinCode: String, title: String?) -> Unit)? = null,
 ) {
-    // Group call notice — rendered as a call card, not a meeting/text bubble.
-    if (message.contentType == "meeting" && !message.isDeleted) {
+    // System cards (meeting invites, group calls, recordings, notes) carry a
+    // JSON payload, not chat text. Never fall through to the text bubble, or
+    // the raw JSON shows in the thread.
+    if (message.contentType in SYSTEM_CARD_TYPES && !message.isDeleted) {
         val card = remember(message.content) {
             runCatching { org.json.JSONObject(message.content ?: "") }.getOrNull()
         }
-        if (card != null && card.optString("kind") == "group_call") {
-            GroupCallCard(
+        val sender = message.sender ?: ""
+        when (card?.optString("kind")) {
+            "group_call" -> GroupCallCard(
                 isMine = isMine,
                 isVideo = card.optString("call_type") == "video",
-                startedBy = message.sender ?: "",
+                startedBy = sender,
                 onJoin = {
                     onJoinGroupCall?.invoke(
                         card.optInt("conference_id"),
@@ -1734,8 +1745,43 @@ private fun MessageBubble(
                     )
                 },
             )
-            return
+            "instant" -> MeetingInviteCard(
+                isMine = isMine,
+                title = card.optString("title").takeIf { it.isNotBlank() && it != "null" } ?: "Instant meeting",
+                subtitle = if (isMine) "You started a meeting" else "Started by $sender",
+                onJoin = card.optInt("conference_id", -1).takeIf { it > 0 }
+                    ?.let { confId -> { onJoinMeeting?.invoke(confId, sender) } },
+            )
+            "scheduled" -> MeetingInviteCard(
+                isMine = isMine,
+                title = card.optString("title").takeIf { it.isNotBlank() && it != "null" } ?: "Scheduled meeting",
+                subtitle = meetingRange(card.optString("scheduled_at"), card.optInt("duration_minutes", 0)),
+                onJoin = card.optString("join_code").takeIf { it.isNotBlank() }
+                    ?.let { code -> { onJoinScheduledMeeting?.invoke(code, card.optString("title").takeIf { t -> t.isNotBlank() && t != "null" }) } },
+            )
+            "meeting_recording" -> MeetingInfoCard(
+                isMine = isMine,
+                icon = Icons.Default.VideoLibrary,
+                title = card.optString("meeting_title").takeIf { it.isNotBlank() } ?: "Meeting recording",
+                body = listOfNotNull(
+                    "Recording",
+                    card.optInt("duration_seconds", 0).takeIf { it > 0 }?.let { formatDuration(it) },
+                ).joinToString(" · "),
+            )
+            "meeting_notes" -> MeetingInfoCard(
+                isMine = isMine,
+                icon = Icons.Default.Description,
+                title = card.optString("meeting_title").takeIf { it.isNotBlank() } ?: "Meeting notes",
+                body = card.optString("summary").takeIf { it.isNotBlank() } ?: "Notes are ready",
+            )
+            else -> MeetingInfoCard(
+                isMine = isMine,
+                icon = Icons.Default.Event,
+                title = "Meeting update",
+                body = "",
+            )
         }
+        return
     }
     var showMenu by remember { mutableStateOf(false) }
     var showInfo by remember { mutableStateOf(false) }
@@ -2148,6 +2194,94 @@ private fun MembersSheetDialog(
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
     )
+}
+
+/** content_type values whose content is a JSON card payload, not chat text. */
+private val SYSTEM_CARD_TYPES = setOf("meeting", "meeting_recording", "meeting_notes")
+
+private fun meetingRange(scheduledAt: String, durationMinutes: Int): String = runCatching {
+    val start = java.time.OffsetDateTime.parse(scheduledAt).atZoneSameInstant(java.time.ZoneId.systemDefault())
+    val day = java.time.format.DateTimeFormatter.ofPattern("MMM d")
+    val time = java.time.format.DateTimeFormatter.ofPattern("h:mm a")
+    val end = start.plusMinutes(durationMinutes.toLong())
+    if (durationMinutes > 0) "${start.format(day)} · ${start.format(time)} – ${end.format(time)}"
+    else "${start.format(day)} · ${start.format(time)}"
+}.getOrDefault("")
+
+private fun formatDuration(seconds: Int): String {
+    val h = seconds / 3600
+    val m = (seconds % 3600) / 60
+    val s = seconds % 60
+    return if (h > 0) "%d:%02d:%02d".format(h, m, s) else "%d:%02d".format(m, s)
+}
+
+@Composable
+private fun MeetingInviteCard(isMine: Boolean, title: String, subtitle: String, onJoin: (() -> Unit)?) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = if (isMine) Arrangement.End else Arrangement.Start,
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .widthIn(min = 220.dp, max = 280.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(if (isMine) ChatBubbleSelf else ChatBubbleOther)
+                .padding(10.dp),
+        ) {
+            Box(
+                Modifier.size(38.dp).clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.primary),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Default.Videocam, null, tint = Color.White, modifier = Modifier.size(20.dp))
+            }
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text(title, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TextPrimary, maxLines = 2)
+                if (subtitle.isNotBlank()) Text(subtitle, fontSize = 12.sp, color = TextSecondary)
+            }
+            if (onJoin != null) {
+                Button(
+                    onClick = onJoin,
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
+                ) { Text("Join", fontSize = 13.sp) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MeetingInfoCard(
+    isMine: Boolean,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    body: String,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = if (isMine) Arrangement.End else Arrangement.Start,
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .widthIn(min = 200.dp, max = 280.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(if (isMine) ChatBubbleSelf else ChatBubbleOther)
+                .padding(10.dp),
+        ) {
+            Box(
+                Modifier.size(38.dp).clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.primary),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(icon, null, tint = Color.White, modifier = Modifier.size(20.dp))
+            }
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text(title, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TextPrimary, maxLines = 2)
+                if (body.isNotBlank()) Text(body, fontSize = 12.sp, color = TextSecondary, maxLines = 4)
+            }
+        }
+    }
 }
 
 @Composable

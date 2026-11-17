@@ -1188,7 +1188,8 @@ class ChatViewModel @Inject constructor(
     // stored filename (e.g. "40a98e3e-….jpg") — the media bubble already renders
     // the attachment, so hide these.
     private val mediaFilenameRegex = Regex(
-        "^(upload_\\d+|voice_[0-9a-fA-F-]+|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\\.(jpg|jpeg|png|gif|heic|mp4|mov|m4a|wav|mp3)$"
+        "^(upload_\\d+|voice_[0-9a-fA-F-]+|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\\.(jpg|jpeg|jfif|pjpeg|png|gif|webp|bmp|heic|heif|avif|mp4|mov|m4v|webm|3gp|m4a|aac|ogg|opus|wav|mp3)$",
+        RegexOption.IGNORE_CASE,
     )
 
     private fun isMediaFilenameMessage(message: Message, mediaItems: List<MediaItem>): Boolean {

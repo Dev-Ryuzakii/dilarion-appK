@@ -246,6 +246,13 @@ class CallOverlayViewModel @Inject constructor(
         _conferenceInvite.value = ConferenceInviteData(conferenceId, startedBy, emptyList(), groupId, groupName, callType)
     }
 
+    /** Join tapped on an instant-meeting card in a chat — same accept flow as a ring. */
+    fun showMeetingJoin(conferenceId: Int, invitedBy: String) {
+        _conferenceInvite.value = ConferenceInviteData(
+            conferenceId, invitedBy, emptyList(), callType = "video", kind = "meeting",
+        )
+    }
+
     fun declineConferenceInvite() {
         val invite = _conferenceInvite.value ?: return
         _conferenceInvite.value = null

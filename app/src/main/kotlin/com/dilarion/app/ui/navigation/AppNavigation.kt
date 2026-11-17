@@ -304,6 +304,10 @@ fun AppNavigation(pendingIncomingCall: IncomingCallData? = null) {
                 groupName = null,
                 onBack = { navController.popBackStack() },
                 onCall = { u -> navController.navigate(Screen.Call.route(u)) },
+                onJoinMeeting = { confId, invitedBy -> overlayVm.showMeetingJoin(confId, invitedBy) },
+                onJoinScheduledMeeting = { joinCode, title ->
+                    navController.navigate(Screen.Lobby.route(mode = "join", joinCode = joinCode, title = title))
+                },
             )
         }
 
@@ -328,6 +332,10 @@ fun AppNavigation(pendingIncomingCall: IncomingCallData? = null) {
                 },
                 onJoinGroupCall = { confId, gid, gname, type, startedBy ->
                     overlayVm.showGroupCallJoin(confId, gid, gname, type, startedBy)
+                },
+                onJoinMeeting = { confId, invitedBy -> overlayVm.showMeetingJoin(confId, invitedBy) },
+                onJoinScheduledMeeting = { joinCode, title ->
+                    navController.navigate(Screen.Lobby.route(mode = "join", joinCode = joinCode, title = title))
                 },
             )
         }

@@ -68,6 +68,9 @@ private fun previewOf(msg: Message, me: String, unread: Int): String {
         "audio", "voice", "voice_note" -> "Voice note"
         "file", "document" -> "File"
         "sticker" -> "Sticker"
+        "meeting" -> "Meeting"
+        "meeting_recording" -> "Meeting recording"
+        "meeting_notes" -> "Meeting notes"
         else -> null
     }
     return when {
