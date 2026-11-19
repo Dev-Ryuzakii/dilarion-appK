@@ -344,7 +344,7 @@ function EncryptedBubble({ token, messageId, decoyContent, masterToken, isMine, 
           lineHeight: 1.5,
           whiteSpace: 'pre-wrap',
           wordBreak: 'break-word',
-          color: isMine ? '#d1b8a8' : '#c9c9c9',
+          color: 'var(--text-secondary)',
           userSelect: 'none',
         }}>
           {loading ? '…' : displayText}
@@ -398,11 +398,10 @@ interface LockedContentProps {
   apiToken: string;
   masterToken: string | null;
   onMasterTokenSaved: (t: string) => void;
-  isMine: boolean;
   children: React.ReactNode;
 }
 
-export function LockedContent({ apiToken, masterToken, onMasterTokenSaved, isMine, children }: LockedContentProps) {
+export function LockedContent({ apiToken, masterToken, onMasterTokenSaved, children }: LockedContentProps) {
   const [showing, setShowing] = useState(false);
   const [inputVisible, setInputVisible] = useState(false);
   const [inputValue, setInputValue] = useState('');
@@ -466,7 +465,7 @@ export function LockedContent({ apiToken, masterToken, onMasterTokenSaved, isMin
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
         {children}
-        <span style={{ fontSize: '0.62rem', color: isMine ? 'rgba(255,255,255,0.6)' : '#6b7280', fontStyle: 'italic' }}>
+        <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
           Hides in {countdown}s
         </span>
       </div>
@@ -479,7 +478,7 @@ export function LockedContent({ apiToken, masterToken, onMasterTokenSaved, isMin
         onClick={handleTap}
         style={{ cursor: loading ? 'wait' : 'pointer', opacity: loading ? 0.7 : 1, display: 'flex', alignItems: 'center', gap: 6, padding: '2px 0' }}
       >
-        <span style={{ fontSize: '0.82rem', color: isMine ? 'rgba(255,255,255,0.75)' : '#6b7280', userSelect: 'none' }}>
+        <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', userSelect: 'none' }}>
           {loading ? 'Verifying…' : 'Tap to view'}
         </span>
       </div>
@@ -651,7 +650,7 @@ function MessageBubble({
     );
   } else {
     body = (
-      <LockedContent apiToken={token} masterToken={masterToken} onMasterTokenSaved={onMasterTokenSaved} isMine={isMine}>
+      <LockedContent apiToken={token} masterToken={masterToken} onMasterTokenSaved={onMasterTokenSaved}>
         <span style={{ fontSize: '0.88rem', lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
           {msg.content}
         </span>
@@ -660,7 +659,7 @@ function MessageBubble({
   }
 
   const encryptedStyle: React.CSSProperties = isEncrypted(ct)
-    ? { background: isMine ? '#1a1218' : '#111827', border: '1px solid #374151' }
+    ? { background: 'var(--bubble-theirs-bg)', border: '1px solid var(--border-color)' }
     : {};
 
   const sender = msg.sender || '?';
@@ -746,7 +745,7 @@ function MessageBubble({
       <MessageReactionPills reactions={msg.reactions} onToggle={onReact} />
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 3, marginTop: 2, minHeight: 0 }}>
-        {msg.is_pinned && <span title="Pinned" style={{ display: 'inline-flex' }}><PinIcon size={11} color={isMine ? 'rgba(255,255,255,0.75)' : '#6b7280'} /></span>}
+        {msg.is_pinned && <span title="Pinned" style={{ display: 'inline-flex' }}><PinIcon size={11} color="var(--text-muted)" /></span>}
         {isStarred && <span title="Starred" style={{ display: 'inline-flex', color: '#f59e0b', fontSize: '0.72rem', lineHeight: 1 }}>★</span>}
         {msg.is_edited && <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>edited</span>}
         {!showHeader && <span style={ms.ts}>{fmtTime(msg.timestamp)}</span>}
