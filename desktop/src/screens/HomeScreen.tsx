@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { presenceService, WsMessage } from '../services/presence';
+import { notifySessionInvalid } from '../services/session';
 import { setToken as setMonitorToken, handleCommand } from '../services/monitoring';
 import { start as startAppPolicyMonitor, stop as stopAppPolicyMonitor } from '../services/appPolicyMonitor';
 import {
@@ -2548,7 +2549,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
       if (msg.type === 'auth_expired') {
         // The presence socket gave up after repeated auth rejections — the
         // session is dead. Send the user back to login instead of looping.
-        onLogout();
+        notifySessionInvalid('Your session expired or was replaced by a newer sign-in. Please sign in again.');
         return;
       }
       if (msg.type === 'org_broadcast') {

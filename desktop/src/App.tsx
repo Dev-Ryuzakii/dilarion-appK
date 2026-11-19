@@ -90,9 +90,14 @@ export default function App() {
       clearStoredSession();
       setSessionEndedNotice(reason);
       setLockedUserState(null);
+      setStartView('login');
+      setUsePassword(true);
       setSession(null);
     };
     window.addEventListener(SESSION_INVALID_EVENT, onInvalid);
+    // A child can reject a restored token before this effect subscribes.
+    // The notifier has already removed it from storage in that case.
+    if (session && !localStorage.getItem(SESSION_KEY)) onInvalid();
     return () => window.removeEventListener(SESSION_INVALID_EVENT, onInvalid);
   }, [session]);
 

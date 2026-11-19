@@ -3,9 +3,9 @@
 // The server keeps one signed-in client per platform group and retires the
 // older one the moment a new login arrives (see /auth/login), so a client can
 // be left holding a token the server has already deactivated. Nothing used to
-// notice: the token sat in localStorage for its full seven days and every
-// request came back 403 "Not authenticated", which each screen swallowed with
-// an empty catch. The app looked signed in and showed nothing.
+// notice: the token sat in localStorage while conversation requests returned
+// 401 and each screen swallowed the error. The app looked signed in and showed
+// nothing.
 //
 // `apiFetch` now reports that case here instead, and App drops back to the
 // sign-in screen with a reason.

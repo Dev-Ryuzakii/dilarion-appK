@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { emitTo, listen } from '@tauri-apps/api/event';
 import { browserDeviceName, isTauri } from './platform';
+import { notifySessionInvalid } from './session';
 
 const WS_BASE = (import.meta.env.VITE_WS_BASE as string | undefined) || 'wss://apidilarion.eibstratoc.com/ws';
 
@@ -148,9 +149,18 @@ class PresenceService {
       } catch {}
     };
 
-    this.ws.onclose = () => {
+    this.ws.onclose = (event) => {
       this._cleanup();
       this.ws = null;
+
+      if (event.code === 4001 && (event.reason === 'session_replaced' || event.reason === 'session_expired')) {
+        this.stopped = true;
+        this.token = null;
+        notifySessionInvalid(event.reason === 'session_replaced'
+          ? 'This session was replaced by a newer sign-in. Please sign in again.'
+          : 'Your session expired. Please sign in again.');
+        return;
+      }
 
       // A close before the socket ever opened means the handshake was rejected
       // — almost always an expired/invalid token. Retrying it forever is the
