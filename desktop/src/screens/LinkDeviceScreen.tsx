@@ -61,12 +61,19 @@ export default function LinkDeviceScreen({ onLinked, onUsePassword, onActivate }
             const status = await linkStatus(nonce);
             if (cancelled) return;
             if (status.status === 'approved' && status.session_token && status.username) {
+              try {
+                await saveKeypair(status.username, {
+                  privateKey: kp.privateKey,
+                  publicKey: kp.publicKey,
+                  deviceUuid: status.device_uuid,
+                });
+              } catch {
+                if (pollRef.current) clearInterval(pollRef.current);
+                setError('Could not store this device’s message key. Check browser storage settings and try again.');
+                setPhase('error');
+                return;
+              }
               if (pollRef.current) clearInterval(pollRef.current);
-              await saveKeypair(status.username, {
-                privateKey: kp.privateKey,
-                publicKey: kp.publicKey,
-                deviceUuid: status.device_uuid,
-              });
               setPhase('approved');
               onLinked(status.session_token, status.username);
             } else if (status.status === 'expired') {
