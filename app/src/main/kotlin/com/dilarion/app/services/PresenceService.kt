@@ -65,14 +65,14 @@ class PresenceService @Inject constructor(
         disconnect()
         val url = buildString {
             append(WS_BASE)
-            append("?token=").append(token)
-            append("&device_id=").append(deviceId)
+            append("?device_id=").append(deviceId)
             append("&device_type=mobile")
             append("&platform=android")
             append("&device_name=").append(android.net.Uri.encode(deviceName))
         }
         val request = Request.Builder()
             .url(url)
+            .header("Authorization", "Bearer $token")
             .build()
         val newWs = okHttpClient.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(ws: WebSocket, response: Response) {

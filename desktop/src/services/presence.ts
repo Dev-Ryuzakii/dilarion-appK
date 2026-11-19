@@ -3,8 +3,10 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { emitTo, listen } from '@tauri-apps/api/event';
 import { browserDeviceName, isTauri } from './platform';
 import { notifySessionInvalid } from './session';
+import { apiFetch } from './apiTransport';
 
 const WS_BASE = (import.meta.env.VITE_WS_BASE as string | undefined) || 'wss://apidilarion.eibstratoc.com/ws';
+const API_BASE = import.meta.env.VITE_API_BASE || 'https://apidilarion.eibstratoc.com';
 
 // The call window never opens its own WebSocket — a second connection under
 // the same device_id would fight the main window's for the "current"
@@ -75,6 +77,7 @@ class PresenceService {
   private openedThisAttempt = false;
   private authFailures = 0;      // closes that never opened → likely bad token
   private stopped = false;       // true once we give up (auth dead)
+  private opening = false;
 
   get isConnected() {
     return this.ws?.readyState === WebSocket.OPEN;
@@ -95,8 +98,8 @@ class PresenceService {
     });
   }
 
-  private _open() {
-    if (!this.token || this.stopped) return;
+  private async _open() {
+    if (!this.token || this.stopped || this.opening) return;
     // One socket at a time. A stale OPEN/CONNECTING socket left behind is what
     // caused the connect/disconnect churn on the server.
     if (this.ws && (this.ws.readyState === WebSocket.OPEN ||
@@ -107,8 +110,35 @@ class PresenceService {
     this._cleanup();
 
     this.openedThisAttempt = false;
+    this.opening = true;
+    const sessionToken = this.token;
+    let ticket: string;
+    try {
+      const response = await apiFetch(`${API_BASE}/auth/ws-ticket`, {
+        method: 'POST', headers: { Authorization: `Bearer ${sessionToken}` },
+      });
+      if (response.status === 401 || response.status === 403) {
+        this.stopped = true;
+        this.token = null;
+        notifySessionInvalid('Your session expired. Please sign in again.');
+        return;
+      }
+      if (!response.ok) throw new Error(`Ticket request failed: ${response.status}`);
+      ticket = (await response.json()).ticket;
+      if (!ticket) throw new Error('Missing WebSocket ticket');
+    } catch {
+      if (!this.stopped && this.token === sessionToken) {
+        this.failures += 1;
+        const delay = Math.min(30_000, 3_000 * 2 ** Math.min(this.failures, 4));
+        this.reconnectTimer = setTimeout(() => this._open(), delay);
+      }
+      return;
+    } finally {
+      this.opening = false;
+    }
+    if (this.stopped || this.token !== sessionToken) return;
     const params = new URLSearchParams({
-      token: this.token,
+      ticket,
       device_id: this.deviceId,
       device_type: isTauri() ? 'desktop' : 'web',
       device_name: this.deviceName,

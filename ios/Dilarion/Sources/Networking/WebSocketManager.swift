@@ -28,9 +28,11 @@ class WebSocketManager: ObservableObject {
     @Published var isConnected = false
 
     func connect(token: String) {
-        guard let url = URL(string: "\(baseWSURL)?token=\(token)") else { return }
+        guard let url = URL(string: baseWSURL) else { return }
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         task?.cancel(with: .goingAway, reason: nil)
-        task = URLSession.shared.webSocketTask(with: url)
+        task = URLSession.shared.webSocketTask(with: request)
         task?.resume()
         isConnected = true
         events.send(.connected)
