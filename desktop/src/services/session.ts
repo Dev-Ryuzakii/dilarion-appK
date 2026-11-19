@@ -3,7 +3,7 @@
 // The server keeps one signed-in client per platform group and retires the
 // older one the moment a new login arrives (see /auth/login), so a client can
 // be left holding a token the server has already deactivated. Nothing used to
-// notice: the token sat in localStorage while conversation requests returned
+// notice: the token sat in browser storage while conversation requests returned
 // 401 and each screen swallowed the error. The app looked signed in and showed
 // nothing.
 //
@@ -20,6 +20,8 @@ let invalidReason: string | null = null;
 
 export function clearStoredSession(): void {
   try {
+    sessionStorage.removeItem(SESSION_KEY);
+    // Remove tokens written by older releases during the migration.
     localStorage.removeItem(SESSION_KEY);
   } catch {
     // Private mode / storage disabled: nothing to clear.

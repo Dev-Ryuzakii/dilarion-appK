@@ -29,23 +29,25 @@ interface StoredSession {
 
 function loadSession(): { token: string; username: string } | null {
   try {
-    const raw = localStorage.getItem(SESSION_KEY);
+    // Older releases persisted bearer tokens beyond the browser session.
+    localStorage.removeItem(SESSION_KEY);
+    const raw = sessionStorage.getItem(SESSION_KEY);
     if (!raw) return null;
     const s: StoredSession = JSON.parse(raw);
     if (Date.now() - s.loginTime > SESSION_TTL) {
-      localStorage.removeItem(SESSION_KEY);
+      sessionStorage.removeItem(SESSION_KEY);
       return null;
     }
     return { token: s.token, username: s.username };
   } catch {
-    localStorage.removeItem(SESSION_KEY);
+    sessionStorage.removeItem(SESSION_KEY);
     return null;
   }
 }
 
 function saveSession(token: string, username: string) {
   const s: StoredSession = { token, username, loginTime: Date.now() };
-  localStorage.setItem(SESSION_KEY, JSON.stringify(s));
+  sessionStorage.setItem(SESSION_KEY, JSON.stringify(s));
 }
 
 // App reopened after sitting idle past the timeout: treat it exactly like
@@ -53,7 +55,7 @@ function saveSession(token: string, username: string) {
 function initialSession(): { token: string; username: string } | null {
   const s = loadSession();
   if (s && isIdleExpired()) {
-    localStorage.removeItem(SESSION_KEY);
+    sessionStorage.removeItem(SESSION_KEY);
     setLockedUser(s.username);
     return null;
   }
@@ -97,7 +99,7 @@ export default function App() {
     window.addEventListener(SESSION_INVALID_EVENT, onInvalid);
     // A child can reject a restored token before this effect subscribes.
     // The notifier has already removed it from storage in that case.
-    if (session && !localStorage.getItem(SESSION_KEY)) onInvalid();
+    if (session && !sessionStorage.getItem(SESSION_KEY)) onInvalid();
     return () => window.removeEventListener(SESSION_INVALID_EVENT, onInvalid);
   }, [session]);
 
