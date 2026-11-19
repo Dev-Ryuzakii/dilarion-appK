@@ -62,7 +62,7 @@ export default function LinkDeviceScreen({ onLinked, onUsePassword, onActivate }
             if (cancelled) return;
             if (status.status === 'approved' && status.session_token && status.username) {
               if (pollRef.current) clearInterval(pollRef.current);
-              saveKeypair(status.username, {
+              await saveKeypair(status.username, {
                 privateKey: kp.privateKey,
                 publicKey: kp.publicKey,
                 deviceUuid: status.device_uuid,

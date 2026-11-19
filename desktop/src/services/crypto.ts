@@ -1,3 +1,5 @@
+import { isStoredKey, loadStoredPrivateKey, storePrivateKey } from './keyStore';
+
 // E2EE primitives. Must stay wire-compatible with the Android CryptoManager and
 // the iOS equivalent: RSA-2048 OAEP/SHA-256 to wrap a fresh AES-256-GCM key,
 // 12-byte IV, 128-bit tag appended to the ciphertext, everything base64 (no wrap).
@@ -34,6 +36,7 @@ function importPublicKey(b64: string): Promise<CryptoKey> {
 }
 
 function importPrivateKey(b64: string): Promise<CryptoKey> {
+  if (isStoredKey(b64)) return loadStoredPrivateKey(b64);
   return crypto.subtle.importKey('pkcs8', fromB64(b64).buffer as ArrayBuffer, RSA_PARAMS, false, ['decrypt']);
 }
 
@@ -45,14 +48,12 @@ export async function validatePrivateKey(b64: string): Promise<void> {
 export async function generateKeyPair(): Promise<{ publicKey: string; privateKey: string }> {
   const kp = await crypto.subtle.generateKey(
     { ...RSA_PARAMS, modulusLength: KEY_BITS, publicExponent: new Uint8Array([1, 0, 1]) },
-    true,
+    false,
     ['encrypt', 'decrypt'],
   );
-  const [pub, priv] = await Promise.all([
-    crypto.subtle.exportKey('spki', kp.publicKey),
-    crypto.subtle.exportKey('pkcs8', kp.privateKey),
-  ]);
-  return { publicKey: toB64(pub), privateKey: toB64(priv) };
+  const pub = await crypto.subtle.exportKey('spki', kp.publicKey);
+  const privateKey = await storePrivateKey(kp.privateKey);
+  return { publicKey: toB64(pub), privateKey };
 }
 
 // ── AES helpers ───────────────────────────────────────────────────────────────

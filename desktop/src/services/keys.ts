@@ -1,5 +1,6 @@
 import { validatePrivateKey, generateKeyPair } from './crypto';
 import { registerDevice } from './api';
+import { importPrivateKeyToStore, isStoredKey, loadStoredPrivateKey, removeStoredPrivateKey } from './keyStore';
 
 // The identity keypair is stored per-username and deliberately survives logout —
 // same as Android, where regenerating on each login would rotate the identity and
@@ -29,12 +30,23 @@ export function loadKeypair(username: string): Keypair | null {
   }
 }
 
-export function saveKeypair(username: string, kp: Keypair): void {
-  localStorage.setItem(storageKey(username), JSON.stringify(kp));
+export async function saveKeypair(username: string, kp: Keypair): Promise<Keypair> {
+  const previous = loadKeypair(username);
+  const privateKey = isStoredKey(kp.privateKey)
+    ? kp.privateKey : await importPrivateKeyToStore(kp.privateKey);
+  await loadStoredPrivateKey(privateKey);
+  const stored = { ...kp, privateKey };
+  localStorage.setItem(storageKey(username), JSON.stringify(stored));
+  if (previous && previous.privateKey !== privateKey) {
+    await removeStoredPrivateKey(previous.privateKey);
+  }
+  return stored;
 }
 
-export function clearKeypair(username: string): void {
+export async function clearKeypair(username: string, removeKey = true): Promise<void> {
+  const current = loadKeypair(username);
   localStorage.removeItem(storageKey(username));
+  if (removeKey && current) await removeStoredPrivateKey(current.privateKey);
 }
 
 export function hasKeypair(username: string): boolean {
@@ -67,8 +79,7 @@ export async function ensureDeviceRegistered(token: string, username: string): P
     // Offline / older server: keep the key; device_uuid stays undefined and
     // decrypt falls back to the username-keyed entry.
   }
-  saveKeypair(username, kp);
-  return kp;
+  return saveKeypair(username, kp);
 }
 
 /**

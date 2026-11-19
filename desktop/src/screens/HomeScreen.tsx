@@ -678,7 +678,7 @@ function AccountIdentitySection({ token, username, onLogout }: { token: string; 
       // Local keypair storage is keyed by username — move it so the next
       // login (under the new name) still finds the identity key.
       const kp = loadKeypair(username);
-      if (kp) { saveKeypair(trimmed, kp); clearKeypair(username); }
+      if (kp) { await saveKeypair(trimmed, kp); await clearKeypair(username, false); }
       setDone(true);
       setTimeout(onLogout, 1500);
     } catch (err: any) {
@@ -791,14 +791,14 @@ function EncryptionKeySection({ token, username }: { token: string; username: st
     setError(null);
     try {
       const parsed = await parseExportedKey(blob);
-      saveKeypair(username, parsed);
+      const stored = await saveKeypair(username, parsed);
       // Only publish a public key if the server has none; overwriting an existing
       // one would rotate the identity and break the user's other devices.
       if (parsed.publicKey) {
         const existing = await getPublicKey(token, username).catch(() => null);
         if (!existing) await updatePublicKey(token, parsed.publicKey).catch(() => {});
       }
-      setKp(parsed);
+      setKp(stored);
       setImporting(false);
       setBlob('');
     } catch (err: any) {
@@ -808,8 +808,8 @@ function EncryptionKeySection({ token, username }: { token: string; username: st
     }
   }
 
-  function handleRemove() {
-    clearKeypair(username);
+  async function handleRemove() {
+    await clearKeypair(username);
     setKp(null);
   }
 
