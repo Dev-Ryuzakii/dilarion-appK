@@ -425,7 +425,15 @@ fun SettingsScreen(
 
                             if (uiState.twoFaEnabled && !showDisable2FA) {
                                 Spacer(Modifier.height(10.dp))
-                                TextButton(onClick = { showDisable2FA = true }) { Text("Disable 2FA", color = TextSecondary) }
+                                TextButton(onClick = { use2FARecovery = false; showDisable2FA = true }) { Text("Disable 2FA", color = TextSecondary) }
+                                TextButton(onClick = {
+                                    use2FARecovery = true
+                                    disable2FAPassword = ""
+                                    showDisable2FA = true
+                                    viewModel.clearTwoFaError()
+                                }) {
+                                    Text("Forgot 2FA password? Reset with recovery code", color = DilarionRed)
+                                }
                             }
 
                             if (uiState.twoFaEnabled && showDisable2FA) {

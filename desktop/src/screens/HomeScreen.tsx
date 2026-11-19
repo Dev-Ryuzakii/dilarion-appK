@@ -1794,12 +1794,20 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
         )}
 
         {twoFaEnabled && !showDisable2FA && (
-          <button
-            onClick={() => setShowDisable2FA(true)}
-            style={{ alignSelf: 'flex-start', background: 'transparent', border: '1px solid var(--accent)', color: 'var(--accent)', borderRadius: 8, padding: '6px 14px', fontSize: '0.8rem', cursor: 'pointer', fontFamily: 'inherit' }}
-          >
-            Disable 2FA
-          </button>
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 12 }}>
+            <button
+              onClick={() => { setUse2FARecovery(false); setShowDisable2FA(true); }}
+              style={{ alignSelf: 'flex-start', background: 'transparent', border: '1px solid var(--accent)', color: 'var(--accent)', borderRadius: 8, padding: '6px 14px', fontSize: '0.8rem', cursor: 'pointer', fontFamily: 'inherit' }}
+            >
+              Disable 2FA
+            </button>
+            <button
+              onClick={() => { setUse2FARecovery(true); setDisable2FAPassword(''); setTwoFaError(null); setShowDisable2FA(true); }}
+              style={{ background: 'transparent', border: 'none', color: 'var(--accent)', padding: 0, fontSize: '0.8rem', cursor: 'pointer', fontFamily: 'inherit', textDecoration: 'underline' }}
+            >
+              Forgot 2FA password? Reset with recovery code
+            </button>
+          </div>
         )}
 
         {twoFaEnabled && showDisable2FA && (
