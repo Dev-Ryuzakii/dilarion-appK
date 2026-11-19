@@ -252,6 +252,15 @@ fun IncomingCallOverlay(
                     CallState.CONNECTED -> {
                         CallControls(uiState, viewModel, showFlip = false)
                     }
+                    CallState.ANSWERING -> {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            CircularProgressIndicator(color = SurfaceWhite)
+                            Spacer(Modifier.height(12.dp))
+                            Text("Connecting call…", color = SurfaceWhite)
+                            Spacer(Modifier.height(16.dp))
+                            CallActionButton(Icons.Default.CallEnd, "Cancel", EndCallRed) { viewModel.endCall() }
+                        }
+                    }
                     else -> {
                         CallActionButton(Icons.Default.CallEnd, "Cancel", EndCallRed) { viewModel.endCall() }
                     }

@@ -1,10 +1,17 @@
 package com.dilarion.app.ui.screens.gallery
 
+import android.app.Activity
+import android.content.Context
+import android.media.projection.MediaProjectionManager
+import android.view.WindowManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -24,6 +31,7 @@ import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.PictureInPictureAlt
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.ScreenShare
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.VideocamOff
 import androidx.compose.material3.*
@@ -87,6 +95,33 @@ fun GalleryScreen(
     var showChat by remember { mutableStateOf(false) }
     var showMore by remember { mutableStateOf(false) }
     val isInPip by PipController.isInPip
+    val context = LocalContext.current
+    val sharingScreen = state.sharingScreen
+    // MainActivity normally blocks screenshots. Android also blanks that secure
+    // window in MediaProjection, so explicitly share it only while the user is
+    // presenting and restore protection as soon as the share stops.
+    DisposableEffect(context, sharingScreen) {
+        val window = (context as? Activity)?.window
+        val secureFlag = WindowManager.LayoutParams.FLAG_SECURE
+        val wasSecure = window != null && (window.attributes.flags and secureFlag) != 0
+        if (sharingScreen && wasSecure) window?.clearFlags(secureFlag)
+        onDispose {
+            if (sharingScreen && wasSecure) window?.addFlags(secureFlag)
+        }
+    }
+    val captureLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == Activity.RESULT_OK && result.data != null) {
+            viewModel.startScreenShare(result.data!!)
+        }
+    }
+    val toggleScreenShare = {
+        if (state.sharingScreen) {
+            viewModel.stopScreenShare()
+        } else if (!state.screenShareBusy) {
+            val manager = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+            captureLauncher.launch(manager.createScreenCaptureIntent())
+        }
+    }
 
     LaunchedEffect(conferenceId) { viewModel.connect(conferenceId, initialMicOn, initialCamOn, displayName, isAdHocCall) }
 
@@ -112,6 +147,15 @@ fun GalleryScreen(
             conferenceId = conferenceId,
             participantUsernames = state.tiles.filter { !it.isLocal }.map { it.identity },
             onDismiss = { showChat = false },
+        )
+    }
+
+    state.screenShareError?.let { message ->
+        AlertDialog(
+            onDismissRequest = { viewModel.clearScreenShareError() },
+            title = { Text("Screen sharing") },
+            text = { Text(message) },
+            confirmButton = { TextButton(onClick = { viewModel.clearScreenShareError() }) { Text("OK") } },
         )
     }
 
@@ -196,6 +240,7 @@ fun GalleryScreen(
             onChat = { showMore = false; showChat = true },
             onWhiteboard = { showMore = false; openWhiteboard() },
             onStopWhiteboard = { showMore = false; viewModel.stopSharingWhiteboard(conferenceId) },
+            onScreenShare = { showMore = false; toggleScreenShare() },
             onBreakout = {
                 showMore = false
                 if (state.breakoutActive) viewModel.endBreakoutRooms() else viewModel.toggleBreakoutPanel(true)
@@ -290,6 +335,32 @@ private fun Chip(text: String) {
 private fun TileGrid(state: GalleryUiState, room: Room?) {
     val gap = 10.dp
     val pad = Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 6.dp)
+    val presenter = state.tiles.firstOrNull { it.screenTrack != null }
+    if (presenter != null && room != null) {
+        Column(pad, verticalArrangement = Arrangement.spacedBy(gap)) {
+            Box(Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Color.Black)) {
+                VideoRenderer(room, presenter.screenTrack!!)
+                Text(
+                    "${presenter.displayName} is sharing screen",
+                    color = Color.White,
+                    modifier = Modifier.align(Alignment.TopStart).padding(12.dp)
+                        .background(Color.Black.copy(alpha = 0.7f), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth().height(110.dp).horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(gap),
+            ) {
+                state.tiles.forEach { tile ->
+                    Box(Modifier.width(150.dp).fillMaxHeight()) {
+                        GalleryTileView(tile = tile, room = room, fill = true, compact = true)
+                    }
+                }
+            }
+        }
+        return
+    }
     when (state.tiles.size) {
         0 -> Unit
         // Solo: one big card filling the screen.
@@ -532,6 +603,7 @@ private fun MoreSheet(
     onChat: () -> Unit,
     onWhiteboard: () -> Unit,
     onStopWhiteboard: () -> Unit,
+    onScreenShare: () -> Unit,
     onBreakout: () -> Unit,
     onPeople: () -> Unit,
     onMinimize: () -> Unit,
@@ -546,6 +618,13 @@ private fun MoreSheet(
             maxItemsInEachRow = 3,
         ) {
             val cell = Modifier.weight(1f).padding(6.dp)
+            ActionTile(
+                Icons.Default.ScreenShare,
+                if (state.sharingScreen) "Stop sharing" else if (state.screenShareBusy) "Starting…" else "Share screen",
+                active = state.sharingScreen,
+                onClick = onScreenShare,
+                modifier = cell,
+            )
             if (meeting) {
                 ActionTile(Icons.Default.Chat, "Chat", onClick = onChat, modifier = cell)
                 ActionTile(

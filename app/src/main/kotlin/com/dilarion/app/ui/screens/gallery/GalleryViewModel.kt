@@ -1,6 +1,7 @@
 package com.dilarion.app.ui.screens.gallery
 
 import android.content.Context
+import android.content.Intent
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.dilarion.app.calls.notifyConferenceLeft
@@ -23,6 +24,7 @@ import io.livekit.android.room.Room
 import io.livekit.android.room.participant.Participant
 import io.livekit.android.room.track.Track
 import io.livekit.android.room.track.VideoTrack
+import io.livekit.android.room.track.screencapture.ScreenCaptureParams
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
@@ -38,6 +40,7 @@ data class GalleryTile(
     val micOn: Boolean,
     val camOn: Boolean,
     val videoTrack: VideoTrack?,
+    val screenTrack: VideoTrack? = null,
 )
 
 data class GalleryUiState(
@@ -46,6 +49,9 @@ data class GalleryUiState(
     val tiles: List<GalleryTile> = emptyList(),
     val micOn: Boolean = true,
     val camOn: Boolean = true,
+    val sharingScreen: Boolean = false,
+    val screenShareBusy: Boolean = false,
+    val screenShareError: String? = null,
     val showParticipants: Boolean = false,
     val allUsers: List<UserInfo> = emptyList(),
     val addSearch: String = "",
@@ -176,7 +182,7 @@ class GalleryViewModel @Inject constructor(
         room?.disconnect()
         room?.release()
         room = null
-        _uiState.value = _uiState.value.copy(tiles = emptyList(), connecting = true)
+        _uiState.value = _uiState.value.copy(tiles = emptyList(), connecting = true, sharingScreen = false)
         connectRoom(targetConferenceId, lastMicOn, lastCamOn, lastDisplayName)
     }
 
@@ -308,8 +314,7 @@ class GalleryViewModel @Inject constructor(
 
     private fun cameraTrack(p: Participant): VideoTrack? {
         val pubs = p.videoTrackPublications
-        val camera = pubs.firstOrNull { it.first.source == Track.Source.CAMERA }?.second as? VideoTrack
-        return camera ?: pubs.firstOrNull()?.second as? VideoTrack
+        return pubs.firstOrNull { it.first.source == Track.Source.CAMERA }?.second as? VideoTrack
     }
 
     private fun tileFrom(p: Participant, isLocal: Boolean): GalleryTile {
@@ -322,6 +327,7 @@ class GalleryViewModel @Inject constructor(
             micOn = p.isMicrophoneEnabled,
             camOn = p.isCameraEnabled,
             videoTrack = videoTrack,
+            screenTrack = p.videoTrackPublications.firstOrNull { it.first.source == Track.Source.SCREEN_SHARE }?.second as? VideoTrack,
         )
     }
 
@@ -424,6 +430,9 @@ class GalleryViewModel @Inject constructor(
                                 reconcileTiles()
                             }
                             is RoomEvent.TrackSubscribed -> upsertTile(event.participant, false)
+                            is RoomEvent.TrackUnsubscribed -> upsertTile(event.participant, false)
+                            is RoomEvent.TrackPublished -> refreshParticipant(event.participant)
+                            is RoomEvent.TrackUnpublished -> refreshParticipant(event.participant)
                             is RoomEvent.TrackMuted -> refreshParticipant(event.participant)
                             is RoomEvent.TrackUnmuted -> refreshParticipant(event.participant)
                             is RoomEvent.ActiveSpeakersChanged -> updateActiveSpeakers(event.speakers)
@@ -485,6 +494,57 @@ class GalleryViewModel @Inject constructor(
         }
     }
 
+    fun startScreenShare(permissionData: Intent) {
+        val activeRoom = room ?: return
+        if (_uiState.value.screenShareBusy || _uiState.value.sharingScreen) return
+        _uiState.value = _uiState.value.copy(screenShareBusy = true, screenShareError = null)
+        viewModelScope.launch {
+            runCatching {
+                activeRoom.localParticipant.setScreenShareEnabled(
+                    true,
+                    ScreenCaptureParams(permissionData, onStop = {
+                        viewModelScope.launch {
+                            _uiState.value = _uiState.value.copy(sharingScreen = false)
+                            if (room === activeRoom) upsertTile(activeRoom.localParticipant, true)
+                        }
+                    }),
+                )
+            }.onSuccess { enabled ->
+                if (room === activeRoom) {
+                    _uiState.value = _uiState.value.copy(
+                        sharingScreen = enabled,
+                        screenShareError = if (enabled) null else "Could not start screen sharing. Please try again.",
+                    )
+                    upsertTile(activeRoom.localParticipant, true)
+                }
+            }.onFailure { error ->
+                _uiState.value = _uiState.value.copy(screenShareError = error.toUserMessage("Could not start screen sharing. Please try again."))
+            }
+            _uiState.value = _uiState.value.copy(screenShareBusy = false)
+        }
+    }
+
+    fun stopScreenShare() {
+        val activeRoom = room ?: return
+        if (_uiState.value.screenShareBusy) return
+        _uiState.value = _uiState.value.copy(screenShareBusy = true, screenShareError = null)
+        viewModelScope.launch {
+            runCatching { activeRoom.localParticipant.setScreenShareEnabled(false) }
+                .onFailure { error ->
+                    _uiState.value = _uiState.value.copy(screenShareError = error.toUserMessage("Could not stop screen sharing."))
+                }
+            if (room === activeRoom) {
+                _uiState.value = _uiState.value.copy(sharingScreen = false)
+                upsertTile(activeRoom.localParticipant, true)
+            }
+            _uiState.value = _uiState.value.copy(screenShareBusy = false)
+        }
+    }
+
+    fun clearScreenShareError() {
+        _uiState.value = _uiState.value.copy(screenShareError = null)
+    }
+
     fun openParticipants() {
         _uiState.value = _uiState.value.copy(showParticipants = true, addError = null)
         if (_uiState.value.allUsers.isEmpty()) {
@@ -525,6 +585,7 @@ class GalleryViewModel @Inject constructor(
         room?.disconnect()
         room?.release()
         room = null
+        _uiState.value = _uiState.value.copy(sharingScreen = false)
         if (id > 0) notifyConferenceLeft(sessionManager, apiService, id)
         if (parent > 0 && parent != id) notifyConferenceLeft(sessionManager, apiService, parent)
     }

@@ -27,7 +27,7 @@ import org.webrtc.VideoTrack
 import javax.inject.Inject
 import com.dilarion.app.utils.toUserMessage
 
-enum class CallState { IDLE, CALLING, RINGING, CONNECTED, INCOMING, ENDED }
+enum class CallState { IDLE, CALLING, RINGING, CONNECTED, INCOMING, ANSWERING, ENDED }
 enum class CallType { VOICE, VIDEO }
 
 data class ConferenceUiState(
@@ -100,6 +100,7 @@ class CallViewModel @Inject constructor(
     /** User hung up before the server assigned a call id. End it as soon as that id exists. */
     private var endRequested = false
     private var connectWatchdog: kotlinx.coroutines.Job? = null
+    private var incomingAcceptConfirmed = false
     private val iceLock = Any()
 
     // The only honest "call connected" signal — the PeerConnection's own ICE
@@ -112,7 +113,9 @@ class CallViewModel @Inject constructor(
         iceConnectedJob?.cancel()
         iceConnectedJob = viewModelScope.launch {
             webRtcManager.iceConnected.collect { connected ->
-                if (connected && _uiState.value.state != CallState.CONNECTED) {
+                val state = _uiState.value.state
+                if (connected && (state == CallState.CALLING || state == CallState.RINGING ||
+                    (state == CallState.ANSWERING && incomingAcceptConfirmed))) {
                     connectWatchdog?.cancel()
                     connectWatchdog = null
                     _uiState.value = _uiState.value.copy(state = CallState.CONNECTED)
@@ -184,7 +187,10 @@ class CallViewModel @Inject constructor(
     }
 
     fun setIncoming(incoming: IncomingCallData) {
+        if (_uiState.value.callId == incoming.callId &&
+            _uiState.value.state in setOf(CallState.INCOMING, CallState.ANSWERING, CallState.CONNECTED)) return
         upgradedAway = false
+        incomingAcceptConfirmed = false
         webRtcManager.closeCall()
         timerJob?.cancel()
         remoteDescSet = false
@@ -223,11 +229,16 @@ class CallViewModel @Inject constructor(
     }
 
     fun acceptCall(masterToken: String) {
-        NotificationHelper.stopRingtone()
+        if (_uiState.value.state != CallState.INCOMING) return
         val callId = _uiState.value.callId ?: return
         val peerUsername = _uiState.value.peerUsername
+        _uiState.value = _uiState.value.copy(state = CallState.ANSWERING, masterTokenRejected = false)
         viewModelScope.launch {
-            val token = sessionManager.sessionToken.first() ?: return@launch
+            val token = sessionManager.sessionToken.first()
+            if (token == null) {
+                _uiState.value = _uiState.value.copy(state = CallState.ENDED, error = "Session expired. Sign in again.")
+                return@launch
+            }
             runCatching {
                 val offerSdp = storedOfferSdp
                     ?: throw Exception("Call offer missing — ask them to call again")
@@ -260,7 +271,7 @@ class CallViewModel @Inject constructor(
                 if (resp.code() == 401) {
                     // Wrong token is a typo, not a reason to hang up on someone:
                     // keep the call ringing and let them try again.
-                    _uiState.value = _uiState.value.copy(masterTokenRejected = true)
+                    _uiState.value = _uiState.value.copy(state = CallState.INCOMING, masterTokenRejected = true)
                     return@runCatching
                 }
                 if (!resp.isSuccessful) {
@@ -272,12 +283,18 @@ class CallViewModel @Inject constructor(
                     )
                 }
                 flushPendingCandidates(token, peerUsername, callId)
+                incomingAcceptConfirmed = true
+                NotificationHelper.stopRingtone()
                 armConnectWatchdog()
-                // state stays as-is here (not yet CONNECTED) — observeIceConnected()
-                // is the only place that flips it, once ICE actually finishes.
-                // Flipping here on a successful accept response showed "Connected"
-                // with a running timer before media had actually negotiated.
+                // Keep ANSWERING until ICE connects; accepting the HTTP request
+                // alone does not mean audio is flowing yet.
                 _uiState.value = _uiState.value.copy(masterTokenRejected = false)
+                if (webRtcManager.iceConnected.value && _uiState.value.state == CallState.ANSWERING) {
+                    connectWatchdog?.cancel()
+                    connectWatchdog = null
+                    _uiState.value = _uiState.value.copy(state = CallState.CONNECTED)
+                    startTimer()
+                }
                 rememberSession()
             }.onFailure { e ->
                 // Unrecoverable — the caller was never told, so do not sit in a
