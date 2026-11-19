@@ -617,6 +617,7 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
   const [pending, setPending] = useState<PendingMsg[]>([]);
   const [taggedUser, setTaggedUser] = useState<string | null>(null);
   const [members, setMembers] = useState<GroupMember[]>([]);
+  const [membersError, setMembersError] = useState<string | null>(null);
   const [showMembers, setShowMembers] = useState(false);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [replyTarget, setReplyTarget] = useState<ChatMessage | null>(null);
@@ -651,15 +652,26 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
     }
   }, [token, group.id]);
 
+  const loadMembers = useCallback(async () => {
+    try {
+      setMembers(await getGroupMembers(token, group.id));
+      setMembersError(null);
+    } catch {
+      setMembersError("Couldn't load members. Check your access and try again.");
+    }
+  }, [token, group.id]);
+
   useEffect(() => {
     setLoading(true);
     setMessages([]);
     setTaggedUser(null);
     setText('');
     loadMessages();
-    getGroupMembers(token, group.id).then(setMembers).catch(() => {});
+    setMembers([]);
+    setMembersError(null);
+    loadMembers();
     getStarredMessages(token).then(list => setStarredIds(new Set(list.map(m => m.id)))).catch(() => {});
-  }, [loadMessages, token, group.id]);
+  }, [loadMessages, loadMembers, token, group.id]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -680,13 +692,13 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
       } else if (msg.type === 'group_updated') {
         const gid = msg.data?.group_id as number | undefined;
         if (gid === group.id) {
-          getGroupMembers(token, group.id).then(setMembers).catch(() => {});
+          loadMembers();
         }
       }
     };
     presenceService.addListener(handler);
     return () => presenceService.removeListener(handler);
-  }, [group.id, loadMessages, token]);
+  }, [group.id, loadMessages, loadMembers, token]);
 
   // The master token gates the reveal in the UI; the decryption itself uses the
   // device's private key against this user's entry in the message's key map.
@@ -1124,7 +1136,7 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
           </button>
         )}
-        <button onClick={() => setShowMembers(true)} style={gs.memberStack} title={`${members.length || group.member_count || 0} members`}>
+        <button onClick={() => { setShowMembers(true); loadMembers(); }} style={gs.memberStack} title={`${members.length || group.member_count || 0} members`}>
           {members.slice(0, 3).map((m, i) => (
             <span key={m.user_id} style={{ ...gs.stackAvatar, background: avatarTint(m.username), marginLeft: i ? -8 : 0, zIndex: 3 - i }}>{initials(m.username)}</span>
           ))}
@@ -1152,9 +1164,10 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
           myUsername={myUsername}
           group={group}
           members={members}
+          membersError={membersError}
           onClose={() => setShowMembers(false)}
           onGroupChanged={g => onGroupChanged?.(g)}
-          onMembersChanged={() => { getGroupMembers(token, group.id).then(setMembers).catch(() => {}); }}
+          onMembersChanged={loadMembers}
           onGroupGone={() => { setShowMembers(false); onGroupGone?.(); }}
         />
       )}

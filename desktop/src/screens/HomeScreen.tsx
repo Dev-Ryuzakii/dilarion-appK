@@ -920,15 +920,22 @@ function SearchModal({ token, onClose, onPickPerson, onPickGroup }: {
   const [q, setQ] = useState('');
   const [res, setRes] = useState<SearchResults | null>(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(false);
 
   useEffect(() => {
     const t = q.trim();
-    if (t.length < 2) { setRes(null); setLoading(false); return; }
+    if (t.length < 2) { setRes(null); setLoading(false); setError(false); return; }
+    let cancelled = false;
+    setRes(null);
+    setError(false);
     setLoading(true);
     const id = setTimeout(() => {
-      searchAll(token, t).then(setRes).catch(() => setRes(null)).finally(() => setLoading(false));
+      searchAll(token, t)
+        .then(results => { if (!cancelled) setRes(results); })
+        .catch(() => { if (!cancelled) setError(true); })
+        .finally(() => { if (!cancelled) setLoading(false); });
     }, 250);
-    return () => clearTimeout(id);
+    return () => { cancelled = true; clearTimeout(id); };
   }, [q, token]);
 
   const empty = res && !res.people.length && !res.groups.length && !(res.channels || []).length && !res.files.length;
@@ -948,6 +955,7 @@ function SearchModal({ token, onClose, onPickPerson, onPickGroup }: {
         </div>
         <div style={{ overflowY: 'auto', padding: '6px 10px 14px' }}>
           {q.trim().length < 2 && <div style={{ padding: 30, textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.82rem' }}>Type at least 2 characters.</div>}
+          {error && <div role="alert" style={{ padding: 30, textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.82rem' }}>Search is unavailable. Please try again.</div>}
           {empty && <div style={{ padding: 30, textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.82rem' }}>No matches. Message text is searched inside each chat.</div>}
           {res && res.people.length > 0 && <>
             <div style={sectionLabel}>People</div>
@@ -3689,8 +3697,10 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
 
     if (activeTab === 'meetings') {
       const now = Date.now();
-      const sorted = [...upcomingMeetings].sort((x, y) => new Date(x.scheduled_at).getTime() - new Date(y.scheduled_at).getTime());
-      const isLive = (m: MeetingSummary) => m.status === 'live' || (new Date(m.scheduled_at).getTime() <= now && now < new Date(m.scheduled_at).getTime() + m.duration_minutes * 60000);
+      const sorted = upcomingMeetings
+        .filter(m => new Date(m.scheduled_at).getTime() + m.duration_minutes * 60000 > now)
+        .sort((x, y) => new Date(x.scheduled_at).getTime() - new Date(y.scheduled_at).getTime());
+      const isLive = (m: MeetingSummary) => new Date(m.scheduled_at).getTime() <= now && now < new Date(m.scheduled_at).getTime() + m.duration_minutes * 60000;
       const dayKey = (iso: string) => {
         const d = new Date(iso); const t = new Date();
         const tm = new Date(t.getFullYear(), t.getMonth(), t.getDate()).getTime();

@@ -205,7 +205,10 @@ export function CreateGroupModal({
       });
       onCreated(g);
     } catch (err: any) {
-      setError(userMessage(err, "Couldn't create the group. Please try again."));
+      const detail = String(err?.message || '');
+      setError(detail === 'An organization membership is required' || detail.startsWith('User not found:')
+        ? detail
+        : userMessage(err, "Couldn't create the group. Please try again."));
     } finally {
       setBusy(false);
     }
@@ -423,12 +426,13 @@ function InviteSection({ token, groupId }: { token: string; groupId: number }) {
 }
 
 export function GroupInfoDrawer({
-  token, myUsername, group, members, onClose, onGroupChanged, onMembersChanged, onGroupGone,
+  token, myUsername, group, members, membersError, onClose, onGroupChanged, onMembersChanged, onGroupGone,
 }: {
   token: string;
   myUsername: string;
   group: Group;
   members: GroupMember[];
+  membersError?: string | null;
   onClose: () => void;
   onGroupChanged: (g: Group) => void;
   onMembersChanged: () => void;
@@ -627,6 +631,7 @@ export function GroupInfoDrawer({
                 <span style={ds.label}>Members ({members.length})</span>
                 {iAmAdmin && !adding && <button style={ds.smallBtn} onClick={() => setAdding(true)}>+ Add</button>}
               </div>
+              {membersError && <div role="alert" style={{ color: '#ef4444', fontSize: '0.82rem' }}>{membersError}</div>}
               {adding && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   <UserPicker
