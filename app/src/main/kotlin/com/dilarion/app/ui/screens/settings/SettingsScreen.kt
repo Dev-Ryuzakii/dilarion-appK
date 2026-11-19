@@ -82,6 +82,7 @@ fun SettingsScreen(
     var enable2FAPassword by remember { mutableStateOf("") }
     var showDisable2FA by remember { mutableStateOf(false) }
     var disable2FAPassword by remember { mutableStateOf("") }
+    var use2FARecovery by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var deleteReason by remember { mutableStateOf("") }
     var speechText by remember { mutableStateOf("") }
@@ -432,17 +433,20 @@ fun SettingsScreen(
                                 OutlinedTextField(
                                     value = disable2FAPassword,
                                     onValueChange = { disable2FAPassword = it },
-                                    label = { Text("Current 2FA password") },
+                                    label = { Text(if (use2FARecovery) "Recovery code (XXXX-XXXX-XXXX)" else "Current 2FA password") },
                                     singleLine = true,
-                                    visualTransformation = PasswordVisualTransformation(),
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                                    visualTransformation = if (use2FARecovery) androidx.compose.ui.text.input.VisualTransformation.None else PasswordVisualTransformation(),
+                                    keyboardOptions = KeyboardOptions(keyboardType = if (use2FARecovery) KeyboardType.Ascii else KeyboardType.Password),
                                     modifier = Modifier.fillMaxWidth(),
                                     colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = DilarionRed),
                                 )
                                 Spacer(Modifier.height(8.dp))
                                 Row {
                                     Button(
-                                        onClick = { viewModel.disableTwoFa(disable2FAPassword) },
+                                        onClick = {
+                                            if (use2FARecovery) viewModel.resetTwoFaWithRecoveryCode(disable2FAPassword)
+                                            else viewModel.disableTwoFa(disable2FAPassword)
+                                        },
                                         enabled = !uiState.twoFaLoading && disable2FAPassword.isNotBlank(),
                                         colors = ButtonDefaults.buttonColors(containerColor = DilarionRed),
                                     ) {
@@ -452,10 +456,52 @@ fun SettingsScreen(
                                     Spacer(Modifier.width(8.dp))
                                     TextButton(onClick = {
                                         showDisable2FA = false
+                                        use2FARecovery = false
                                         disable2FAPassword = ""
                                         viewModel.clearTwoFaError()
                                     }) { Text("Cancel") }
                                 }
+                                TextButton(onClick = {
+                                    use2FARecovery = !use2FARecovery
+                                    disable2FAPassword = ""
+                                    viewModel.clearTwoFaError()
+                                }) {
+                                    Text(
+                                        if (use2FARecovery) "Use my 2FA password instead" else "Forgot your 2FA password? Use your recovery code",
+                                        color = DilarionRed,
+                                        style = MaterialTheme.typography.bodySmall,
+                                    )
+                                }
+                            }
+
+                            uiState.twoFaNewRecoveryCode?.let { code ->
+                                Spacer(Modifier.height(10.dp))
+                                Text(
+                                    "2FA was turned off. Your old recovery code no longer works — here is your new one:",
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                                Text(
+                                    code,
+                                    fontWeight = FontWeight.Bold,
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(top = 6.dp)
+                                        .background(BackgroundGrey, RoundedCornerShape(10.dp))
+                                        .padding(vertical = 12.dp),
+                                )
+                                Text(
+                                    if (uiState.twoFaNewRecoveryCodeEmailed) "A copy was also sent to your email."
+                                    else "Save it somewhere safe — no email address is on file for this account.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = TextSecondary,
+                                    modifier = Modifier.padding(top = 6.dp),
+                                )
+                                TextButton(onClick = {
+                                    viewModel.clearTwoFaNewRecoveryCode()
+                                    showDisable2FA = false
+                                    disable2FAPassword = ""
+                                }) { Text("I saved it") }
                             }
 
                             uiState.twoFaError?.let { err ->
@@ -629,6 +675,9 @@ fun SettingsScreen(
                                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
                                     Checkbox(checked = ack, onCheckedChange = { ack = it })
                                     Text("I've saved this code somewhere safe", style = MaterialTheme.typography.bodySmall)
+                                }
+                                if (uiState.revealedRecoveryCodeEmailed) {
+                                    Text("A copy was also sent to your email.", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
                                 }
                                 TextButton(
                                     onClick = { viewModel.clearRevealedRecoveryCode(); ack = false },

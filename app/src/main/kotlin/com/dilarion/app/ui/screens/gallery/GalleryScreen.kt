@@ -96,21 +96,22 @@ fun GalleryScreen(
     var showMore by remember { mutableStateOf(false) }
     val isInPip by PipController.isInPip
     val context = LocalContext.current
-    val sharingScreen = state.sharingScreen
-    // MainActivity normally blocks screenshots. Android also blanks that secure
-    // window in MediaProjection, so explicitly share it only while the user is
-    // presenting and restore protection as soon as the share stops.
-    DisposableEffect(context, sharingScreen) {
-        val window = (context as? Activity)?.window
-        val secureFlag = WindowManager.LayoutParams.FLAG_SECURE
-        val wasSecure = window != null && (window.attributes.flags and secureFlag) != 0
-        if (sharingScreen && wasSecure) window?.clearFlags(secureFlag)
-        onDispose {
-            if (sharingScreen && wasSecure) window?.addFlags(secureFlag)
-        }
+    val window = (context as? Activity)?.window
+    val secureFlag = WindowManager.LayoutParams.FLAG_SECURE
+    val wasSecure = remember(window) { window != null && (window.attributes.flags and secureFlag) != 0 }
+    // MediaProjection starts capturing inside setScreenShareEnabled. Clear the
+    // secure flag before that call; clearing it after publish leaves the first
+    // captured surface black on some phones.
+    LaunchedEffect(window, state.sharingScreen, state.screenShareBusy) {
+        if (state.sharingScreen || state.screenShareBusy) window?.clearFlags(secureFlag)
+        else if (wasSecure) window?.addFlags(secureFlag)
+    }
+    DisposableEffect(window) {
+        onDispose { if (wasSecure) window?.addFlags(secureFlag) }
     }
     val captureLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == Activity.RESULT_OK && result.data != null) {
+            window?.clearFlags(secureFlag)
             viewModel.startScreenShare(result.data!!)
         }
     }
@@ -156,6 +157,14 @@ fun GalleryScreen(
             title = { Text("Screen sharing") },
             text = { Text(message) },
             confirmButton = { TextButton(onClick = { viewModel.clearScreenShareError() }) { Text("OK") } },
+        )
+    }
+    state.cameraError?.let { message ->
+        AlertDialog(
+            onDismissRequest = { viewModel.clearCameraError() },
+            title = { Text("Camera") },
+            text = { Text(message) },
+            confirmButton = { TextButton(onClick = { viewModel.clearCameraError() }) { Text("OK") } },
         )
     }
 
@@ -338,7 +347,7 @@ private fun TileGrid(state: GalleryUiState, room: Room?) {
     val presenter = state.tiles.firstOrNull { it.screenTrack != null }
     if (presenter != null && room != null) {
         Column(pad, verticalArrangement = Arrangement.spacedBy(gap)) {
-            Box(Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Color.Black)) {
+            Box(Modifier.weight(1f).fillMaxWidth().background(Color.Black, RoundedCornerShape(18.dp))) {
                 VideoRenderer(room, presenter.screenTrack!!)
                 Text(
                     "${presenter.displayName} is sharing screen",
@@ -393,7 +402,7 @@ private fun GalleryTileView(tile: GalleryTile, room: Room?, compact: Boolean = f
     val avatarSize = if (compact) 52.dp else 84.dp
     Box(
         modifier = (if (fill) Modifier.fillMaxSize() else Modifier.fillMaxWidth().aspectRatio(16f / 9f))
-            .clip(shape)
+            .then(if (tile.camOn && tile.videoTrack != null) Modifier else Modifier.clip(shape))
             .background(Brush.linearGradient(listOf(Color(0xFF241B1B), Color(0xFF141010))))
             .border(
                 if (tile.isSpeaking) 2.dp else 1.dp,
@@ -455,17 +464,19 @@ private fun GalleryTileView(tile: GalleryTile, room: Room?, compact: Boolean = f
 @Composable
 private fun VideoRenderer(room: Room, videoTrack: VideoTrack) {
     val context = LocalContext.current
-    val renderer = remember(context) {
+    val renderer = remember(context, room) {
         TextureViewRenderer(context).also { room.initVideoRenderer(it) }
     }
-    DisposableEffect(videoTrack) {
+    DisposableEffect(videoTrack, renderer) {
         videoTrack.addRenderer(renderer)
         onDispose { videoTrack.removeRenderer(renderer) }
     }
-    DisposableEffect(Unit) {
+    DisposableEffect(renderer) {
         onDispose { renderer.release() }
     }
-    AndroidView(factory = { renderer }, modifier = Modifier.fillMaxSize())
+    key(renderer) {
+        AndroidView(factory = { renderer }, modifier = Modifier.fillMaxSize())
+    }
 }
 
 // ── Control dock ───────────────────────────────────────────────────────

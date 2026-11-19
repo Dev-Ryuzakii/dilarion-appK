@@ -117,6 +117,7 @@ export default function GroupCallView({ token, myUsername, info, onEnd }: {
   onEnd: () => void;
 }) {
   const roomRef = useRef<Room | null>(null);
+  const cameraChangeInProgress = useRef(false);
   const [version, setVersion] = useState(0);
   const [speaking, setSpeaking] = useState<Set<string>>(new Set());
   const [status, setStatus] = useState<'connecting' | 'ringing' | 'active' | 'ended'>('connecting');
@@ -299,9 +300,16 @@ export default function GroupCallView({ token, myUsername, info, onEnd }: {
 
   async function toggleCam() {
     const room = roomRef.current;
-    if (!room) return;
-    await room.localParticipant.setCameraEnabled(!camOn).catch(() => {});
-    setCamOn(v => !v);
+    if (!room || cameraChangeInProgress.current) return;
+    cameraChangeInProgress.current = true;
+    try {
+      await room.localParticipant.setCameraEnabled(!camOn);
+    } catch (error) {
+      console.warn('[group call] camera change failed', error);
+    } finally {
+      setCamOn(room.localParticipant.isCameraEnabled);
+      cameraChangeInProgress.current = false;
+    }
     bump();
   }
 

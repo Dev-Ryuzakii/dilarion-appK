@@ -78,6 +78,7 @@ data class RecoveryCodeResetResponse(
 
 data class RecoveryCodeRegenerateResponse(
     @SerializedName("recovery_code") val recoveryCode: String,
+    val emailed: Boolean = false,
 )
 
 data class UsernameUpdateRequest(
@@ -628,6 +629,17 @@ data class MasterToken2FAEnableRequest(
 
 data class MasterToken2FADisableRequest(
     @SerializedName("two_fa_password") val twoFaPassword: String,
+)
+
+/** Forgot the 2FA password: the account recovery code turns 2FA off. */
+data class MasterToken2FARecoveryResetRequest(
+    @SerializedName("recovery_code") val recoveryCode: String,
+)
+
+data class MasterToken2FARecoveryResetResponse(
+    val enabled: Boolean = false,
+    @SerializedName("recovery_code") val recoveryCode: String,
+    val emailed: Boolean = false,
 )
 
 // ─── Account deletion requests ───────────────────────────────────────────────

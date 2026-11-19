@@ -40,6 +40,9 @@ data class SettingsUiState(
     val twoFaEnabled: Boolean = false,
     val twoFaLoading: Boolean = false,
     val twoFaError: String? = null,
+    /** New recovery code issued after a 2FA reset (old one is consumed). */
+    val twoFaNewRecoveryCode: String? = null,
+    val twoFaNewRecoveryCodeEmailed: Boolean = false,
     val deletionStatus: String? = null,
     val deletionLoading: Boolean = false,
     val deletionError: String? = null,
@@ -65,6 +68,7 @@ data class SettingsUiState(
     val recoveryCodeBusy: Boolean = false,
     val recoveryCodeError: String? = null,
     val revealedRecoveryCode: String? = null,
+    val revealedRecoveryCodeEmailed: Boolean = false,
     // Profile picture
     val hasProfilePicture: Boolean = false,
     val profilePictureBusy: Boolean = false,
@@ -426,6 +430,36 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    /** Forgot the 2FA password: turn 2FA off with the account recovery code. */
+    fun resetTwoFaWithRecoveryCode(recoveryCode: String) {
+        if (recoveryCode.isBlank()) return
+        viewModelScope.launch {
+            val bearer = bearer() ?: return@launch
+            _uiState.value = _uiState.value.copy(twoFaLoading = true, twoFaError = null)
+            runCatching {
+                val resp = apiService.resetMasterToken2FAWithRecoveryCode(
+                    bearer, com.dilarion.app.data.model.MasterToken2FARecoveryResetRequest(recoveryCode.trim()),
+                )
+                if (!resp.isSuccessful) {
+                    throw IllegalStateException(resp.errorBody().parseErrorDetail("Couldn't reset 2FA. Please try again."))
+                }
+                val body = resp.body()
+                _uiState.value = _uiState.value.copy(
+                    twoFaLoading = false,
+                    twoFaEnabled = body?.enabled ?: false,
+                    twoFaNewRecoveryCode = body?.recoveryCode,
+                    twoFaNewRecoveryCodeEmailed = body?.emailed ?: false,
+                )
+            }.onFailure { e ->
+                _uiState.value = _uiState.value.copy(twoFaLoading = false, twoFaError = e.toUserMessage(e.message ?: "Couldn't reset 2FA. Please try again."))
+            }
+        }
+    }
+
+    fun clearTwoFaNewRecoveryCode() {
+        _uiState.value = _uiState.value.copy(twoFaNewRecoveryCode = null, twoFaNewRecoveryCodeEmailed = false)
+    }
+
     fun clearTwoFaError() { _uiState.value = _uiState.value.copy(twoFaError = null) }
 
     fun requestAccountDeletion(reason: String?) {
@@ -532,6 +566,7 @@ class SettingsViewModel @Inject constructor(
                         _uiState.value = _uiState.value.copy(
                             recoveryCodeBusy = false,
                             revealedRecoveryCode = response.body()?.recoveryCode,
+                            revealedRecoveryCodeEmailed = response.body()?.emailed ?: false,
                         )
                     } else {
                         _uiState.value = _uiState.value.copy(recoveryCodeBusy = false, recoveryCodeError = "Failed to generate a new recovery code")

@@ -1701,6 +1701,25 @@ export async function enableMasterToken2FA(token: string, masterToken: string, t
   }
 }
 
+/** Forgot the 2FA password: prove ownership with the account recovery code.
+ *  Turns 2FA off (or sets a new 2FA password). The recovery code is single
+ *  use, so a fresh one comes back and is also emailed to the account. */
+export async function resetMasterToken2FAWithRecoveryCode(
+  token: string, recoveryCode: string, newTwoFaPassword?: string,
+): Promise<{ enabled: boolean; recovery_code: string; emailed: boolean }> {
+  const res = await apiFetch(`${BASE}/mastertoken/2fa/reset-with-recovery-code`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ recovery_code: recoveryCode, new_two_fa_password: newTwoFaPassword || null }),
+  });
+  if (!res.ok) {
+    let detail = 'Failed to reset 2FA';
+    try { const b = await res.json(); detail = b.detail || detail; } catch {}
+    throw new Error(detail);
+  }
+  return res.json();
+}
+
 export async function disableMasterToken2FA(token: string, twoFaPassword: string): Promise<void> {
   const res = await apiFetch(`${BASE}/mastertoken/2fa/disable`, {
     method: 'POST',
@@ -2095,7 +2114,7 @@ export async function resetWithRecoveryCode(username: string, recoveryCode: stri
   return res.json();
 }
 
-export async function regenerateRecoveryCode(token: string): Promise<{ recovery_code: string }> {
+export async function regenerateRecoveryCode(token: string): Promise<{ recovery_code: string; emailed?: boolean }> {
   const res = await apiFetch(`${BASE}/users/me/recovery-code/regenerate`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
@@ -2575,7 +2594,7 @@ export async function getMyOrgPrivileges(token: string): Promise<string[]> {
  * Username + password (not an invite token). Returns a session token usable
  * for every app endpoint.
  */
-export async function loginOrganization(username: string, password: string): Promise<{ token: string }> {
+export async function loginOrganization(username: string, password: string): Promise<{ token: string; username?: string }> {
   const res = await apiFetch(`${BASE}/organization/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

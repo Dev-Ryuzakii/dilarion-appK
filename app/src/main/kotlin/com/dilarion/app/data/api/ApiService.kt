@@ -368,6 +368,12 @@ interface ApiService {
         @Body request: MasterToken2FADisableRequest,
     ): Response<Unit>
 
+    @POST("mastertoken/2fa/reset-with-recovery-code")
+    suspend fun resetMasterToken2FAWithRecoveryCode(
+        @Header("Authorization") bearer: String,
+        @Body request: com.dilarion.app.data.model.MasterToken2FARecoveryResetRequest,
+    ): Response<com.dilarion.app.data.model.MasterToken2FARecoveryResetResponse>
+
     // ─── Account deletion requests ───────────────────────────────────────────────
 
     @POST("account/delete-request")

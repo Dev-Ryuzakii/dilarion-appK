@@ -74,6 +74,7 @@ class GroupCallViewModel @Inject constructor(
 
     private var conferenceId: Int = 0
     private var started = false
+    private var cameraChangeInProgress = false
     private var everHadOthers = false
     private var noAnswerJob: Job? = null
     /** Left the call. Later LiveKit track events must not put their tile back. */
@@ -214,6 +215,7 @@ class GroupCallViewModel @Inject constructor(
             }
             runCatching { r.localParticipant.setMicrophoneEnabled(true) }
             if (camOn) runCatching { r.localParticipant.setCameraEnabled(true) }
+            _uiState.value = _uiState.value.copy(camOn = r.localParticipant.isCameraEnabled)
             subscribeCameras()
             syncFromRoom()
             if (r.remoteParticipants.isEmpty()) {
@@ -292,8 +294,7 @@ class GroupCallViewModel @Inject constructor(
     /** Camera, not screen share. The first publication is often the wrong one. */
     private fun cameraTrack(p: Participant): VideoTrack? {
         val pubs = p.videoTrackPublications
-        val camera = pubs.firstOrNull { it.first.source == Track.Source.CAMERA }?.second as? VideoTrack
-        return camera ?: pubs.firstOrNull()?.second as? VideoTrack
+        return pubs.firstOrNull { it.first.source == Track.Source.CAMERA }?.second as? VideoTrack
     }
 
     private fun tileFrom(p: Participant, isLocal: Boolean): GroupCallTile {
@@ -358,11 +359,19 @@ class GroupCallViewModel @Inject constructor(
 
     fun toggleCam() {
         val r = room ?: return
+        if (cameraChangeInProgress) return
         val next = !_uiState.value.camOn
+        cameraChangeInProgress = true
         viewModelScope.launch {
             runCatching { r.localParticipant.setCameraEnabled(next) }
-            _uiState.value = _uiState.value.copy(camOn = next)
-            upsertTile(r.localParticipant, true)
+                .onFailure { error ->
+                    _uiState.value = _uiState.value.copy(notice = error.toUserMessage("Could not change the camera. Please try again."))
+                }
+            if (room === r) {
+                _uiState.value = _uiState.value.copy(camOn = r.localParticipant.isCameraEnabled)
+                upsertTile(r.localParticipant, true)
+            }
+            cameraChangeInProgress = false
         }
     }
 

@@ -107,6 +107,7 @@ export default function GalleryView({
   // silently re-enabling the mic/camera on every breakout start/end.
   const micOnRef = useRef(initialMicOn);
   const camOnRef = useRef(initialCamOn);
+  const cameraChangeInProgress = useRef(false);
   useEffect(() => { micOnRef.current = micOn; }, [micOn]);
   useEffect(() => { camOnRef.current = camOn; }, [camOn]);
   const [screenSharing, setScreenSharing] = useState(false);
@@ -232,7 +233,9 @@ export default function GalleryView({
         const t = prev[participant.identity];
         if (!t) return prev;
         if (pub.kind === Track.Kind.Audio) return { ...prev, [participant.identity]: { ...t, micOn: enabled } };
-        if (pub.kind === Track.Kind.Video) return { ...prev, [participant.identity]: { ...t, camOn: enabled } };
+        if (pub.kind === Track.Kind.Video && pub.source === Track.Source.Camera) {
+          return { ...prev, [participant.identity]: { ...t, camOn: enabled } };
+        }
         return prev;
       });
     }
@@ -284,6 +287,8 @@ export default function GalleryView({
                 if (el) track.attach(el);
                 return;
               }
+              const previous = trackRefs.current[participant.identity];
+              if (previous && previous !== track) previous.detach();
               trackRefs.current[participant.identity] = track;
               const el = videoRefs.current[participant.identity];
               if (el) track.attach(el);
@@ -294,6 +299,13 @@ export default function GalleryView({
           .on(RoomEvent.TrackUnsubscribed, (track, _pub, participant) => {
             if (track.kind === Track.Kind.Video && track.source === Track.Source.ScreenShare) {
               removeScreenTile(participant.identity);
+            } else if (track.kind === Track.Kind.Video && track.source === Track.Source.Camera) {
+              track.detach();
+              if (trackRefs.current[participant.identity] === track) delete trackRefs.current[participant.identity];
+              setTiles(prev => {
+                const tile = prev[participant.identity];
+                return tile ? { ...prev, [participant.identity]: { ...tile, camOn: false } } : prev;
+              });
             }
           })
           .on(RoomEvent.TrackMuted, (pub, participant) => setTrackState(participant, pub, false))
@@ -318,6 +330,15 @@ export default function GalleryView({
             if (pub.kind === Track.Kind.Video && pub.source === Track.Source.ScreenShare) {
               removeScreenTile(room.localParticipant.identity);
               setScreenSharing(false);
+            } else if (pub.kind === Track.Kind.Video && pub.source === Track.Source.Camera) {
+              const key = room.localParticipant.identity;
+              const track = trackRefs.current[key];
+              track?.detach();
+              delete trackRefs.current[key];
+              setTiles(prev => {
+                const tile = prev[key];
+                return tile ? { ...prev, [key]: { ...tile, camOn: false } } : prev;
+              });
             }
           })
           .on(RoomEvent.DataReceived, (payload, participant) => {
@@ -567,10 +588,17 @@ export default function GalleryView({
 
   async function toggleCam() {
     const room = roomRef.current;
-    if (!room) return;
+    if (!room || cameraChangeInProgress.current) return;
+    cameraChangeInProgress.current = true;
     const next = !camOn;
-    await room.localParticipant.setCameraEnabled(next);
-    setCamOn(next);
+    try {
+      await room.localParticipant.setCameraEnabled(next);
+    } catch (error) {
+      console.warn('[meeting] camera change failed', error);
+    } finally {
+      setCamOn(room.localParticipant.isCameraEnabled);
+      cameraChangeInProgress.current = false;
+    }
   }
 
   // Host / org call moderator: mute or unmute another participant's mic. The

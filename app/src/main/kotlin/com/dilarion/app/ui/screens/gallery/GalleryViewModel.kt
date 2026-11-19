@@ -24,6 +24,8 @@ import io.livekit.android.room.Room
 import io.livekit.android.room.participant.Participant
 import io.livekit.android.room.track.Track
 import io.livekit.android.room.track.VideoTrack
+import io.livekit.android.room.track.VideoCaptureParameter
+import io.livekit.android.room.track.LocalVideoTrackOptions
 import io.livekit.android.room.track.screencapture.ScreenCaptureParams
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -52,6 +54,8 @@ data class GalleryUiState(
     val sharingScreen: Boolean = false,
     val screenShareBusy: Boolean = false,
     val screenShareError: String? = null,
+    val cameraError: String? = null,
+    val cameraBusy: Boolean = false,
     val showParticipants: Boolean = false,
     val allUsers: List<UserInfo> = emptyList(),
     val addSearch: String = "",
@@ -407,11 +411,25 @@ class GalleryViewModel @Inject constructor(
                 )
                 if (!adHoc) loadWaitingRoom(parentConferenceId.takeIf { it > 0 } ?: conferenceId)
 
-                // Both default to false in the SDK — unlike desktop (which passes
-                // {adaptiveStream:true, dynacast:true} explicitly), so without this
-                // Android never downgrades subscriptions on bad bandwidth and never
-                // pauses unwatched layers server-side.
-                val r = LiveKit.create(context, RoomOptions(adaptiveStream = true, dynacast = true), LiveKitOverrides())
+                // Keep subscriptions active while Android creates or replaces its
+                // TextureView. Adaptive streaming can pause the track before the
+                // renderer has a measured size, leaving a black remote tile.
+                // Screen share defaults to the phone's native resolution (e.g.
+                // 1080x2400). Desktop browsers decode that, but many phone
+                // hardware decoders reject frames that large and render black,
+                // so mobile-to-mobile sharing showed a blank screen. Cap it.
+                val r = LiveKit.create(
+                    context,
+                    RoomOptions(
+                        adaptiveStream = false,
+                        dynacast = false,
+                        screenShareTrackCaptureDefaults = LocalVideoTrackOptions(
+                            isScreencast = true,
+                            captureParams = screenShareCaptureParams(),
+                        ),
+                    ),
+                    LiveKitOverrides(),
+                )
                 room = r
 
                 viewModelScope.launch {
@@ -456,6 +474,9 @@ class GalleryViewModel @Inject constructor(
                 r.connect(body.url, body.token, ConnectOptions(iceServers = iceServers))
                 r.localParticipant.setMicrophoneEnabled(initialMicOn)
                 r.localParticipant.setCameraEnabled(cam)
+                val actualCamOn = r.localParticipant.isCameraEnabled
+                _uiState.value = _uiState.value.copy(camOn = actualCamOn)
+                lastCamOn = actualCamOn
 
                 upsertTile(r.localParticipant, true)
                 r.remoteParticipants.values.forEach { upsertTile(it, false) }
@@ -486,12 +507,46 @@ class GalleryViewModel @Inject constructor(
 
     fun toggleCam() {
         val r = room ?: return
+        if (_uiState.value.cameraBusy) return
         val next = !_uiState.value.camOn
+        _uiState.value = _uiState.value.copy(cameraBusy = true)
         viewModelScope.launch {
             runCatching { r.localParticipant.setCameraEnabled(next) }
-            _uiState.value = _uiState.value.copy(camOn = next)
-            lastCamOn = next
+                .onSuccess {
+                    if (room === r) {
+                        val actual = r.localParticipant.isCameraEnabled
+                        _uiState.value = _uiState.value.copy(
+                            camOn = actual,
+                            cameraError = if (actual == next) null else "Could not change the camera. Please try again.",
+                        )
+                        lastCamOn = actual
+                        upsertTile(r.localParticipant, true)
+                    }
+                }
+                .onFailure { error ->
+                    _uiState.value = _uiState.value.copy(cameraError = error.toUserMessage("Could not change the camera. Please try again."))
+                }
+            _uiState.value = _uiState.value.copy(cameraBusy = false)
         }
+    }
+
+    fun clearCameraError() {
+        _uiState.value = _uiState.value.copy(cameraError = null)
+    }
+
+    /**
+     * Capture size for screen share that every phone's hardware decoder can
+     * handle: keeps the display's aspect ratio, long side <= 1920 and short
+     * side <= 1080, rounded down to a multiple of 16. Width is the LONG side —
+     * LiveKit swaps width/height itself when the display is in portrait.
+     */
+    private fun screenShareCaptureParams(): VideoCaptureParameter {
+        val metrics = context.resources.displayMetrics
+        val long = maxOf(metrics.widthPixels, metrics.heightPixels).coerceAtLeast(16)
+        val short = minOf(metrics.widthPixels, metrics.heightPixels).coerceAtLeast(16)
+        val scale = minOf(1.0, 1920.0 / long, 1080.0 / short)
+        fun even16(v: Double) = ((v.toInt() / 16) * 16).coerceAtLeast(16)
+        return VideoCaptureParameter(even16(long * scale), even16(short * scale), 15)
     }
 
     fun startScreenShare(permissionData: Intent) {

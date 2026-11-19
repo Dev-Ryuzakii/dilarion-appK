@@ -271,10 +271,13 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
     };
 
     pc.ontrack = (e) => {
-      const stream = e.streams[0];
-      if (!stream) return;
+      const stream = e.streams[0] ?? remoteStreamRef.current ?? new MediaStream();
+      if (!e.streams[0] && !stream.getTracks().includes(e.track)) stream.addTrack(e.track);
       remoteStreamRef.current = stream;
-      if (remoteVideoRef.current) remoteVideoRef.current.srcObject = stream;
+      if (remoteVideoRef.current) {
+        remoteVideoRef.current.srcObject = stream;
+        remoteVideoRef.current.play().catch(() => {});
+      }
       // Dedicated audio element ensures audio plays even when video element is hidden
       if (remoteAudioRef.current) {
         remoteAudioRef.current.srcObject = stream;
@@ -463,6 +466,9 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
     }
     if (remoteVideoRef.current && remoteVideoRef.current.srcObject !== stream) {
       remoteVideoRef.current.srcObject = stream;
+    }
+    if (remoteVideoRef.current?.paused && stream.getVideoTracks().length > 0) {
+      remoteVideoRef.current.play().catch(() => {});
     }
   });
 

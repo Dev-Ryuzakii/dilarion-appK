@@ -24,6 +24,7 @@ import {
   getMasterToken2FAStatus,
   enableMasterToken2FA,
   disableMasterToken2FA,
+  resetMasterToken2FAWithRecoveryCode,
   uploadVoiceIdentity,
   hasVoiceIdentity,
   listVoiceSpeech,
@@ -664,6 +665,7 @@ function AccountIdentitySection({ token, username, onLogout }: { token: string; 
   const [done, setDone] = useState(false);
 
   const [recCode, setRecCode] = useState<string | null>(null);
+  const [recEmailed, setRecEmailed] = useState(false);
   const [recBusy, setRecBusy] = useState(false);
   const [recError, setRecError] = useState<string | null>(null);
   const [ack, setAck] = useState(false);
@@ -694,6 +696,7 @@ function AccountIdentitySection({ token, username, onLogout }: { token: string; 
     try {
       const res = await regenerateRecoveryCode(token);
       setRecCode(res.recovery_code);
+      setRecEmailed(!!res.emailed);
       setAck(false);
     } catch (err: any) {
       setRecError(userMessage(err, "Couldn't generate a new recovery code. Please try again."));
@@ -739,6 +742,7 @@ function AccountIdentitySection({ token, username, onLogout }: { token: string; 
             <div style={{ background: 'var(--bg-card)', border: '1px dashed var(--accent)', borderRadius: 8, padding: '10px 14px', fontFamily: 'monospace', fontSize: '1rem', fontWeight: 700, letterSpacing: '0.06em', textAlign: 'center' }}>
               {recCode}
             </div>
+            {recEmailed && <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>A copy was also sent to your email.</span>}
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
               <input type="checkbox" checked={ack} onChange={e => setAck(e.target.checked)} />
               I've saved this code somewhere safe
@@ -1049,6 +1053,9 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
   const [enable2FAPassword, setEnable2FAPassword] = useState('');
   const [showDisable2FA, setShowDisable2FA] = useState(false);
   const [disable2FAPassword, setDisable2FAPassword] = useState('');
+  // Forgot the 2FA password → use the account recovery code instead.
+  const [use2FARecovery, setUse2FARecovery] = useState(false);
+  const [twoFaNewRecoveryCode, setTwoFaNewRecoveryCode] = useState<{ code: string; emailed: boolean } | null>(null);
 
   const [voiceIdentityEnrolled, setVoiceIdentityEnrolled] = useState(false);
   const [voiceIdentityLoading, setVoiceIdentityLoading] = useState(true);
@@ -1294,7 +1301,13 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
     setTwoFaLoading(true);
     setTwoFaError(null);
     try {
-      await disableMasterToken2FA(token, disable2FAPassword.trim());
+      if (use2FARecovery) {
+        const res = await resetMasterToken2FAWithRecoveryCode(token, disable2FAPassword.trim());
+        setTwoFaNewRecoveryCode({ code: res.recovery_code, emailed: !!res.emailed });
+        setUse2FARecovery(false);
+      } else {
+        await disableMasterToken2FA(token, disable2FAPassword.trim());
+      }
       setTwoFaEnabled(false);
       setShowDisable2FA(false);
       setDisable2FAPassword('');
@@ -1792,8 +1805,8 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
         {twoFaEnabled && showDisable2FA && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             <input
-              type="password"
-              placeholder="Current 2FA password"
+              type={use2FARecovery ? 'text' : 'password'}
+              placeholder={use2FARecovery ? 'Recovery code (XXXX-XXXX-XXXX)' : 'Current 2FA password'}
               value={disable2FAPassword}
               onChange={e => setDisable2FAPassword(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') handleDisable2FA(); }}
@@ -1808,12 +1821,37 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
                 {twoFaLoading ? '...' : 'Confirm'}
               </button>
               <button
-                onClick={() => { setShowDisable2FA(false); setTwoFaError(null); }}
+                onClick={() => { setShowDisable2FA(false); setUse2FARecovery(false); setTwoFaError(null); }}
                 style={{ background: 'transparent', color: 'var(--text-muted)', border: '1px solid var(--border-color)', borderRadius: 8, padding: '8px 16px', fontSize: '0.82rem', cursor: 'pointer', fontFamily: 'inherit' }}
               >
                 Cancel
               </button>
             </div>
+          </div>
+        )}
+
+        {twoFaEnabled && showDisable2FA && (
+          <button
+            onClick={() => { setUse2FARecovery(v => !v); setDisable2FAPassword(''); setTwoFaError(null); }}
+            style={{ alignSelf: 'flex-start', background: 'transparent', border: 'none', color: 'var(--accent)', padding: 0, fontSize: '0.78rem', cursor: 'pointer', fontFamily: 'inherit', textDecoration: 'underline' }}
+          >
+            {use2FARecovery ? 'Use my 2FA password instead' : 'Forgot your 2FA password? Use your recovery code'}
+          </button>
+        )}
+
+        {twoFaNewRecoveryCode && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, border: '1px solid var(--border-color)', borderRadius: 10, padding: '10px 12px' }}>
+            <span style={{ fontSize: '0.8rem', color: 'var(--text-primary)' }}>2FA was turned off. Your old recovery code no longer works — here is your new one:</span>
+            <code style={{ fontSize: '1rem', fontWeight: 700, letterSpacing: 1, color: 'var(--text-primary)', userSelect: 'all' }}>{twoFaNewRecoveryCode.code}</code>
+            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+              {twoFaNewRecoveryCode.emailed ? 'A copy was also sent to your email.' : 'Save it somewhere safe — no email address is on file for this account.'}
+            </span>
+            <button
+              onClick={() => setTwoFaNewRecoveryCode(null)}
+              style={{ alignSelf: 'flex-start', background: 'transparent', color: 'var(--text-muted)', border: '1px solid var(--border-color)', borderRadius: 8, padding: '4px 12px', fontSize: '0.78rem', cursor: 'pointer', fontFamily: 'inherit' }}
+            >
+              I saved it
+            </button>
           </div>
         )}
 

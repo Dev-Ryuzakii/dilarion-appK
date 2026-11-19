@@ -96,7 +96,8 @@ export default function LoginScreen({ onLogin, onBack, initialView = 'login', no
       try {
         const org = await loginOrganization(username.trim().toLowerCase(), userToken);
         if (org?.token) {
-          onLogin(org.token, username.trim().toLowerCase());
+          // Email sign-in works too; the server returns the real username.
+          onLogin(org.token, org.username || username.trim().toLowerCase());
           return;
         }
       } catch {}
