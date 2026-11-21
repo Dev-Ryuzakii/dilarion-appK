@@ -110,8 +110,8 @@ import {
   SparkleIcon,
 } from '../components/Icons';
 import { userMessage } from '../services/errors';
-
 import { applyProfileUpdate } from '../services/people';
+
 interface Props {
   token: string;
   username: string;
@@ -1021,7 +1021,6 @@ function SearchModal({ token, onClose, onPickPerson, onPickGroup }: {
   );
 }
 
-function SettingsMainPanel({ token, username, onLogout, page }: SettingsMainProps) {
 // Bio: the line people see under your name in a chat header. Empty falls
 // back to the job title the org set for you.
 function BioCard({ token }: { token: string }) {
@@ -1071,6 +1070,7 @@ function BioCard({ token }: { token: string }) {
   );
 }
 
+function SettingsMainPanel({ token, username, onLogout, page }: SettingsMainProps) {
   const [appearance, setAppearanceState] = useState<AppearancePrefs>(loadAppearance);
 
   function updateAppearance(patch: Partial<AppearancePrefs>) {
@@ -1565,8 +1565,8 @@ function BioCard({ token }: { token: string }) {
       </div>
 
       {page === 'profile' && (<>
-{/* Availability status */}
       <BioCard token={token} />
+{/* Availability status */}
       <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 14, padding: '20px 22px', boxShadow: '0 1px 2px rgba(0,0,0,0.03)', display: 'flex', flexDirection: 'column', gap: 14 }}>
         <div style={{ fontSize: '1rem', fontWeight: 650, color: 'var(--text-primary)' }}>Status</div>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -2641,9 +2641,9 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
             return [...prev, { username: sender, is_active: true }];
           });
         }
-      } else if (msg.type === 'user_status') {
       } else if (msg.type === 'profile_updated') {
         applyProfileUpdate(msg.data as { username?: string; bio?: string | null; job_title?: string | null });
+      } else if (msg.type === 'user_status') {
         const onlineList = ((msg as any).users as string[]) ?? [];
         const onlineSet = new Set(onlineList);
         setContacts(prev => prev.map(c => ({ ...c, is_active: onlineSet.has(c.username) })));

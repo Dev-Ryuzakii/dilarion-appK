@@ -2099,6 +2099,29 @@ export function formatDisappear(hours: number | null | undefined): string {
   return `${hours} hours`;
 }
 
+// ── Bio ───────────────────────────────────────────────────────────────────────
+
+export interface BioInfo { bio: string | null; job_title: string | null }
+
+export async function getMyBio(token: string): Promise<BioInfo> {
+  const res = await apiFetch(`${BASE}/users/me/bio`, { headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) throw new Error('Failed to load bio');
+  return res.json();
+}
+
+export async function setMyBio(token: string, bio: string): Promise<BioInfo> {
+  const res = await apiFetch(`${BASE}/users/me/bio`, {
+    method: 'PUT',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ bio }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || 'Failed to save bio');
+  }
+  return res.json();
+}
+
 // ── Profile picture ───────────────────────────────────────────────────────────
 
 export function profilePictureUrl(username: string): string {
@@ -2173,29 +2196,6 @@ export async function signUp(username: string, phoneNumber: string, token: strin
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username, phone_number: phoneNumber, token }),
   });
-// ── Bio ───────────────────────────────────────────────────────────────────────
-
-export interface BioInfo { bio: string | null; job_title: string | null }
-
-export async function getMyBio(token: string): Promise<BioInfo> {
-  const res = await apiFetch(`${BASE}/users/me/bio`, { headers: { Authorization: `Bearer ${token}` } });
-  if (!res.ok) throw new Error('Failed to load bio');
-  return res.json();
-}
-
-export async function setMyBio(token: string, bio: string): Promise<BioInfo> {
-  const res = await apiFetch(`${BASE}/users/me/bio`, {
-    method: 'PUT',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ bio }),
-  });
-  if (!res.ok) {
-    const body = await res.json().catch(() => null);
-    throw new Error(body?.detail || 'Failed to save bio');
-  }
-  return res.json();
-}
-
   if (!res.ok) {
     const body = await res.json().catch(() => null);
     throw new Error(body?.detail || 'Failed to create account');
