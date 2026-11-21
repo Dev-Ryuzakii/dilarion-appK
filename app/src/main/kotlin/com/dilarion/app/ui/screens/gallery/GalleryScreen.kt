@@ -17,6 +17,18 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.ClosedCaption
+import androidx.compose.material.icons.filled.ClosedCaptionDisabled
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Subtitles
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
+import com.dilarion.app.data.model.CaptionSegment
+import kotlinx.coroutines.delay
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.CallSplit
@@ -227,6 +239,15 @@ fun GalleryScreen(
                     )
                     else -> TileGrid(state = state, room = viewModel.room)
                 }
+                if (!state.connecting && state.error == null && !state.isAdHocCall &&
+                    state.captions.enabled && state.captions.showOverlay
+                ) {
+                    CaptionsOverlay(
+                        segments = state.captions.segments,
+                        starting = state.captions.status == "starting",
+                        modifier = Modifier.align(Alignment.BottomCenter),
+                    )
+                }
             }
 
             if (!state.connecting && state.error == null) {
@@ -257,6 +278,18 @@ fun GalleryScreen(
             onPeople = { showMore = false; viewModel.openParticipants() },
             onMinimize = { showMore = false; PipController.enter?.invoke() },
             onLeave = { showMore = false; leave() },
+            onTranscript = { showMore = false; viewModel.showTranscript(true) },
+            onToggleCaptions = { showMore = false; viewModel.toggleCaptionsOverlay() },
+        )
+    }
+
+    if (state.captions.showTranscript && !state.isAdHocCall) {
+        TranscriptSheet(
+            state = state,
+            onDismiss = { viewModel.showTranscript(false) },
+            onStart = { viewModel.startCaptions(it) },
+            onStop = { viewModel.stopCaptions() },
+            onLanguage = { viewModel.setCaptionsLanguage(it) },
         )
     }
 
@@ -619,6 +652,8 @@ private fun MoreSheet(
     onPeople: () -> Unit,
     onMinimize: () -> Unit,
     onLeave: () -> Unit,
+    onTranscript: () -> Unit,
+    onToggleCaptions: () -> Unit,
 ) {
     val meeting = !state.isAdHocCall
     val iShareBoard = state.whiteboardOwner != null && state.whiteboardOwner == state.myUsername
@@ -649,6 +684,21 @@ private fun MoreSheet(
                 )
                 if (iShareBoard) {
                     ActionTile(Icons.Default.Close, "Stop board", onClick = onStopWhiteboard, modifier = cell)
+                }
+                val cap = state.captions
+                if (cap.available || cap.segments.isNotEmpty()) {
+                    ActionTile(
+                        Icons.Default.Subtitles,
+                        if (cap.enabled) "Transcript" else "Live transcript",
+                        active = cap.enabled, onClick = onTranscript, modifier = cell,
+                    )
+                }
+                if (cap.enabled) {
+                    ActionTile(
+                        if (cap.showOverlay) Icons.Default.ClosedCaptionDisabled else Icons.Default.ClosedCaption,
+                        if (cap.showOverlay) "Hide captions" else "Show captions",
+                        onClick = onToggleCaptions, modifier = cell,
+                    )
                 }
                 if (state.isHost) {
                     ActionTile(
@@ -1037,6 +1087,225 @@ private fun BreakoutSheet(
                 modifier = Modifier.fillMaxWidth(),
             )
             Spacer(Modifier.height(6.dp))
+        }
+    }
+}
+
+// ── Live transcript ────────────────────────────────────────────────────
+
+private const val OVERLAY_LINES = 2
+private const val OVERLAY_TTL_MS = 9_000L
+
+/** The last couple of lines over the call, fading out when people stop talking. */
+@Composable
+private fun CaptionsOverlay(segments: List<CaptionSegment>, starting: Boolean, modifier: Modifier = Modifier) {
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) { delay(1000); now = System.currentTimeMillis() }
+    }
+    // Age lines by when they reached this phone, so a server clock difference
+    // can't hide captions.
+    val arrived = remember { mutableMapOf<Int, Long>() }
+    val last = segments.takeLast(OVERLAY_LINES)
+    last.forEach { arrived.getOrPut(it.id) { System.currentTimeMillis() } }
+    val visible = last.filter { now - (arrived[it.id] ?: now) < OVERLAY_TTL_MS }
+    if (visible.isEmpty() && !starting) return
+    Column(
+        modifier
+            .padding(horizontal = 12.dp, vertical = 10.dp)
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(Color.Black.copy(alpha = 0.72f))
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        if (visible.isEmpty()) {
+            Text("Live transcript is starting…", color = TextMuted, fontSize = 13.sp)
+        } else visible.forEach { s ->
+            Text(
+                androidx.compose.ui.text.buildAnnotatedString {
+                    pushStyle(androidx.compose.ui.text.SpanStyle(color = SoftRed, fontWeight = FontWeight.Bold))
+                    append(s.speakerName ?: s.speakerUsername)
+                    pop()
+                    append("  ")
+                    append(s.text)
+                },
+                color = Color.White, fontSize = 15.sp, lineHeight = 20.sp,
+            )
+        }
+    }
+}
+
+private fun captionTime(iso: String?): String {
+    if (iso.isNullOrBlank()) return ""
+    return runCatching {
+        java.time.Instant.parse(iso).atZone(java.time.ZoneId.systemDefault())
+            .format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))
+    }.getOrDefault("")
+}
+
+/** Full transcript: search, copy, and the host's language and on/off controls. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TranscriptSheet(
+    state: GalleryUiState,
+    onDismiss: () -> Unit,
+    onStart: (String) -> Unit,
+    onStop: () -> Unit,
+    onLanguage: (String) -> Unit,
+) {
+    val cap = state.captions
+    var query by remember { mutableStateOf("") }
+    var chosen by remember { mutableStateOf("auto") }
+    var copied by remember { mutableStateOf(false) }
+    var langMenu by remember { mutableStateOf(false) }
+    val clipboard = LocalClipboardManager.current
+    val current = if (cap.enabled) cap.language else chosen
+    fun nameOf(code: String) = cap.languages.firstOrNull { it.code == code }?.name ?: code
+
+    val shown = remember(cap.segments, query) {
+        val q = query.trim().lowercase()
+        if (q.isEmpty()) cap.segments
+        else cap.segments.filter { it.text.lowercase().contains(q) || (it.speakerName ?: "").lowercase().contains(q) }
+    }
+    val listState = rememberLazyListState()
+    // Follow new lines unless the reader scrolled up.
+    LaunchedEffect(shown.size) {
+        if (shown.isEmpty()) return@LaunchedEffect
+        val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+        if (lastVisible >= shown.size - 3) listState.animateScrollToItem(shown.size - 1)
+    }
+    LaunchedEffect(copied) { if (copied) { delay(1500); copied = false } }
+
+    val status = when {
+        !cap.enabled -> "Off"
+        cap.status == "starting" -> "Starting…"
+        else -> "On" + (cap.startedBy?.let { " · turned on by $it" } ?: "")
+    } + if (cap.enabled && cap.language != "auto") " · ${nameOf(cap.language)}" else ""
+
+    DarkSheet(onDismiss) {
+        SheetHeader("Live transcript", status, Icons.Default.Subtitles)
+
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            DarkField(query, { query = it }, "Search the transcript", Modifier.weight(1f), Icons.Default.Search)
+            IconButton(
+                onClick = {
+                    val text = cap.segments.joinToString("\n") {
+                        "[${captionTime(it.startedAt)}] ${it.speakerName ?: it.speakerUsername}: ${it.text}"
+                    }
+                    clipboard.setText(AnnotatedString(text))
+                    copied = true
+                },
+                enabled = cap.segments.isNotEmpty(),
+            ) {
+                Icon(Icons.Default.ContentCopy, if (copied) "Copied" else "Copy transcript", tint = if (copied) Speaking else TextMain)
+            }
+        }
+
+        Box(Modifier.fillMaxWidth().heightIn(min = 160.dp, max = 380.dp)) {
+            if (shown.isEmpty()) {
+                Text(
+                    when {
+                        query.isNotBlank() -> "Nothing matches \"$query\"."
+                        cap.enabled -> "Lines appear here a moment after each person finishes speaking."
+                        !cap.available -> "Live transcript isn't available on this server yet."
+                        state.isHost -> "Turn on the live transcript so everyone can follow along in text."
+                        else -> "The host hasn't turned on the live transcript."
+                    },
+                    color = TextMuted, fontSize = 13.sp, textAlign = TextAlign.Center, lineHeight = 19.sp,
+                    modifier = Modifier.align(Alignment.Center).padding(horizontal = 32.dp),
+                )
+            } else {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
+                ) {
+                    itemsIndexed(shown, key = { _, s -> s.id }) { i, s ->
+                        val same = i > 0 && shown[i - 1].speakerUsername == s.speakerUsername
+                        Column(Modifier.fillMaxWidth().padding(top = if (same) 2.dp else 12.dp)) {
+                            if (!same) {
+                                Row(verticalAlignment = Alignment.Bottom) {
+                                    Text(s.speakerName ?: s.speakerUsername, color = TextMain, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(captionTime(s.startedAt), color = TextMuted, fontSize = 11.sp)
+                                }
+                                Spacer(Modifier.height(2.dp))
+                            }
+                            Text(s.text, color = Color(0xFFE9E2E1), fontSize = 14.sp, lineHeight = 20.sp)
+                        }
+                    }
+                }
+            }
+        }
+
+        (cap.error ?: cap.serverError?.takeIf { !cap.enabled })?.let {
+            Text(it, color = SoftRed, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp))
+        }
+
+        if (state.isHost && cap.available) {
+            Spacer(Modifier.height(6.dp))
+            SectionLabel("Spoken language")
+            Box(Modifier.padding(horizontal = 20.dp).fillMaxWidth()) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color(0xFF0F0B0B))
+                        .border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(14.dp))
+                        .clickable(enabled = !cap.busy) { langMenu = true }
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(nameOf(current), color = TextMain, fontSize = 14.sp, modifier = Modifier.weight(1f))
+                    Icon(Icons.Default.ArrowDropDown, "Choose language", tint = TextMuted)
+                }
+                DropdownMenu(
+                    expanded = langMenu,
+                    onDismissRequest = { langMenu = false },
+                    modifier = Modifier.background(Card).heightIn(max = 320.dp),
+                ) {
+                    cap.languages.forEach { l ->
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    l.name,
+                                    color = if (l.code == current) SoftRed else TextMain,
+                                    fontWeight = if (l.code == current) FontWeight.Bold else FontWeight.Normal,
+                                )
+                            },
+                            onClick = {
+                                langMenu = false
+                                if (cap.enabled) { if (l.code != cap.language) onLanguage(l.code) } else chosen = l.code
+                            },
+                        )
+                    }
+                }
+            }
+            Text(
+                "Transcribed on your organization's server. Everyone in the meeting can see it.",
+                color = TextMuted, fontSize = 11.sp, lineHeight = 15.sp,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+            )
+            if (cap.enabled) {
+                Box(
+                    Modifier.padding(horizontal = 20.dp).fillMaxWidth().height(48.dp)
+                        .clip(RoundedCornerShape(14.dp)).background(LeaveRed.copy(alpha = 0.16f))
+                        .clickable(enabled = !cap.busy, onClick = onStop),
+                    contentAlignment = Alignment.Center,
+                ) { Text(if (cap.busy) "…" else "Turn off", color = SoftRed, fontWeight = FontWeight.Bold) }
+            } else {
+                PrimaryButton(
+                    if (cap.busy) "Turning on…" else "Turn on",
+                    onClick = { onStart(chosen) },
+                    enabled = !cap.busy,
+                    modifier = Modifier.padding(horizontal = 20.dp).fillMaxWidth(),
+                )
+            }
         }
     }
 }

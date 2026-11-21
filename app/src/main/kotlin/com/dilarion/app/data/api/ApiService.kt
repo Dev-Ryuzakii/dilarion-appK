@@ -652,6 +652,29 @@ interface ApiService {
         @Query("display_name") displayName: String?,
     ): Response<com.dilarion.app.data.model.LiveKitTokenResponse>
 
+    // ─── Live meeting transcript ─────────────────────────────────────────────
+
+    @GET("calls/conference/{id}/captions")
+    suspend fun getLiveCaptions(
+        @Header("Authorization") bearer: String,
+        @Path("id") conferenceId: Int,
+        @Query("after_id") afterId: Int = 0,
+    ): Response<com.dilarion.app.data.model.CaptionsResponse>
+
+    /** Host only. Turns the transcript on, or switches its language while it runs. */
+    @POST("calls/conference/{id}/captions/start")
+    suspend fun startLiveCaptions(
+        @Header("Authorization") bearer: String,
+        @Path("id") conferenceId: Int,
+        @Body body: com.dilarion.app.data.model.CaptionsStartRequest,
+    ): Response<com.dilarion.app.data.model.CaptionsResponse>
+
+    @POST("calls/conference/{id}/captions/stop")
+    suspend fun stopLiveCaptions(
+        @Header("Authorization") bearer: String,
+        @Path("id") conferenceId: Int,
+    ): Response<com.dilarion.app.data.model.CaptionsResponse>
+
     // ─── Waiting room (host-only) ────────────────────────────────────────────
 
     @GET("calls/conference/{id}/waiting-room")

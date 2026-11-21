@@ -8,6 +8,10 @@ import com.dilarion.app.calls.notifyConferenceLeft
 import com.dilarion.app.data.api.ApiService
 import com.dilarion.app.data.model.BreakoutGroupInput
 import com.dilarion.app.data.model.BreakoutStartRequest
+import com.dilarion.app.data.model.CaptionLanguage
+import com.dilarion.app.data.model.CaptionSegment
+import com.dilarion.app.data.model.CaptionsResponse
+import com.dilarion.app.data.model.CaptionsStartRequest
 import com.dilarion.app.data.model.UserInfo
 import com.dilarion.app.data.model.WaitingParticipant
 import com.dilarion.app.data.model.WhiteboardOpenRequest
@@ -45,6 +49,45 @@ data class GalleryTile(
     val screenTrack: VideoTrack? = null,
 )
 
+/** Live meeting transcript, mirrored from desktop's LiveCaptions.tsx. */
+data class CaptionsUi(
+    /** False when the server has captions turned off or predates them. */
+    val available: Boolean = false,
+    val enabled: Boolean = false,
+    /** "off" | "starting" | "running" */
+    val status: String = "off",
+    val startedBy: String? = null,
+    /** Spoken language code, or "auto". */
+    val language: String = "auto",
+    val segments: List<CaptionSegment> = emptyList(),
+    val languages: List<CaptionLanguage> = DEFAULT_CAPTION_LANGUAGES,
+    val busy: Boolean = false,
+    val error: String? = null,
+    /** Server-side failure of the last run (worker crashed, etc.). */
+    val serverError: String? = null,
+    /** Show the last lines over the call. Local choice only. */
+    val showOverlay: Boolean = true,
+    val showTranscript: Boolean = false,
+)
+
+/** Used until the server sends its own list. */
+val DEFAULT_CAPTION_LANGUAGES = listOf(
+    CaptionLanguage("auto", "Detect automatically"),
+    CaptionLanguage("en", "English"),
+    CaptionLanguage("fr", "French"),
+    CaptionLanguage("es", "Spanish"),
+    CaptionLanguage("pt", "Portuguese"),
+    CaptionLanguage("de", "German"),
+    CaptionLanguage("ar", "Arabic"),
+    CaptionLanguage("zh", "Chinese"),
+    CaptionLanguage("hi", "Hindi"),
+    CaptionLanguage("sw", "Swahili"),
+    CaptionLanguage("yo", "Yoruba"),
+    CaptionLanguage("ha", "Hausa"),
+)
+
+private const val MAX_CAPTION_SEGMENTS = 1000
+
 data class GalleryUiState(
     val connecting: Boolean = true,
     val error: String? = null,
@@ -81,6 +124,7 @@ data class GalleryUiState(
     val isAdHocCall: Boolean = false,
     /** "voice" | "video" from the server, for the call title and camera. */
     val callType: String? = null,
+    val captions: CaptionsUi = CaptionsUi(),
 )
 
 /**
@@ -118,6 +162,8 @@ class GalleryViewModel @Inject constructor(
     private var appliedServerCallType = false
     /** Left the call. Later LiveKit track events must not put their tile back. */
     private val departed = mutableSetOf<String>()
+    private val gson = com.google.gson.Gson()
+    private var lastCaptionId = 0
 
     init {
         viewModelScope.launch {
@@ -167,6 +213,23 @@ class GalleryViewModel @Inject constructor(
                         switchRoom(breakoutId)
                         _uiState.value = _uiState.value.copy(inBreakoutName = name)
                     }
+                    "meeting_caption" -> {
+                        val data = msg.data ?: return@collect
+                        val confId = data.get("conference_id")?.takeIf { !it.isJsonNull }?.asInt ?: return@collect
+                        if (confId != currentConferenceId) return@collect
+                        runCatching { gson.fromJson(data, CaptionSegment::class.java) }.getOrNull()
+                            ?.let { mergeCaptions(listOf(it)) }
+                    }
+                    "meeting_captions_state" -> {
+                        val data = msg.data ?: return@collect
+                        val confId = data.get("conference_id")?.takeIf { !it.isJsonNull }?.asInt ?: return@collect
+                        if (confId != currentConferenceId) return@collect
+                        val st = runCatching { gson.fromJson(data, CaptionsResponse::class.java) }.getOrNull() ?: return@collect
+                        applyCaptionsState(st)
+                        if (st.enabled) refreshCaptions()
+                    }
+                    // Socket came back: catch up on lines missed while it was away.
+                    "connected" -> if (currentConferenceId > 0 && !_uiState.value.isAdHocCall) refreshCaptions()
                     "breakout_ended" -> {
                         val data = msg.data ?: return@collect
                         val parentId = data.get("parent_conference_id")?.takeIf { !it.isJsonNull }?.asInt ?: return@collect
@@ -409,7 +472,11 @@ class GalleryViewModel @Inject constructor(
                     isHost = if (adHoc) body.isHost else _uiState.value.isHost,
                     waiting = if (adHoc) emptyList() else _uiState.value.waiting,
                 )
-                if (!adHoc) loadWaitingRoom(parentConferenceId.takeIf { it > 0 } ?: conferenceId)
+                if (!adHoc) {
+                    loadWaitingRoom(parentConferenceId.takeIf { it > 0 } ?: conferenceId)
+                    resetCaptions()
+                    refreshCaptions()
+                }
 
                 // Keep subscriptions active while Android creates or replaces its
                 // TextureView. Adaptive streaming can pause the track before the
@@ -632,6 +699,120 @@ class GalleryViewModel @Inject constructor(
             }
             _uiState.value = _uiState.value.copy(inviting = null)
         }
+    }
+
+    // ── Live transcript ──────────────────────────────────────────────────
+
+    private fun resetCaptions() {
+        lastCaptionId = 0
+        val keep = _uiState.value.captions
+        _uiState.value = _uiState.value.copy(
+            captions = CaptionsUi(showOverlay = keep.showOverlay, languages = keep.languages),
+        )
+    }
+
+    private fun mergeCaptions(incoming: List<CaptionSegment>) {
+        if (incoming.isEmpty()) return
+        val cur = _uiState.value.captions
+        val seen = cur.segments.mapTo(HashSet()) { it.id }
+        val merged = (cur.segments + incoming.filter { it.id !in seen }).sortedBy { it.id }.takeLast(MAX_CAPTION_SEGMENTS)
+        merged.lastOrNull()?.let { lastCaptionId = it.id }
+        _uiState.value = _uiState.value.copy(captions = _uiState.value.captions.copy(segments = merged))
+    }
+
+    private fun applyCaptionsState(st: CaptionsResponse) {
+        val c = _uiState.value.captions
+        _uiState.value = _uiState.value.copy(
+            captions = c.copy(
+                enabled = st.enabled,
+                status = st.status,
+                startedBy = st.startedBy,
+                language = if (st.enabled) (st.language ?: "auto") else c.language,
+                serverError = st.error,
+                available = st.available ?: c.available,
+                languages = st.languages?.takeIf { it.isNotEmpty() } ?: c.languages,
+                showOverlay = if (st.enabled && !c.enabled) true else c.showOverlay,
+            ),
+        )
+    }
+
+    private fun refreshCaptions() {
+        val confId = currentConferenceId
+        if (confId <= 0) return
+        viewModelScope.launch {
+            val token = sessionManager.sessionToken.first() ?: return@launch
+            val resp = runCatching { apiService.getLiveCaptions("Bearer $token", confId, lastCaptionId) }.getOrNull()
+            if (confId != currentConferenceId) return@launch
+            val body = resp?.takeIf { it.isSuccessful }?.body()
+            if (body == null) {
+                // Older servers have no captions route: hide the feature quietly.
+                if (resp != null && resp.code() == 404) {
+                    _uiState.value = _uiState.value.copy(captions = _uiState.value.captions.copy(available = false))
+                }
+                return@launch
+            }
+            applyCaptionsState(body.copy(available = body.available ?: true))
+            mergeCaptions(body.segments.orEmpty())
+        }
+    }
+
+    private fun serverDetail(resp: retrofit2.Response<*>, fallback: String): String =
+        runCatching {
+            gson.fromJson(resp.errorBody()?.string(), com.google.gson.JsonObject::class.java)
+                ?.get("detail")?.takeIf { it.isJsonPrimitive }?.asString
+        }.getOrNull()?.takeIf { it.isNotBlank() } ?: fallback
+
+    private fun captionsCall(fallback: String, call: suspend (String) -> retrofit2.Response<CaptionsResponse>) {
+        viewModelScope.launch {
+            val token = sessionManager.sessionToken.first() ?: return@launch
+            _uiState.value = _uiState.value.copy(captions = _uiState.value.captions.copy(busy = true, error = null))
+            runCatching { call("Bearer $token") }
+                .onSuccess { resp ->
+                    val body = resp.body()
+                    if (resp.isSuccessful && body != null) applyCaptionsState(body)
+                    else _uiState.value = _uiState.value.copy(
+                        captions = _uiState.value.captions.copy(error = serverDetail(resp, fallback)),
+                    )
+                }
+                .onFailure { e ->
+                    _uiState.value = _uiState.value.copy(captions = _uiState.value.captions.copy(error = e.toUserMessage(fallback)))
+                }
+            _uiState.value = _uiState.value.copy(captions = _uiState.value.captions.copy(busy = false))
+        }
+    }
+
+    /** Host only. [language] is a code like "en", or "auto". */
+    fun startCaptions(language: String) {
+        val confId = currentConferenceId
+        _uiState.value = _uiState.value.copy(captions = _uiState.value.captions.copy(showOverlay = true))
+        captionsCall("Couldn't start the live transcript.") { bearer ->
+            apiService.startLiveCaptions(bearer, confId, CaptionsStartRequest(language))
+        }
+    }
+
+    /** Host only, while it runs: switch the spoken language. */
+    fun setCaptionsLanguage(language: String) {
+        val confId = currentConferenceId
+        captionsCall("Couldn't change the transcript language.") { bearer ->
+            apiService.startLiveCaptions(bearer, confId, CaptionsStartRequest(language))
+        }
+    }
+
+    fun stopCaptions() {
+        val confId = currentConferenceId
+        captionsCall("Couldn't stop the live transcript.") { bearer ->
+            apiService.stopLiveCaptions(bearer, confId)
+        }
+    }
+
+    fun toggleCaptionsOverlay() {
+        val c = _uiState.value.captions
+        _uiState.value = _uiState.value.copy(captions = c.copy(showOverlay = !c.showOverlay))
+    }
+
+    fun showTranscript(show: Boolean) {
+        val c = _uiState.value.captions
+        _uiState.value = _uiState.value.copy(captions = c.copy(showTranscript = show, error = null))
     }
 
     fun leave() {

@@ -954,3 +954,33 @@ data class VoiceSpeechClip(
 data class VoiceSpeechList(
     val clips: List<VoiceSpeechClip> = emptyList(),
 )
+
+// ─── Live meeting transcript ─────────────────────────────────────────────────
+
+data class CaptionSegment(
+    @SerializedName("conference_id") val conferenceId: Int,
+    val id: Int,
+    @SerializedName("speaker_username") val speakerUsername: String,
+    @SerializedName("speaker_name") val speakerName: String? = null,
+    val text: String,
+    @SerializedName("started_at") val startedAt: String? = null,
+    @SerializedName("ended_at") val endedAt: String? = null,
+)
+
+data class CaptionLanguage(val code: String, val name: String)
+
+data class CaptionsResponse(
+    @SerializedName("conference_id") val conferenceId: Int = 0,
+    val enabled: Boolean = false,
+    /** "off" | "starting" | "running" */
+    val status: String = "off",
+    @SerializedName("started_by") val startedBy: String? = null,
+    /** Spoken language code ("en", ...) or "auto". */
+    val language: String? = null,
+    val error: String? = null,
+    val available: Boolean? = null,
+    val segments: List<CaptionSegment>? = null,
+    val languages: List<CaptionLanguage>? = null,
+)
+
+data class CaptionsStartRequest(val language: String? = null)
