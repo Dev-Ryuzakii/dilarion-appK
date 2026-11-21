@@ -897,9 +897,6 @@ function EncryptionKeySection({ token, username }: { token: string; username: st
 interface SettingsMainProps {
   token: string;
   username: string;
-  masterToken: string | null;
-  onSetMasterToken: (t: string) => void;
-  onClearMasterToken: () => void;
   onLogout: () => void;
   page: SettingsPage;
 }
@@ -1020,7 +1017,7 @@ function SearchModal({ token, onClose, onPickPerson, onPickGroup }: {
   );
 }
 
-function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onClearMasterToken, onLogout, page }: SettingsMainProps) {
+function SettingsMainPanel({ token, username, onLogout, page }: SettingsMainProps) {
   const [appearance, setAppearanceState] = useState<AppearancePrefs>(loadAppearance);
 
   function updateAppearance(patch: Partial<AppearancePrefs>) {
@@ -1031,11 +1028,6 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
     });
   }
 
-  const [verifyInput, setVerifyInput] = useState('');
-  const [verifyShow, setVerifyShow] = useState(false);
-  const [verifyLoading, setVerifyLoading] = useState(false);
-  const [verifyError, setVerifyError] = useState<string | null>(null);
-  const [verifySuccess, setVerifySuccess] = useState(false);
 
   const [createInput, setCreateInput] = useState('');
   const [createShow, setCreateShow] = useState(false);
@@ -1334,28 +1326,6 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
     }
   }
 
-  async function handleVerify() {
-    const trimmed = verifyInput.trim();
-    if (!trimmed) return;
-    setVerifyLoading(true);
-    setVerifyError(null);
-    setVerifySuccess(false);
-    try {
-      const valid = await confirmMasterToken(token, trimmed);
-      if (valid) {
-        onSetMasterToken(trimmed);
-        setVerifySuccess(true);
-        setVerifyInput('');
-      } else {
-        setVerifyError('Invalid master token');
-      }
-    } catch {
-      setVerifyError('Failed to verify master token');
-    } finally {
-      setVerifyLoading(false);
-    }
-  }
-
   async function handleCreate() {
     const trimmed = createInput.trim();
     if (!trimmed) return;
@@ -1634,52 +1604,6 @@ function SettingsMainPanel({ token, username, masterToken, onSetMasterToken, onC
           </span>
         </div>
 
-        {masterToken ? (
-          <>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#25d366', flexShrink: 0 }} />
-              <span style={{ fontSize: '0.85rem', color: '#25d366' }}>Master token active (session)</span>
-            </div>
-            <button
-              onClick={onClearMasterToken}
-              style={{
-                alignSelf: 'flex-start', background: 'transparent',
-                border: '1px solid var(--accent)', color: 'var(--accent)',
-                borderRadius: 8, padding: '6px 14px', fontSize: '0.8rem', cursor: 'pointer', fontFamily: 'inherit',
-              }}
-            >
-              Clear
-            </button>
-          </>
-        ) : (
-          <>
-            <div style={{ fontSize: '0.83rem', color: 'var(--text-muted)' }}>Enter your master token</div>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <div style={{ flex: 1, position: 'relative' }}>
-                <input
-                  type={verifyShow ? 'text' : 'password'}
-                  placeholder="Master token"
-                  value={verifyInput}
-                  onChange={e => setVerifyInput(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter') handleVerify(); }}
-                  style={inputStyle}
-                />
-                <button onClick={() => setVerifyShow(v => !v)} style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', cursor: 'pointer', padding: 2, display: 'flex', alignItems: 'center' }}>
-                  {verifyShow ? <EyeOffIcon size={15} color="#6b7280" /> : <EyeIcon size={15} color="#6b7280" />}
-                </button>
-              </div>
-              <button
-                onClick={handleVerify}
-                disabled={verifyLoading || !verifyInput.trim()}
-                style={{ background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 16px', fontSize: '0.82rem', fontWeight: 600, cursor: verifyLoading ? 'wait' : 'pointer', opacity: verifyLoading ? 0.7 : 1, whiteSpace: 'nowrap', fontFamily: 'inherit' }}
-              >
-                {verifyLoading ? '...' : 'Verify & Save'}
-              </button>
-            </div>
-            {verifyError && <span style={{ fontSize: '0.75rem', color: '#ef4444' }}>{verifyError}</span>}
-            {verifySuccess && <span style={{ fontSize: '0.75rem', color: '#25d366' }}>Master token verified and saved.</span>}
-          </>
-        )}
 
         <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: 12 }}>
           <button
@@ -2326,7 +2250,6 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
   const [showSearch, setShowSearch] = useState(false);
   const [selectedGroup, setSelectedGroup] = useState<number | null>(null);
   const [selectedCallId, setSelectedCallId] = useState<number | null>(null);
-  const [masterToken, setMasterToken] = useState<string | null>(null);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
   const [channels, setChannels] = useState<ChannelSummary[]>([]);
@@ -2433,7 +2356,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
   const [confJoining, setConfJoining] = useState(false);
 
   async function joinConferenceCall() {
-    const entered = confTokenInput.trim() || masterToken;
+    const entered = confTokenInput.trim();
     if (!conferenceInvite || !entered) return;
     setConfJoining(true);
     try {
@@ -2902,8 +2825,8 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
     setSearch('');
   }
 
-  function openContact(c: string) {
-    if (settingsForContact(c)?.is_locked && !masterToken) {
+  function openContact(c: string, unlocked = false) {
+    if (settingsForContact(c)?.is_locked && !unlocked) {
       setLockPrompt({ kind: 'contact', target: c });
       return;
     }
@@ -2916,8 +2839,8 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
     });
   }
 
-  function openGroup(id: number) {
-    if (settingsForGroup(id)?.is_locked && !masterToken) {
+  function openGroup(id: number, unlocked = false) {
+    if (settingsForGroup(id)?.is_locked && !unlocked) {
       setLockPrompt({ kind: 'group', target: id });
       return;
     }
@@ -2935,9 +2858,8 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
         setLockPromptError('Invalid master token');
         return;
       }
-      setMasterToken(lockPromptInput.trim());
-      if (lockPrompt.kind === 'contact') openContact(lockPrompt.target as string);
-      else openGroup(lockPrompt.target as number);
+      if (lockPrompt.kind === 'contact') openContact(lockPrompt.target as string, true);
+      else openGroup(lockPrompt.target as number, true);
       setLockPrompt(null);
       setLockPromptInput('');
     } catch {
@@ -3923,9 +3845,6 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
         <SettingsMainPanel
           token={token}
           username={username}
-          masterToken={masterToken}
-          onSetMasterToken={setMasterToken}
-          onClearMasterToken={() => setMasterToken(null)}
           onLogout={onLogout}
           page={settingsPage}
         />
@@ -4210,8 +4129,8 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
           title={activeGalleryCall.title}
           isAdHocCall={activeGalleryCall.isAdHocCall}
           myUsername={username}
-          masterToken={masterToken}
-          onMasterTokenSaved={setMasterToken}
+          masterToken={null}
+          onMasterTokenSaved={() => {}}
           onClose={() => { setActiveGalleryCall(null); setGalleryMinimized(false); }}
           minimized={galleryMinimized}
           onMinimize={() => setGalleryMinimized(true)}
@@ -4274,8 +4193,8 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
                 Ignore
               </button>
               <button
-                style={{ ...ci.join, opacity: (masterToken || confTokenInput.trim()) && !confJoining ? 1 : 0.5 }}
-                disabled={(!masterToken && !confTokenInput.trim()) || confJoining}
+                style={{ ...ci.join, opacity: confTokenInput.trim() && !confJoining ? 1 : 0.5 }}
+                disabled={!confTokenInput.trim() || confJoining}
                 onClick={() => { joinConferenceCall(); }}
               >
                 {confJoining ? 'Joining…' : 'Join'}
