@@ -167,6 +167,7 @@ button.mtg-chip:hover { background: rgba(255, 255, 255, 0.12); }
   padding: 9px 12px; font-size: 0.84rem; outline: none; width: 100%;
 }
 .mtg-input:focus { border-color: var(--mtg-red); box-shadow: 0 0 0 3px rgba(192, 57, 43, 0.22); }
+select.mtg-input { color-scheme: dark; cursor: pointer; }
 .mtg-input.bare { background: transparent; border-color: transparent; padding: 4px 6px; font-weight: 700; }
 .mtg-input.bare:hover { border-color: var(--mtg-line-2); }
 

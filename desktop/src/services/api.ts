@@ -2887,22 +2887,45 @@ export interface CaptionsState {
   enabled: boolean;
   status: 'off' | 'starting' | 'running';
   started_by: string | null;
+  /** Spoken language the host picked: a code like "en", or "auto". */
+  language?: string | null;
   error?: string | null;
   available?: boolean;
 }
 
+export interface CaptionLanguage { code: string; name: string }
+
+/** Used until the server sends its own list (older servers send none). */
+export const DEFAULT_CAPTION_LANGUAGES: CaptionLanguage[] = [
+  { code: 'auto', name: 'Detect automatically' },
+  { code: 'en', name: 'English' },
+  { code: 'fr', name: 'French' },
+  { code: 'es', name: 'Spanish' },
+  { code: 'pt', name: 'Portuguese' },
+  { code: 'de', name: 'German' },
+  { code: 'ar', name: 'Arabic' },
+  { code: 'zh', name: 'Chinese' },
+  { code: 'hi', name: 'Hindi' },
+  { code: 'sw', name: 'Swahili' },
+  { code: 'yo', name: 'Yoruba' },
+  { code: 'ha', name: 'Hausa' },
+];
+
 export async function getLiveCaptions(
   token: string, conferenceId: number, afterId = 0,
-): Promise<CaptionsState & { segments: CaptionSegment[] }> {
+): Promise<CaptionsState & { segments: CaptionSegment[]; languages?: CaptionLanguage[] }> {
   const res = await apiFetch(`${BASE}/calls/conference/${conferenceId}/captions?after_id=${afterId}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   return channelJson(res);
 }
 
-export async function startLiveCaptions(token: string, conferenceId: number): Promise<CaptionsState> {
+/** Turns the transcript on, or switches its language while it's on. */
+export async function startLiveCaptions(token: string, conferenceId: number, language?: string): Promise<CaptionsState> {
   const res = await apiFetch(`${BASE}/calls/conference/${conferenceId}/captions/start`, {
-    method: 'POST', headers: { Authorization: `Bearer ${token}` },
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(language ? { language } : {}),
   });
   return channelJson(res);
 }

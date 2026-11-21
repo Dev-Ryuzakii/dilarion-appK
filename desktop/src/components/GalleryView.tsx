@@ -1103,8 +1103,10 @@ export default function GalleryView({
           busy={captions.busy}
           error={captions.error}
           available={captions.available}
-          onStart={() => { setShowCaptions(true); captions.start(); }}
+          onStart={(language) => { setShowCaptions(true); captions.start(language); }}
           onStop={captions.stop}
+          languages={captions.languages}
+          onLanguage={captions.setLanguage}
           onClose={() => setShowTranscript(false)}
         />
       )}

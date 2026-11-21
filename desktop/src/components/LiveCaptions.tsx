@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  CaptionLanguage,
   CaptionSegment,
   CaptionsState,
+  DEFAULT_CAPTION_LANGUAGES,
   getLiveCaptions,
   startLiveCaptions,
   stopLiveCaptions,
@@ -26,6 +28,7 @@ export function useLiveCaptions(token: string, conferenceId: number, active: boo
   const [segments, setSegments] = useState<CaptionSegment[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [languages, setLanguages] = useState<CaptionLanguage[]>(DEFAULT_CAPTION_LANGUAGES);
   const lastId = useRef(0);
 
   const merge = useCallback((incoming: CaptionSegment[]) => {
@@ -42,8 +45,9 @@ export function useLiveCaptions(token: string, conferenceId: number, active: boo
   const refresh = useCallback(async () => {
     try {
       const body = await getLiveCaptions(token, conferenceId, lastId.current);
-      setState({ conference_id: body.conference_id, enabled: body.enabled, status: body.status, started_by: body.started_by, error: body.error });
+      setState({ conference_id: body.conference_id, enabled: body.enabled, status: body.status, started_by: body.started_by, language: body.language ?? null, error: body.error });
       setAvailable(body.available !== false);
+      if (body.languages?.length) setLanguages(body.languages);
       merge(body.segments || []);
     } catch {
       // Older servers have no captions route: treat as unavailable, quietly.
@@ -67,7 +71,7 @@ export function useLiveCaptions(token: string, conferenceId: number, active: boo
       if (msg.type === 'meeting_caption') {
         merge([data as CaptionSegment]);
       } else if (msg.type === 'meeting_captions_state') {
-        setState({ conference_id: conferenceId, enabled: !!data.enabled, status: data.status || 'off', started_by: data.started_by ?? null, error: data.error ?? null });
+        setState({ conference_id: conferenceId, enabled: !!data.enabled, status: data.status || 'off', started_by: data.started_by ?? null, language: data.language ?? null, error: data.error ?? null });
         if (data.enabled) refresh();
       }
     };
@@ -75,11 +79,20 @@ export function useLiveCaptions(token: string, conferenceId: number, active: boo
     return () => presenceService.removeListener(onMsg);
   }, [active, conferenceId, merge, refresh]);
 
-  async function start() {
+  async function start(language?: string) {
     setBusy(true);
     setError(null);
-    try { setState(await startLiveCaptions(token, conferenceId)); }
+    try { setState(await startLiveCaptions(token, conferenceId, language)); }
     catch (err) { setError(userMessage(err, "Couldn't start the live transcript.")); }
+    finally { setBusy(false); }
+  }
+
+  /** Host only, while it's on: switch the spoken language. */
+  async function setLanguage(language: string) {
+    setBusy(true);
+    setError(null);
+    try { setState(await startLiveCaptions(token, conferenceId, language)); }
+    catch (err) { setError(userMessage(err, "Couldn't change the transcript language.")); }
     finally { setBusy(false); }
   }
 
@@ -91,7 +104,7 @@ export function useLiveCaptions(token: string, conferenceId: number, active: boo
     finally { setBusy(false); }
   }
 
-  return { state, available, segments, busy, error, setError, start, stop };
+  return { state, available, segments, busy, error, setError, start, stop, setLanguage, languages };
 }
 
 /** The last couple of lines, over the call, fading out when people stop talking. */
@@ -130,7 +143,7 @@ export function CaptionsOverlay({ segments, starting }: { segments: CaptionSegme
 
 /** Full live transcript: search, copy, and the host's stop control. */
 export function TranscriptDrawer({
-  segments, state, isHost, busy, error, onStart, onStop, onClose, available,
+  segments, state, isHost, busy, error, onStart, onStop, onClose, available, languages, onLanguage,
 }: {
   segments: CaptionSegment[];
   state: CaptionsState;
@@ -138,11 +151,17 @@ export function TranscriptDrawer({
   busy: boolean;
   error: string | null;
   available: boolean;
-  onStart: () => void;
+  onStart: (language: string) => void;
   onStop: () => void;
   onClose: () => void;
+  languages: CaptionLanguage[];
+  onLanguage: (language: string) => void;
 }) {
   const [query, setQuery] = useState('');
+  // The host's pick before turning it on; once on, the server's value wins.
+  const [chosen, setChosen] = useState('auto');
+  const current = state.enabled ? (state.language || 'auto') : chosen;
+  const languageName = (code: string) => languages.find(l => l.code === code)?.name ?? code;
   const [copied, setCopied] = useState(false);
   const listRef = useRef<HTMLDivElement | null>(null);
   const pinnedToBottom = useRef(true);
@@ -167,7 +186,7 @@ export function TranscriptDrawer({
   }
 
   const statusLine = state.enabled
-    ? state.status === 'starting' ? 'Starting…' : `On${state.started_by ? ` · turned on by ${state.started_by}` : ''}`
+    ? `${state.status === 'starting' ? 'Starting…' : `On${state.started_by ? ` · turned on by ${state.started_by}` : ''}`}${state.language && state.language !== 'auto' ? ` · ${languageName(state.language)}` : ''}`
     : 'Off';
 
   return (
@@ -228,13 +247,32 @@ export function TranscriptDrawer({
         {state.error && !state.enabled && <div className="mtg-error" style={{ padding: '0 20px 8px' }}>{state.error}</div>}
 
         {isHost && available && (
+          <div style={{ padding: '0 20px 10px', display: 'flex', alignItems: 'center', gap: 10 }}>
+            <label htmlFor="mtg-caption-lang" className="mtg-sheet-sub" style={{ marginTop: 0, flexShrink: 0 }}>Spoken language</label>
+            <select
+              id="mtg-caption-lang"
+              className="mtg-input"
+              value={current}
+              disabled={busy}
+              onChange={e => {
+                const code = e.target.value;
+                if (state.enabled) onLanguage(code); else setChosen(code);
+              }}
+              style={{ flex: 1 }}
+            >
+              {languages.map(l => <option key={l.code} value={l.code}>{l.name}</option>)}
+            </select>
+          </div>
+        )}
+
+        {isHost && available && (
           <div className="mtg-sheet-foot">
             <span className="mtg-sheet-sub" style={{ marginTop: 0, flex: 1 }}>
               Transcribed on your organization’s server. Everyone in the meeting can see it.
             </span>
             {state.enabled
               ? <button className="mtg-btn danger" onClick={onStop} disabled={busy}>Turn off</button>
-              : <button className="mtg-btn primary" onClick={onStart} disabled={busy}>Turn on</button>}
+              : <button className="mtg-btn primary" onClick={() => onStart(chosen)} disabled={busy}>Turn on</button>}
           </div>
         )}
       </div>
