@@ -30,7 +30,10 @@ import {
   patchChannel,
   archiveChannel,
   transferChannel,
+  Contact,
 } from '../services/api';
+import { usePeople, firstNameOf } from '../services/people';
+import PersonAvatar from '../components/PersonAvatar';
 import { encryptMessage } from '../services/crypto';
 import { generateDecoy } from '../services/decoy';
 import { loadKeypair } from '../services/keys';
@@ -347,6 +350,8 @@ function PrivateTagBubble({ recipient }: { recipient: string }) {
 
 interface GroupMsgBubbleProps {
   msg: ChatMessage;
+  /** Directory entry for the sender: photo flag and full name. */
+  person?: Contact;
   isMine: boolean;
   /** First message in a run from one sender: show avatar, name and time. */
   showHeader?: boolean;
@@ -369,7 +374,7 @@ interface GroupMsgBubbleProps {
 }
 
 function GroupMsgBubble({
-  msg, isMine: isMineReal, showHeader = true, myUsername, token, masterToken, onDecrypt, onMasterTokenSaved, onJoinMeeting,
+  msg, person, isMine: isMineReal, showHeader = true, token, masterToken, onDecrypt, onMasterTokenSaved, onJoinMeeting,
   replyToMsg, onReact, onReply, onForward, onPinToggle, onStarToggle, onEdit, onDelete, onTranslate,
   isStarred,
 }: GroupMsgBubbleProps) {
@@ -379,8 +384,6 @@ function GroupMsgBubble({
   const ct = msg.content_type;
   const mediaId = msg.content;
   const isPrivateTagged = ct === 'private_tagged';
-  const hasRecipient = msg.recipient && msg.recipient !== 'group';
-  const isForMe = hasRecipient && msg.recipient === myUsername;
   const [hovered, setHovered] = useState(false);
   const [revealedText, setRevealedText] = useState<string | null>(null);
   const [showInfo, setShowInfo] = useState(false);
@@ -492,16 +495,13 @@ function GroupMsgBubble({
       style={{ ...flat.row, marginTop: showHeader ? 14 : 2, background: hovered ? 'var(--item-hover)' : 'transparent' }}
     >
       <div style={flat.avatarCol}>
-        {showHeader && <div style={{ ...flat.avatar, background: avatarTint(sender) }}>{initials(sender)}</div>}
+        {showHeader && <PersonAvatar username={sender} label={firstNameOf(person, sender)} hasPicture={person?.has_profile_picture} size={36} />}
       </div>
       <div style={flat.content}>
       {showHeader && (
         <div style={flat.header}>
-          <span style={flat.senderName}>{sender}</span>
+          <span style={flat.senderName} title={sender}>{firstNameOf(person, sender)}</span>
           <span style={flat.headerTime}>{fmtTime(msg.timestamp)}</span>
-          {hasRecipient && !isPrivateTagged && (
-            <span style={{ fontSize: '0.75rem', color: 'var(--accent)' }}>→ @{msg.recipient}</span>
-          )}
         </div>
       )}
       {hovered && (
@@ -540,12 +540,6 @@ function GroupMsgBubble({
           {msg.is_edited && <div>Edited</div>}
           <button onClick={() => setShowInfo(false)} style={{ marginTop: 6, background: 'transparent', border: 'none', color: 'var(--accent)', cursor: 'pointer', fontSize: '0.7rem', padding: 0 }}>Close</button>
         </div>
-      )}
-
-      {isForMe && !isMineReal && (
-        <span style={{ fontSize: '0.67rem', color: '#a78bfa', marginBottom: 2, marginLeft: 4, display: 'flex', alignItems: 'center', gap: 3 }}>
-          Only you can read this
-        </span>
       )}
 
       {msg.forwarded_from_message_id && (
@@ -616,6 +610,7 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
   const [pendingDocFile, setPendingDocFile] = useState<File | null>(null);
   const [pending, setPending] = useState<PendingMsg[]>([]);
   const [taggedUser, setTaggedUser] = useState<string | null>(null);
+  const people = usePeople(token);
   const [members, setMembers] = useState<GroupMember[]>([]);
   const [membersError, setMembersError] = useState<string | null>(null);
   const [showMembers, setShowMembers] = useState(false);
@@ -1201,6 +1196,7 @@ export default function GroupPanel({ token, myUsername, group, masterToken, onMa
               <GroupMsgBubble
                 key={msg.id}
                 msg={msg}
+                person={people[msg.sender || '']}
                 showHeader={showHeader}
                 isMine={msg.sender === myUsername}
                 myUsername={myUsername}

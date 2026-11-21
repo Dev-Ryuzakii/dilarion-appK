@@ -38,6 +38,8 @@ import ContactInfoPanel from '../components/ContactInfoPanel';
 import ForwardRecipientPicker from '../components/ForwardRecipientPicker';
 import { summarizeThreadCopilot, composeReplyCopilot, translateCopilot, clearConversation, GifResult } from '../services/api';
 import { userMessage } from '../services/errors';
+import { usePeople, firstNameOf, aboutLineOf } from '../services/people';
+import PersonAvatar from '../components/PersonAvatar';
 
 interface Props {
   token: string;
@@ -826,6 +828,9 @@ export default function ChatPanel({
 }: Props) {
   // The personal "You" chat: sender and recipient are both me.
   const isSelfChat = partner === myUsername;
+  const people = usePeople(token);
+  const partnerPerson = people[partner];
+  const partnerAbout = aboutLineOf(partnerPerson);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [pending, setPending] = useState<PendingMsg[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1368,7 +1373,7 @@ export default function ChatPanel({
           {isSelfChat ? (
             <div style={{ ...cs.avatar, background: 'var(--accent, #c0392b)', color: '#fff' }}><SelfChatGlyph /></div>
           ) : (
-            <div style={cs.avatar}>{initials(partner)}</div>
+            <PersonAvatar username={partner} label={firstNameOf(partnerPerson, partner)} hasPicture={partnerPerson?.has_profile_picture} size={40} />
           )}
           <div>
             <div style={cs.partnerName}>{isSelfChat ? 'You' : partner}</div>
@@ -1382,11 +1387,17 @@ export default function ChatPanel({
                 <span style={{ fontSize: '0.72rem', color: '#25d366', fontStyle: 'italic' }}>typing…</span>
               </div>
             ) : (
-              <div style={cs.partnerStatus}>
-                <div style={{ width: 7, height: 7, borderRadius: '50%', background: partnerOnline ? '#25d366' : '#6b7280', boxShadow: partnerOnline ? '0 0 5px #25d366' : 'none' }} />
-                <span style={{ fontSize: '0.72rem', color: partnerOnline ? '#25d366' : '#6b7280' }}>
-                  {partnerOnline ? 'online' : 'offline'}
-                </span>
+              <div style={cs.partnerStatus} title={partnerOnline ? 'online' : 'offline'}>
+                <div style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, background: partnerOnline ? '#25d366' : '#6b7280', boxShadow: partnerOnline ? '0 0 5px #25d366' : 'none' }} />
+                {partnerAbout ? (
+                  <span style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 320 }}>
+                    {partnerAbout}
+                  </span>
+                ) : (
+                  <span style={{ fontSize: '0.72rem', color: partnerOnline ? '#25d366' : '#6b7280' }}>
+                    {partnerOnline ? 'online' : 'offline'}
+                  </span>
+                )}
               </div>
             )}
           </div>

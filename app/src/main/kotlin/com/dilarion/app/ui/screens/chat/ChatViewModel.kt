@@ -128,6 +128,10 @@ data class ChatUiState(
     val playbackPositionMs: Int = 0,
     val playbackSpeed: Float = 1f,
     val groupMembers: List<GroupMember> = emptyList(),
+    /** Everyone in the organization by username: names, photos, bio, job title. */
+    val people: Map<String, com.dilarion.app.data.model.UserInfo> = emptyMap(),
+    /** Bearer for loading profile photos (the endpoint needs auth). */
+    val authToken: String? = null,
     val taggedUser: String? = null,
     val mentionQuery: String? = null,
     val replyTarget: Message? = null,
@@ -185,7 +189,20 @@ class ChatViewModel @Inject constructor(
             if (gId == null) loadMedia()
             else loadGroupMembers(gId)
             loadChatSettings()
+            loadPeople()
             observeWebSocket()
+        }
+    }
+
+    private fun loadPeople() {
+        viewModelScope.launch {
+            val token = sessionManager.sessionToken.first() ?: return@launch
+            _uiState.value = _uiState.value.copy(authToken = token)
+            runCatching { apiService.getUsers("Bearer $token").body() }.getOrNull()?.let { users ->
+                _uiState.value = _uiState.value.copy(
+                    people = users.mapNotNull { u -> u.username?.let { it to u } }.toMap(),
+                )
+            }
         }
     }
 
@@ -1211,6 +1228,18 @@ class ChatViewModel @Inject constructor(
                     // arrived while the socket was down was never pushed, so
                     // reload to catch up instead of waiting for a reopen.
                     "connected" -> loadMessages()
+                    // Someone changed their bio: update the header live.
+                    "profile_updated" -> {
+                        val data = d ?: return@collect
+                        val who = data.get("username")?.takeIf { !it.isJsonNull }?.asString ?: return@collect
+                        val cur = _uiState.value.people[who] ?: com.dilarion.app.data.model.UserInfo(username = who)
+                        _uiState.value = _uiState.value.copy(
+                            people = _uiState.value.people + (who to cur.copy(
+                                bio = data.get("bio")?.takeIf { !it.isJsonNull }?.asString,
+                                jobTitle = data.get("job_title")?.takeIf { !it.isJsonNull }?.asString ?: cur.jobTitle,
+                            )),
+                        )
+                    }
                     "typing" -> {
                         if (groupId == null && event.sender == peerUsername) {
                             setPeerTyping(event.isTyping == true)

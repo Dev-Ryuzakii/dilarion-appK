@@ -47,6 +47,11 @@ export interface Contact {
   /** The personal "You" chat (sender == recipient == me). */
   is_self?: boolean;
   display_name?: string;
+  full_name?: string | null;
+  job_title?: string | null;
+  /** Short "about" line; clients fall back to job_title when empty. */
+  bio?: string | null;
+  has_profile_picture?: boolean;
 }
 
 export interface Group {
@@ -2094,6 +2099,29 @@ export async function signUp(username: string, phoneNumber: string, token: strin
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username, phone_number: phoneNumber, token }),
   });
+// ── Bio ───────────────────────────────────────────────────────────────────────
+
+export interface BioInfo { bio: string | null; job_title: string | null }
+
+export async function getMyBio(token: string): Promise<BioInfo> {
+  const res = await apiFetch(`${BASE}/users/me/bio`, { headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) throw new Error('Failed to load bio');
+  return res.json();
+}
+
+export async function setMyBio(token: string, bio: string): Promise<BioInfo> {
+  const res = await apiFetch(`${BASE}/users/me/bio`, {
+    method: 'PUT',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ bio }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || 'Failed to save bio');
+  }
+  return res.json();
+}
+
   if (!res.ok) {
     const body = await res.json().catch(() => null);
     throw new Error(body?.detail || 'Failed to create account');

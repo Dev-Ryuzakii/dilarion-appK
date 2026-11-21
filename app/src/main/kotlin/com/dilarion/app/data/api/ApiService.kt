@@ -417,6 +417,17 @@ interface ApiService {
         @Header("Authorization") bearer: String,
     ): Response<com.google.gson.JsonObject>
 
+    // ─── Bio ──────────────────────────────────────────────────────────────────
+
+    @GET("users/me/bio")
+    suspend fun getMyBio(@Header("Authorization") bearer: String): Response<com.dilarion.app.data.model.BioResponse>
+
+    @PUT("users/me/bio")
+    suspend fun setMyBio(
+        @Header("Authorization") bearer: String,
+        @Body body: com.dilarion.app.data.model.BioUpdateRequest,
+    ): Response<com.dilarion.app.data.model.BioResponse>
+
     // ─── Availability status ────────────────────────────────────────────────────
 
     @POST("users/me/availability")

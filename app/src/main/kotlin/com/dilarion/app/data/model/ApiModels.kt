@@ -506,7 +506,13 @@ data class UserInfo(
     @SerializedName("availability_status") val availabilityStatus: String? = null,
     @SerializedName("status_text") val statusText: String? = null,
     @SerializedName("has_profile_picture") val hasProfilePicture: Boolean = false,
+    @SerializedName("full_name") val fullName: String? = null,
+    @SerializedName("job_title") val jobTitle: String? = null,
+    val bio: String? = null,
 )
+
+data class BioUpdateRequest(val bio: String?)
+data class BioResponse(val bio: String? = null, @SerializedName("job_title") val jobTitle: String? = null)
 
 // ─── Profile picture / availability ─────────────────────────────────────────
 

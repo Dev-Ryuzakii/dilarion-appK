@@ -44,6 +44,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -397,26 +398,36 @@ fun ChatScreen(
                         modifier = if (groupId == null) Modifier.clickable { viewModel.toggleContactInfo(true) }
                         else Modifier.clickable { onOpenGroupInfo?.invoke(groupId) ?: viewModel.toggleMembersSheet(true) },
                     ) {
-                        Box(
-                            modifier = Modifier.size(36.dp).clip(CircleShape).background(DilarionRedDark),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text(
-                                displayName.firstOrNull()?.uppercaseChar()?.toString() ?: "?",
-                                color = SurfaceWhite, fontSize = 16.sp, fontWeight = FontWeight.Bold,
-                            )
+                        val peer = if (groupId == null) uiState.people[username] else null
+                        if (peer != null) {
+                            PersonAvatar(username = username, person = peer, authToken = uiState.authToken, size = 36.dp)
+                        } else {
+                            Box(
+                                modifier = Modifier.size(36.dp).clip(CircleShape).background(DilarionRedDark),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    displayName.firstOrNull()?.uppercaseChar()?.toString() ?: "?",
+                                    color = SurfaceWhite, fontSize = 16.sp, fontWeight = FontWeight.Bold,
+                                )
+                            }
                         }
                         Spacer(Modifier.width(10.dp))
                         Column {
-                            Text(displayName, style = MaterialTheme.typography.titleMedium, color = SurfaceWhite)
-                            if (groupId == null && uiState.peerTyping) {
-                                Text("typing…", fontSize = 11.sp, color = SurfaceWhite.copy(alpha = 0.9f))
-                            } else {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.Lock, null, modifier = Modifier.size(9.dp), tint = SurfaceWhite.copy(alpha = 0.7f))
-                                    Spacer(Modifier.width(3.dp))
-                                    Text("end-to-end encrypted", fontSize = 10.sp, color = SurfaceWhite.copy(alpha = 0.7f))
-                                }
+                            Text(displayName, style = MaterialTheme.typography.titleMedium, color = SurfaceWhite, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            // Under the name: what they wrote in their bio, else
+                            // their job title. Groups show how many people are in it.
+                            val subtitle = when {
+                                groupId == null && uiState.peerTyping -> "typing…"
+                                groupId == null -> peer?.bio?.takeIf { it.isNotBlank() } ?: peer?.jobTitle?.takeIf { it.isNotBlank() }
+                                uiState.groupMembers.isNotEmpty() -> "${uiState.groupMembers.size} members"
+                                else -> null
+                            }
+                            if (subtitle != null) {
+                                Text(
+                                    subtitle, fontSize = 11.sp, color = SurfaceWhite.copy(alpha = 0.8f),
+                                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                )
                             }
                         }
                     }
@@ -543,6 +554,8 @@ fun ChatScreen(
                                     currentUsername = uiState.currentUsername,
                                     isGroup = groupId != null,
                                     senderName = if (groupId != null && !isMine) message.sender else null,
+                                    senderPerson = if (groupId != null && !isMine) uiState.people[message.sender] else null,
+                                    authToken = uiState.authToken,
                                     replyToMsg = message.replyToMessageId?.let { rid -> uiState.messages.find { it.id == rid } },
                                     onReact = { emoji -> viewModel.toggleReaction(message.id, emoji) },
                                     onReply = { viewModel.setReplyTarget(message) },
@@ -1580,6 +1593,43 @@ private fun usernameInitials(name: String): String =
         .joinToString("") { it[0].uppercase() }
         .ifEmpty { name.take(2).uppercase() }
 
+/** First word of their full name, else the username. */
+private fun firstNameOf(person: com.dilarion.app.data.model.UserInfo?, username: String): String =
+    person?.fullName?.trim()?.split(Regex("\\s+"))?.firstOrNull()?.takeIf { it.isNotBlank() } ?: username
+
+/** Their profile photo when they have one, else their initial on a colour. */
+@Composable
+private fun PersonAvatar(
+    username: String,
+    person: com.dilarion.app.data.model.UserInfo?,
+    authToken: String?,
+    size: androidx.compose.ui.unit.Dp,
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val initial = firstNameOf(person, username).firstOrNull()?.uppercaseChar()?.toString() ?: "?"
+    Box(
+        modifier = Modifier.size(size).clip(CircleShape).background(avatarColorFor(username)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(initial, color = Color.White, fontSize = (size.value * 0.4f).sp, fontWeight = FontWeight.Bold)
+        if (person?.hasProfilePicture == true && authToken != null) {
+            val request = remember(username, authToken) {
+                ImageRequest.Builder(context)
+                    .data("${com.dilarion.app.BuildConfig.BASE_URL}users/$username/profile-picture")
+                    .addHeader("Authorization", "Bearer $authToken")
+                    .crossfade(true)
+                    .build()
+            }
+            AsyncImage(
+                model = request,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+    }
+}
+
 @Composable
 private fun SenderAvatar(username: String) {
     Box(
@@ -1714,6 +1764,8 @@ private fun MessageBubble(
     currentUsername: String = "",
     isGroup: Boolean = false,
     senderName: String? = null,
+    senderPerson: com.dilarion.app.data.model.UserInfo? = null,
+    authToken: String? = null,
     replyToMsg: Message? = null,
     onReact: (String) -> Unit = {},
     onReply: () -> Unit = {},
@@ -1829,8 +1881,6 @@ private fun MessageBubble(
     val isEncrypted = message.contentType == "encrypted" ||
             message.encryptedKey != null ||
             message.iv != null
-    val hasRecipient = !message.recipient.isNullOrBlank() && message.recipient != "group"
-    val isForMe = hasRecipient && message.recipient == currentUsername
     val privatePurple = Color(0xFFA78BFA)
     val showDecoy = decryptedText == null && (isEncrypted || looksLikeCiphertext(message.content))
 
@@ -1849,30 +1899,6 @@ private fun MessageBubble(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = if (isMine) Alignment.End else Alignment.Start,
     ) {
-        if (!isMine && hasRecipient && !isPrivateTagged) {
-            Text(
-                "→ @${message.recipient}",
-                style = MaterialTheme.typography.labelSmall,
-                color = privatePurple,
-                modifier = Modifier.padding(start = if (isGroup) 44.dp else 4.dp, bottom = 2.dp),
-            )
-        }
-        if (isMine && hasRecipient && !isPrivateTagged) {
-            Text(
-                "→ @${message.recipient}",
-                style = MaterialTheme.typography.labelSmall,
-                color = privatePurple,
-                modifier = Modifier.padding(end = 4.dp, bottom = 2.dp),
-            )
-        }
-        if (isForMe && !isMine) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(start = if (isGroup) 44.dp else 4.dp, bottom = 2.dp),
-            ) {
-                Text("Only you can read this", style = MaterialTheme.typography.labelSmall, color = privatePurple)
-            }
-        }
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = if (isMine) Arrangement.End else Arrangement.Start,
@@ -1880,7 +1906,7 @@ private fun MessageBubble(
         ) {
             // Sender avatar for group received messages
             if (isGroup && !isMine) {
-                SenderAvatar(username = senderName ?: "?")
+                PersonAvatar(username = senderName ?: "?", person = senderPerson, authToken = authToken, size = 32.dp)
                 Spacer(Modifier.width(6.dp))
             } else if (isGroup && isMine) {
                 // spacer to align mine bubbles
@@ -1889,7 +1915,7 @@ private fun MessageBubble(
                 // Sender name for group received messages
                 if (isGroup && !isMine && senderName != null) {
                     Text(
-                        senderName,
+                        firstNameOf(senderPerson, senderName),
                         style = MaterialTheme.typography.labelSmall,
                         color = avatarColorFor(senderName),
                         fontWeight = FontWeight.SemiBold,

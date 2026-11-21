@@ -79,6 +79,13 @@ data class SettingsUiState(
     val statusText: String = "",
     val availabilityBusy: Boolean = false,
     val availabilityError: String? = null,
+    // Bio shown under your name in other people's chat headers; job title is
+    // what they see when the bio is empty.
+    val bio: String = "",
+    val jobTitle: String? = null,
+    val bioBusy: Boolean = false,
+    val bioSaved: Boolean = false,
+    val bioError: String? = null,
 
     val notifMuteAll: Boolean = false,
     val notifQuietEnabled: Boolean = false,
@@ -108,6 +115,7 @@ class SettingsViewModel @Inject constructor(
             )
         }
         refreshTwoFaStatus()
+        refreshBio()
         refreshDeletionStatus()
         refreshVoiceIdentityStatus()
         refreshNotificationSettings()
@@ -624,6 +632,36 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun clearProfilePictureError() { _uiState.value = _uiState.value.copy(profilePictureError = null) }
+
+    // ── Bio ──────────────────────────────────────────────────────────────────────
+
+    private fun refreshBio() {
+        viewModelScope.launch {
+            val bearer = bearer() ?: return@launch
+            runCatching { apiService.getMyBio(bearer).body() }.getOrNull()?.let { b ->
+                _uiState.value = _uiState.value.copy(bio = b.bio.orEmpty(), jobTitle = b.jobTitle)
+            }
+        }
+    }
+
+    fun saveBio(text: String) {
+        viewModelScope.launch {
+            val bearer = bearer() ?: return@launch
+            _uiState.value = _uiState.value.copy(bioBusy = true, bioError = null, bioSaved = false)
+            runCatching { apiService.setMyBio(bearer, com.dilarion.app.data.model.BioUpdateRequest(text.trim().ifBlank { null })) }
+                .onSuccess { resp ->
+                    val body = resp.body()
+                    _uiState.value = if (resp.isSuccessful && body != null) {
+                        _uiState.value.copy(bioBusy = false, bioSaved = true, bio = body.bio.orEmpty(), jobTitle = body.jobTitle)
+                    } else {
+                        _uiState.value.copy(bioBusy = false, bioError = "Couldn't save your bio. Please try again.")
+                    }
+                }
+                .onFailure { e ->
+                    _uiState.value = _uiState.value.copy(bioBusy = false, bioError = e.toUserMessage("Couldn't save your bio. Please try again."))
+                }
+        }
+    }
 
     // ── Availability status ──────────────────────────────────────────────────────
 

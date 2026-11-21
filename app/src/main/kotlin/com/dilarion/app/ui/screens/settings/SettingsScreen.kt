@@ -15,6 +15,7 @@ import androidx.compose.material.icons.Icons
 import androidx.activity.compose.BackHandler
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Circle
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Person
@@ -51,6 +52,7 @@ import kotlinx.coroutines.launch
 private enum class SettingsPage(val title: String) {
     HUB("Settings"),
     AVAILABILITY("Status"),
+    BIO("Bio"),
     NOTIFICATIONS("Notifications"),
     TWO_FA("Two-factor (2FA)"),
     VOICE("AI voice decoy"),
@@ -226,6 +228,11 @@ fun SettingsScreen(
                         HubDivider()
                         HubRow(Icons.Default.Person, "Username", uiState.username) { page = SettingsPage.USERNAME }
                         HubDivider()
+                        HubRow(
+                            Icons.Default.Info, "Bio",
+                            uiState.bio.ifBlank { uiState.jobTitle?.let { "Showing your job title: $it" } ?: "Add a short line about you" },
+                        ) { page = SettingsPage.BIO }
+                        HubDivider()
                         HubRow(Icons.Default.Notifications, "Notifications", when {
                             uiState.notifMuteAll -> "Paused"
                             uiState.notifQuietEnabled -> String.format("Quiet %02d:00–%02d:00", uiState.notifQuietStart, uiState.notifQuietEnd)
@@ -314,6 +321,39 @@ fun SettingsScreen(
                         }
                     }
 
+                    Spacer(Modifier.height(24.dp))
+                }
+                SettingsPage.BIO -> {
+                    SettingsIntro("Shown under your name at the top of chats. Leave it empty to show your job title instead.")
+                    var bioInput by remember(uiState.bio) { mutableStateOf(uiState.bio) }
+                    SettingsCard {
+                        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+                            OutlinedTextField(
+                                value = bioInput,
+                                onValueChange = { bioInput = it.take(300) },
+                                placeholder = { Text(uiState.jobTitle ?: "e.g. Finance lead · Lagos office") },
+                                minLines = 2,
+                                maxLines = 4,
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(14.dp),
+                                supportingText = { Text("${bioInput.length}/300", fontSize = 11.sp) },
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                                horizontalArrangement = Arrangement.End,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                if (uiState.bioSaved) Text("Saved", color = TextSecondary, fontSize = 12.sp, modifier = Modifier.padding(end = 12.dp))
+                                Button(
+                                    onClick = { viewModel.saveBio(bioInput) },
+                                    enabled = !uiState.bioBusy && bioInput.trim() != uiState.bio,
+                                ) { Text(if (uiState.bioBusy) "Saving…" else "Save") }
+                            }
+                            uiState.bioError?.let {
+                                Text(it, color = DilarionRed, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp))
+                            }
+                        }
+                    }
                     Spacer(Modifier.height(24.dp))
                 }
                 SettingsPage.NOTIFICATIONS -> {

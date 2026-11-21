@@ -60,6 +60,8 @@ import {
   setDisappearSettings,
   DisappearSettings,
   profilePictureUrl,
+  getMyBio,
+  setMyBio,
   uploadProfilePicture,
   deleteProfilePicture,
   setAvailabilityStatus,
@@ -108,6 +110,7 @@ import {
 } from '../components/Icons';
 import { userMessage } from '../services/errors';
 
+import { applyProfileUpdate } from '../services/people';
 interface Props {
   token: string;
   username: string;
@@ -1018,6 +1021,55 @@ function SearchModal({ token, onClose, onPickPerson, onPickGroup }: {
 }
 
 function SettingsMainPanel({ token, username, onLogout, page }: SettingsMainProps) {
+// Bio: the line people see under your name in a chat header. Empty falls
+// back to the job title the org set for you.
+function BioCard({ token }: { token: string }) {
+  const [bio, setBio] = useState('');
+  const [jobTitle, setJobTitle] = useState<string | null>(null);
+  const [saved, setSaved] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+  useEffect(() => {
+    getMyBio(token).then(r => { setBio(r.bio ?? ''); setSaved(r.bio ?? ''); setJobTitle(r.job_title); }).catch(() => {});
+  }, [token]);
+  async function save() {
+    setBusy(true); setNote(null);
+    try {
+      const r = await setMyBio(token, bio);
+      setBio(r.bio ?? ''); setSaved(r.bio ?? ''); setNote('Saved');
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : 'Failed to save bio');
+    } finally { setBusy(false); }
+  }
+  return (
+    <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 14, padding: '20px 22px', boxShadow: '0 1px 2px rgba(0,0,0,0.03)', display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ fontSize: '1rem', fontWeight: 650, color: 'var(--text-primary)' }}>Bio</div>
+      <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+        Shown under your name at the top of chats.{jobTitle ? ` Leave it empty to show your job title (${jobTitle}).` : ''}
+      </div>
+      <textarea
+        value={bio}
+        maxLength={300}
+        rows={2}
+        onChange={e => { setBio(e.target.value); setNote(null); }}
+        placeholder={jobTitle || 'Say something about yourself'}
+        style={{ resize: 'vertical', background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border-color)', borderRadius: 8, padding: '8px 10px', fontFamily: 'inherit', fontSize: '0.85rem' }}
+      />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <button
+          onClick={save}
+          disabled={busy || bio.trim() === saved.trim()}
+          style={{ background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 8, padding: '6px 14px', cursor: busy ? 'wait' : 'pointer', opacity: busy || bio.trim() === saved.trim() ? 0.5 : 1 }}
+        >
+          Save
+        </button>
+        <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{bio.length}/300</span>
+        {note && <span style={{ fontSize: '0.72rem', color: note === 'Saved' ? '#25d366' : '#ef4444' }}>{note}</span>}
+      </div>
+    </div>
+  );
+}
+
   const [appearance, setAppearanceState] = useState<AppearancePrefs>(loadAppearance);
 
   function updateAppearance(patch: Partial<AppearancePrefs>) {
@@ -1513,6 +1565,7 @@ function SettingsMainPanel({ token, username, onLogout, page }: SettingsMainProp
 
       {page === 'profile' && (<>
 {/* Availability status */}
+      <BioCard token={token} />
       <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 14, padding: '20px 22px', boxShadow: '0 1px 2px rgba(0,0,0,0.03)', display: 'flex', flexDirection: 'column', gap: 14 }}>
         <div style={{ fontSize: '1rem', fontWeight: 650, color: 'var(--text-primary)' }}>Status</div>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -2588,6 +2641,8 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
           });
         }
       } else if (msg.type === 'user_status') {
+      } else if (msg.type === 'profile_updated') {
+        applyProfileUpdate(msg.data as { username?: string; bio?: string | null; job_title?: string | null });
         const onlineList = ((msg as any).users as string[]) ?? [];
         const onlineSet = new Set(onlineList);
         setContacts(prev => prev.map(c => ({ ...c, is_active: onlineSet.has(c.username) })));
