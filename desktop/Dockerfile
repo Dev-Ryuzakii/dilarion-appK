@@ -10,18 +10,19 @@ RUN npm run build:test
 FROM nginx:1.27-alpine
 COPY --from=build /app/dist /usr/share/nginx/html
 # The platform runs the container as a non-root user, so nginx must not write
-# anywhere root-owned. Logs go to stdout/stderr, and the pid file and temp
-# directories live in /tmp. There is no "user" directive, because a non-root
+# anywhere root-owned. It also refuses opening /dev/stderr as a file, so errors
+# use nginx's "stderr" keyword (writes to the inherited stream) and access logs
+# are off. The pid file and temp directories live in /tmp. There is no "user" directive, because a non-root
 # process cannot switch users.
 RUN printf '%s\n' \
   'worker_processes auto;' \
   'pid /tmp/nginx.pid;' \
-  'error_log /dev/stderr warn;' \
+  'error_log stderr warn;' \
   'events { worker_connections 1024; }' \
   'http {' \
   '  include /etc/nginx/mime.types;' \
   '  default_type application/octet-stream;' \
-  '  access_log /dev/stdout;' \
+  '  access_log off;' \
   '  sendfile on;' \
   '  client_body_temp_path /tmp/client_temp;' \
   '  proxy_temp_path /tmp/proxy_temp;' \
