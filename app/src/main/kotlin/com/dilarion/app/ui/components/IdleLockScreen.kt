@@ -56,7 +56,7 @@ class IdleLockViewModel @Inject constructor(
                     LoginRequest(
                         username, accessToken.trim(),
                         deviceId = com.dilarion.app.security.DeviceIdentity.id(context),
-                        deviceName = com.dilarion.app.security.DeviceIdentity.name(),
+                        deviceName = com.dilarion.app.security.DeviceIdentity.name(context),
                     )
                 ) }
                 .onSuccess { resp ->
@@ -68,6 +68,7 @@ class IdleLockViewModel @Inject constructor(
                     } else {
                         error = when (resp.code()) {
                             401 -> "That access token is incorrect. Please try again."
+                            202 -> "This phone needs approval from your other device. Sign out and sign in again."
                             409 -> "This account is now signed in on another phone"
                             else -> "Couldn't sign you in. Please try again."
                         }

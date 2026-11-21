@@ -93,6 +93,7 @@ import type { GroupCallInfo } from '../callWindow/GroupCallView';
 import type { JoinMeetingHandler } from '../components/MeetingCard';
 import GalleryView from '../components/GalleryView';
 import MeetingLobby from '../components/MeetingLobby';
+import LoginApprovalPrompt from '../components/LoginApprovalPrompt';
 import meetingsArt from '../assets/undraw_processing_bto8.svg';
 import WaitingForHostScreen from '../components/WaitingForHostScreen';
 import { fmtRange } from '../components/MeetingCard';
@@ -4298,6 +4299,8 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
           </div>
         </div>
       )}
+
+      <LoginApprovalPrompt token={token} />
 
       {/* Web only: calls render here instead of in a separate OS window. */}
       {!isTauri() && <InPageCallHost />}

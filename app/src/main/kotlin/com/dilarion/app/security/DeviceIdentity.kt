@@ -22,7 +22,18 @@ object DeviceIdentity {
         return fresh
     }
 
-    fun name(): String {
+    /**
+     * The name the owner sees in "Is this you signing in on …?": the phone's
+     * own name from Settings > About phone (e.g. "Infinix SMART 7"), else the
+     * maker and model.
+     */
+    fun name(context: Context? = null): String {
+        context?.let { ctx ->
+            val cr = ctx.contentResolver
+            val own = runCatching { android.provider.Settings.Global.getString(cr, android.provider.Settings.Global.DEVICE_NAME) }.getOrNull()
+                ?: runCatching { android.provider.Settings.Secure.getString(cr, "bluetooth_name") }.getOrNull()
+            if (!own.isNullOrBlank()) return own.trim().take(120)
+        }
         val maker = Build.MANUFACTURER.replaceFirstChar { it.uppercase() }
         val model = Build.MODEL
         return if (model.startsWith(maker, ignoreCase = true)) model else "$maker $model"

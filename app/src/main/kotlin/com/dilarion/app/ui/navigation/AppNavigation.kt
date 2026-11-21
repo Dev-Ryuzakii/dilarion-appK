@@ -90,6 +90,9 @@ fun AppNavigation(pendingIncomingCall: IncomingCallData? = null) {
         )
     }
 
+    // "Is this you signing in on <device>?" from a new device's sign-in.
+    com.dilarion.app.ui.components.LoginApprovalPrompt()
+
     // Our 1:1 call was turned into a group call by the other party. Group calls
     // run in the LiveKit room — staying on the mesh leg would leave us connected
     // to no one — so follow it there.

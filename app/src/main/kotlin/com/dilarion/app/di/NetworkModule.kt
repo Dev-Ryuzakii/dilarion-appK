@@ -59,4 +59,10 @@ object NetworkModule {
     fun provideApiService(retrofit: Retrofit): ApiService {
         return retrofit.create(ApiService::class.java)
     }
+
+    @Provides
+    @Singleton
+    fun provideLoginApprovalApi(retrofit: Retrofit): com.dilarion.app.data.api.LoginApprovalApi {
+        return retrofit.create(com.dilarion.app.data.api.LoginApprovalApi::class.java)
+    }
 }

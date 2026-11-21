@@ -4,7 +4,7 @@ import { apiFetch } from './apiTransport';
 // VITE_API_BASE comes from .env.production / .env.test (see package.json build:test).
 // Falls back to production so a plain `npm run build` with no mode flag never
 // silently points at the test backend.
-import { deviceId, deviceName } from './device';
+import { deviceId, deviceName, resolveDeviceName } from './device';
 import { platformName } from './platform';
 
 const BASE = import.meta.env.VITE_API_BASE || 'https://apidilarion.eibstratoc.com';
@@ -74,15 +74,26 @@ export interface Group {
 
 // ── Auth ───────────────────────────────────────────────────────────────────────
 
+/** The new device is waiting for the owner to approve it (HTTP 202 from /auth/login). */
+export interface LoginApprovalRequired {
+  status: 'approval_required';
+  request_token: string;
+  request_id: number;
+  expires_at: string;
+  device_name: string;
+  location: string;
+  email_sent: boolean;
+  two_fa_required: boolean;
+}
+
 export async function login(username: string, token: string): Promise<unknown> {
   const res = await apiFetch(`${BASE}/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       username, token,
-      // One signed-in desktop per account — the server names this device in
-      // the owner's alert if it's blocked.
-      device_id: deviceId(), device_name: deviceName(), platform: platformName(),
+      // Names this device in the owner's "Is this you?" prompt and email.
+      device_id: deviceId(), device_name: await resolveDeviceName(), platform: platformName(),
     }),
   });
   if (!res.ok) {
@@ -94,6 +105,69 @@ export async function login(username: string, token: string): Promise<unknown> {
     throw new Error(detail);
   }
   return res.json();
+}
+
+export interface LoginRequestStatus {
+  status: 'pending' | 'approved' | 'completed' | 'denied' | 'expired' | 'cancelled';
+  expires_at?: string;
+  two_fa_required?: boolean;
+  login?: Record<string, any>;
+}
+
+async function loginRequestPost(path: string, body: object): Promise<any> {
+  const res = await apiFetch(`${BASE}/auth/login-requests/${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    let detail = 'Something went wrong. Please try again.';
+    try { const b = await res.json(); detail = b.detail || detail; } catch {}
+    const err = new Error(detail) as Error & { status?: number };
+    err.status = res.status;
+    throw err;
+  }
+  return res.json();
+}
+
+export function loginRequestStatus(requestToken: string): Promise<LoginRequestStatus> {
+  return loginRequestPost('status', { request_token: requestToken });
+}
+
+export function loginRequestMasterToken(requestToken: string, masterToken: string, twoFaPassword?: string): Promise<LoginRequestStatus> {
+  return loginRequestPost('master-token', {
+    request_token: requestToken, master_token: masterToken, two_fa_password: twoFaPassword || null,
+  });
+}
+
+export function loginRequestCancel(requestToken: string): Promise<unknown> {
+  return loginRequestPost('cancel', { request_token: requestToken }).catch(() => null);
+}
+
+export interface PendingLoginRequest {
+  request_id: number;
+  device_name: string;
+  platform: string | null;
+  location: string;
+  ip: string;
+  time: string;
+  expires_at: string;
+}
+
+export async function getPendingLoginRequests(token: string): Promise<PendingLoginRequest[]> {
+  const res = await apiFetch(`${BASE}/auth/login-requests/pending`, { headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) return [];
+  return ((await res.json()).requests || []) as PendingLoginRequest[];
+}
+
+export async function decideLoginRequest(token: string, requestId: number, approve: boolean): Promise<string> {
+  const res = await apiFetch(`${BASE}/auth/login-requests/${requestId}/decision`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ approve }),
+  });
+  if (!res.ok) throw new Error("Couldn't send your answer. Please try again.");
+  return (await res.json()).status as string;
 }
 
 /** Ends this session on the server too - otherwise it keeps counting as this

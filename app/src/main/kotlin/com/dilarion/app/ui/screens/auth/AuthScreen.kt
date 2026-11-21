@@ -46,6 +46,7 @@ fun AuthScreen(
     onAuthSuccess: (onboardingRequired: Boolean) -> Unit,
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val approval by viewModel.approval.collectAsState()
     val focusManager = LocalFocusManager.current
 
     var view by remember { mutableStateOf(AuthView.LOGIN) }
@@ -101,6 +102,18 @@ fun AuthScreen(
                     view = AuthView.LOGIN
                 }
             },
+        )
+        return
+    }
+
+    // Signed in on another device: wait here until it (or the email link,
+    // or the master token) approves this phone.
+    approval?.let { a ->
+        androidx.activity.compose.BackHandler { viewModel.leaveApproval() }
+        LoginApprovalWaitingScreen(
+            approval = a,
+            onMasterToken = { mt, twoFa -> viewModel.approveWithMasterToken(mt, twoFa, username.trim()) },
+            onLeave = viewModel::leaveApproval,
         )
         return
     }
@@ -443,6 +456,131 @@ fun AuthScreen(
  * no way to see this code again short of regenerating a new one (Settings)
  * or an admin-approved reset — same tradeoff the desktop app makes.
  */
+@Composable
+private fun LoginApprovalWaitingScreen(
+    approval: LoginApprovalUi,
+    onMasterToken: (masterToken: String, twoFaPassword: String) -> Unit,
+    onLeave: () -> Unit,
+) {
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(approval.requestToken) {
+        while (true) { now = System.currentTimeMillis(); kotlinx.coroutines.delay(1000) }
+    }
+    var showMasterToken by remember { mutableStateOf(false) }
+    var masterToken by remember { mutableStateOf("") }
+    var twoFa by remember { mutableStateOf("") }
+    val ended = approval.status != "pending"
+    val left = ((approval.expiresAtMillis - now) / 1000).coerceAtLeast(0)
+    val countdown = "%d:%02d".format(left / 60, left % 60)
+
+    Box(
+        modifier = Modifier.fillMaxSize().background(SurfaceWhite).imePadding(),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 24.dp)
+                .padding(vertical = 48.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Box(
+                modifier = Modifier.size(64.dp).clip(CircleShape).background(DilarionRed.copy(alpha = 0.10f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (ended) Icon(Icons.Default.Lock, contentDescription = null, tint = DilarionRed)
+                else CircularProgressIndicator(color = DilarionRed, strokeWidth = 2.5.dp, modifier = Modifier.size(28.dp))
+            }
+            Spacer(Modifier.height(20.dp))
+            Text(
+                when (approval.status) {
+                    "denied" -> "Sign-in blocked"
+                    "expired" -> "Request expired"
+                    else -> "Approve this sign-in"
+                },
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.height(10.dp))
+            Text(
+                when (approval.status) {
+                    "denied" -> "This sign-in was blocked from your account. If that was a mistake, try again and approve it."
+                    "expired" -> "Nobody approved this sign-in in time. Try again."
+                    else -> "Your account is signed in on another device. On that device, tap \"Yes, it's me\"" +
+                        (if (approval.emailSent) ", or use the link we just emailed you." else ".")
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = TextSecondary,
+                textAlign = TextAlign.Center,
+            )
+            if (!ended) {
+                Spacer(Modifier.height(20.dp))
+                Column(
+                    modifier = Modifier.fillMaxWidth().background(BackgroundGrey, RoundedCornerShape(14.dp)).padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text("This device: ${approval.deviceName}", style = MaterialTheme.typography.bodySmall)
+                    Text("Location: ${approval.location}", style = MaterialTheme.typography.bodySmall)
+                    Text("Expires in $countdown", style = MaterialTheme.typography.bodySmall, color = TextMuted)
+                }
+                Spacer(Modifier.height(16.dp))
+                if (!showMasterToken) {
+                    TextButton(onClick = { showMasterToken = true }) {
+                        Text("Can't reach your other device? Use your master token", color = DilarionRed, textAlign = TextAlign.Center)
+                    }
+                } else {
+                    AuthTextField(
+                        value = masterToken,
+                        onValueChange = { masterToken = it },
+                        label = "Master token",
+                        visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    if (approval.twoFaRequired) {
+                        Spacer(Modifier.height(12.dp))
+                        AuthTextField(
+                            value = twoFa,
+                            onValueChange = { twoFa = it },
+                            label = "2FA password",
+                            visualTransformation = PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                    Spacer(Modifier.height(16.dp))
+                    Button(
+                        onClick = { onMasterToken(masterToken, twoFa) },
+                        enabled = !approval.busy && masterToken.isNotBlank() && (!approval.twoFaRequired || twoFa.isNotEmpty()),
+                        modifier = Modifier.fillMaxWidth().height(54.dp),
+                        shape = RoundedCornerShape(50),
+                        colors = ButtonDefaults.buttonColors(containerColor = DilarionRed),
+                    ) {
+                        Text(if (approval.busy) "Checking…" else "Sign in with master token", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            }
+            approval.error?.let {
+                Spacer(Modifier.height(12.dp))
+                Text(it, color = DilarionRed, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
+            }
+            Spacer(Modifier.height(16.dp))
+            if (ended) {
+                Button(
+                    onClick = onLeave,
+                    modifier = Modifier.fillMaxWidth().height(54.dp),
+                    shape = RoundedCornerShape(50),
+                    colors = ButtonDefaults.buttonColors(containerColor = DilarionRed),
+                ) { Text("Back to sign in", fontSize = 16.sp, fontWeight = FontWeight.SemiBold) }
+            } else {
+                TextButton(onClick = onLeave) { Text("Cancel", color = TextSecondary) }
+            }
+        }
+    }
+}
+
 @Composable
 private fun RecoveryCodeRevealScreen(
     code: String,

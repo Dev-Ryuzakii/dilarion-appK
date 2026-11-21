@@ -11,6 +11,12 @@ import com.dilarion.app.security.SessionManager
 import com.dilarion.app.services.PresenceService
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import com.dilarion.app.data.api.LoginApprovalApi
+import com.dilarion.app.data.api.LoginOutcome
+import com.dilarion.app.data.api.LoginRequestMasterToken
+import com.dilarion.app.data.api.LoginRequestToken
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
@@ -30,6 +36,23 @@ data class AuthUiState(
     val onboardingRequired: Boolean = false,
     /** The reveal screen is for a fresh activation (continue → onboarding/home, not back to login). */
     val activated: Boolean = false,
+)
+
+/**
+ * This device is waiting for the owner to approve the sign-in, because the
+ * account is already signed in on another device.
+ */
+data class LoginApprovalUi(
+    val requestToken: String,
+    val deviceName: String,
+    val location: String,
+    val expiresAtMillis: Long,
+    val emailSent: Boolean,
+    val twoFaRequired: Boolean,
+    /** pending | denied | expired */
+    val status: String = "pending",
+    val busy: Boolean = false,
+    val error: String? = null,
 )
 
 /** Uploads this device's public key and registers it so senders can encrypt to it. */
@@ -53,10 +76,15 @@ class AuthViewModel @Inject constructor(
     private val sessionManager: SessionManager,
     private val cryptoManager: CryptoManager,
     private val presenceService: PresenceService,
+    private val loginApprovalApi: LoginApprovalApi,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(AuthUiState())
     val uiState: StateFlow<AuthUiState> = _uiState
+
+    private val _approval = MutableStateFlow<LoginApprovalUi?>(null)
+    val approval: StateFlow<LoginApprovalUi?> = _approval
+    private var approvalPoll: Job? = null
 
     fun login(username: String, token: String) {
         if (username.isBlank() || token.isBlank()) {
@@ -71,11 +99,11 @@ class AuthViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.value = AuthUiState(isLoading = true)
             runCatching {
-                val response = apiService.login(
+                val response = loginApprovalApi.login(
                     LoginRequest(
                         cleanUsername, token.trim(),
                         deviceId = com.dilarion.app.security.DeviceIdentity.id(context),
-                        deviceName = com.dilarion.app.security.DeviceIdentity.name(),
+                        deviceName = com.dilarion.app.security.DeviceIdentity.name(context),
                     )
                 )
                 if (!response.isSuccessful) {
@@ -90,16 +118,100 @@ class AuthViewModel @Inject constructor(
                     return@launch
                 }
                 val body = response.body()!!
-                val sessionToken = body.sessionToken
-                if (sessionToken.isNullOrBlank()) {
-                    _uiState.value = AuthUiState(error = "Something went wrong signing you in. Please try again.")
+                if (response.code() == 202 && body.status == "approval_required" && body.requestToken != null) {
+                    _uiState.value = AuthUiState()
+                    startApproval(body, cleanUsername)
                     return@launch
                 }
-                establishSession(sessionToken, body.username, body.onboardingRequired)
-                _uiState.value = AuthUiState(success = true, onboardingRequired = body.onboardingRequired)
+                completeLogin(body, cleanUsername)
             }.onFailure { e ->
                 _uiState.value = AuthUiState(error = e.toUserMessage("Can't reach the server. Check your connection and try again."))
             }
+        }
+    }
+
+    private suspend fun completeLogin(body: LoginOutcome, fallbackUsername: String) {
+        val sessionToken = body.sessionToken
+        if (sessionToken.isNullOrBlank()) {
+            _uiState.value = AuthUiState(error = "Something went wrong signing you in. Please try again.")
+            return
+        }
+        establishSession(sessionToken, body.username ?: fallbackUsername, body.onboardingRequired)
+        _uiState.value = AuthUiState(success = true, onboardingRequired = body.onboardingRequired)
+    }
+
+    private fun startApproval(body: LoginOutcome, username: String) {
+        val expires = body.expiresAt?.let { runCatching { java.time.OffsetDateTime.parse(it).toInstant().toEpochMilli() }.getOrNull() }
+            ?: (System.currentTimeMillis() + 10 * 60_000L)
+        val requestToken = body.requestToken ?: return
+        _approval.value = LoginApprovalUi(
+            requestToken = requestToken,
+            deviceName = body.deviceName ?: com.dilarion.app.security.DeviceIdentity.name(context),
+            location = body.location ?: "Unknown location",
+            expiresAtMillis = expires,
+            emailSent = body.emailSent,
+            twoFaRequired = body.twoFaRequired,
+        )
+        approvalPoll?.cancel()
+        approvalPoll = viewModelScope.launch {
+            while (true) {
+                val current = _approval.value ?: break
+                if (current.status != "pending" || current.requestToken != requestToken) break
+                runCatching { loginApprovalApi.status(LoginRequestToken(requestToken)) }.getOrNull()?.let { resp ->
+                    val st = resp.body()
+                    when {
+                        st?.status == "completed" && st.login != null -> {
+                            _approval.value = null
+                            completeLogin(st.login, username)
+                            return@launch
+                        }
+                        st?.status == "denied" || st?.status == "expired" || st?.status == "cancelled" ->
+                            _approval.value = current.copy(status = st.status)
+                        resp.code() == 404 || resp.code() == 409 ->
+                            _approval.value = current.copy(status = "expired")
+                    }
+                }
+                delay(2500)
+            }
+        }
+    }
+
+    /** Can't reach the signed-in device: the master token approves this sign-in. */
+    fun approveWithMasterToken(masterToken: String, twoFaPassword: String, username: String) {
+        val current = _approval.value ?: return
+        if (masterToken.isBlank()) return
+        viewModelScope.launch {
+            _approval.value = current.copy(busy = true, error = null)
+            runCatching {
+                loginApprovalApi.masterToken(
+                    LoginRequestMasterToken(current.requestToken, masterToken.trim(), twoFaPassword.takeIf { it.isNotEmpty() })
+                )
+            }.onSuccess { resp ->
+                val login = resp.body()?.login
+                if (resp.isSuccessful && login != null) {
+                    approvalPoll?.cancel()
+                    _approval.value = null
+                    completeLogin(login, username)
+                } else {
+                    val msg = errorBody(resp.errorBody()?.string()) ?: "That master token is incorrect."
+                    _approval.value = _approval.value?.copy(
+                        busy = false, error = msg,
+                        status = if (resp.code() == 403) "denied" else "pending",
+                    )
+                }
+            }.onFailure { e ->
+                _approval.value = _approval.value?.copy(busy = false, error = e.toUserMessage("Can't reach the server."))
+            }
+        }
+    }
+
+    /** Leave the waiting screen (cancels the request if it's still open). */
+    fun leaveApproval() {
+        val current = _approval.value ?: return
+        approvalPoll?.cancel()
+        _approval.value = null
+        if (current.status == "pending") {
+            viewModelScope.launch { runCatching { loginApprovalApi.cancel(LoginRequestToken(current.requestToken)) } }
         }
     }
 

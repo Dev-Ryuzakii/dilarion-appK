@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { login, requestPasswordReset, signUp, resetWithRecoveryCode, activateAccount, loginOrganization } from '../services/api';
+import { useEffect, useState } from 'react';
+import { login, requestPasswordReset, signUp, resetWithRecoveryCode, activateAccount, loginOrganization, loginRequestStatus, loginRequestMasterToken, loginRequestCancel, LoginApprovalRequired } from '../services/api';
 import OnboardingScreen from './OnboardingScreen';
 import { userMessage } from '../services/errors';
 
@@ -34,6 +34,15 @@ export default function LoginScreen({ onLogin, onBack, initialView = 'login', no
   const [showToken, setShowToken] = useState(false);
   const [error, setError]         = useState('');
   const [loading, setLoading]     = useState(false);
+  // Signed in elsewhere: this device waits for the owner to approve it.
+  const [approval, setApproval]   = useState<LoginApprovalRequired | null>(null);
+  const [approvalState, setApprovalState] = useState<'pending' | 'denied' | 'expired' | 'cancelled'>('pending');
+  const [approvalError, setApprovalError] = useState('');
+  const [showMasterToken, setShowMasterToken] = useState(false);
+  const [mtInput, setMtInput] = useState('');
+  const [mt2fa, setMt2fa] = useState('');
+  const [mtBusy, setMtBusy] = useState(false);
+  const [now, setNow] = useState(Date.now());
 
   const [forgotPhone, setForgotPhone] = useState('');
   const [forgotReason, setForgotReason] = useState('');
@@ -74,21 +83,78 @@ export default function LoginScreen({ onLogin, onBack, initialView = 'login', no
     }
   }
 
+  /** A finished /auth/login response (direct, or after approval). */
+  function completeLogin(data: Record<string, any>) {
+    const sessionToken = data.token || data.access_token || data.session_token;
+    if (!sessionToken) throw new Error('No session token received');
+    if (data.onboarding_required) {
+      // Invited staff finish the live-photo profile right here; the server
+      // refuses everything else until it's done.
+      setOnboarding({ token: sessionToken, username: data.username || username });
+      return;
+    }
+    onLogin(sessionToken, data.username || username);
+  }
+
+  // Poll until the owner approves (on a signed-in device or by email) or it ends.
+  useEffect(() => {
+    if (!approval || approvalState !== 'pending') return;
+    let stopped = false;
+    const tick = async () => {
+      try {
+        const st = await loginRequestStatus(approval.request_token);
+        if (stopped) return;
+        if (st.status === 'completed' && st.login) { setApproval(null); completeLogin(st.login); return; }
+        if (st.status === 'denied' || st.status === 'expired' || st.status === 'cancelled') setApprovalState(st.status);
+      } catch {
+        // Network blip: keep polling until it expires.
+      }
+    };
+    const id = setInterval(tick, 2500);
+    const clock = setInterval(() => setNow(Date.now()), 1000);
+    tick();
+    return () => { stopped = true; clearInterval(id); clearInterval(clock); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [approval, approvalState]);
+
+  async function submitMasterToken(e: React.FormEvent) {
+    e.preventDefault();
+    if (!approval || !mtInput.trim()) return;
+    setMtBusy(true);
+    setApprovalError('');
+    try {
+      const st = await loginRequestMasterToken(approval.request_token, mtInput.trim(), mt2fa);
+      if (st.login) { setApproval(null); completeLogin(st.login); }
+    } catch (err: any) {
+      if (err?.status === 403) setApprovalState('denied');
+      setApprovalError(err?.message || 'Wrong master token.');
+    } finally {
+      setMtBusy(false);
+    }
+  }
+
+  function leaveApproval() {
+    if (approval && approvalState === 'pending') loginRequestCancel(approval.request_token);
+    setApproval(null);
+    setApprovalState('pending');
+    setApprovalError('');
+    setShowMasterToken(false);
+    setMtInput('');
+    setMt2fa('');
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError('');
     setLoading(true);
     try {
       const data = await login(username, userToken) as Record<string, any>;
-      const sessionToken = data.token || data.access_token || data.session_token;
-      if (!sessionToken) throw new Error('No session token received');
-      if (data.onboarding_required) {
-        // Invited staff finish the live-photo profile right here; the server
-        // refuses everything else until it's done.
-        setOnboarding({ token: sessionToken, username: data.username || username });
+      if (data.status === 'approval_required') {
+        setApprovalState('pending');
+        setApproval(data as LoginApprovalRequired);
         return;
       }
-      onLogin(sessionToken, username);
+      completeLogin(data);
     } catch (err: any) {
       // Fall back to an organization-account login: the org account signs in
       // with username + password (typed in the token field) and now runs its
@@ -186,6 +252,59 @@ export default function LoginScreen({ onLogin, onBack, initialView = 'login', no
         onDone={() => onLogin(onboarding.token, onboarding.username)}
         onCancel={() => { setOnboarding(null); setView('login'); }}
       />
+    );
+  }
+
+  if (approval) {
+    const left = Math.max(0, Math.round((new Date(approval.expires_at).getTime() - now) / 1000));
+    const mmss = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
+    const ended = approvalState !== 'pending';
+    return (
+      <div className="auth-page" style={s.root}>
+        <div className="auth-card" style={s.card}>
+          <div style={s.logoWrap}>
+            <img src="/logo.jpg" alt="Dilarion" style={s.logo} onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
+          </div>
+          <h1 style={s.title}>
+            {approvalState === 'denied' ? 'Sign-in blocked' : approvalState === 'expired' ? 'Request expired' : 'Approve this sign-in'}
+          </h1>
+          <p style={{ ...s.sub, lineHeight: 1.6, textAlign: 'center' }}>
+            {approvalState === 'denied'
+              ? 'This sign-in was blocked from your account. If that was a mistake, try again and approve it.'
+              : approvalState === 'expired'
+                ? 'Nobody approved this sign-in in time. Try again.'
+                : <>Your account is signed in on another device. On that device, tap <b>Yes, it's me</b>
+                  {approval.email_sent ? <>, or use the link we just emailed you</> : null}.</>}
+          </p>
+          {!ended && (
+            <div style={{ width: '100%', border: '1px solid var(--border-color)', borderRadius: 10, padding: '10px 14px', fontSize: '0.8rem', lineHeight: 1.7, marginBottom: '0.75rem' }}>
+              <div><span style={{ color: 'var(--text-muted)' }}>This device:</span> {approval.device_name}</div>
+              <div><span style={{ color: 'var(--text-muted)' }}>Location:</span> {approval.location}</div>
+              <div><span style={{ color: 'var(--text-muted)' }}>Waiting:</span> expires in {mmss}</div>
+            </div>
+          )}
+          {!ended && !showMasterToken && (
+            <button type="button" style={s.linkBtn} onClick={() => setShowMasterToken(true)}>
+              Can't reach your other device? Use your master token
+            </button>
+          )}
+          {!ended && showMasterToken && (
+            <form onSubmit={submitMasterToken} style={s.form}>
+              <input style={s.input} type="password" placeholder="Master token" value={mtInput} onChange={e => setMtInput(e.target.value)} autoFocus />
+              {approval.two_fa_required && (
+                <input style={s.input} type="password" placeholder="2FA password" value={mt2fa} onChange={e => setMt2fa(e.target.value)} />
+              )}
+              <button style={s.btn} type="submit" disabled={mtBusy || !mtInput.trim() || (approval.two_fa_required && !mt2fa)}>
+                {mtBusy ? 'Checking…' : 'Sign in with master token'}
+              </button>
+            </form>
+          )}
+          {approvalError && <p style={s.error}>{approvalError}</p>}
+          <button type="button" style={ended ? s.btn : s.linkBtn} onClick={leaveApproval}>
+            {ended ? 'Back to sign in' : 'Cancel'}
+          </button>
+        </div>
+      </div>
     );
   }
 
