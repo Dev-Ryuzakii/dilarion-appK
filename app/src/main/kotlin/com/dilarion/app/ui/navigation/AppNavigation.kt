@@ -160,8 +160,9 @@ fun AppNavigation(pendingIncomingCall: IncomingCallData? = null) {
                         Screen.GroupCall.route(confId, invite.groupId ?: 0, invite.groupName ?: "Group", invite.callType ?: "voice")
                     )
                 } else if (invite.kind == "meeting") {
+                    // Meetings go through the setup room first, same as starting one.
                     navController.navigate(
-                        Screen.Gallery.route(confId, camOn = invite.callType == "video", isAdHoc = false)
+                        Screen.Lobby.route(mode = "instant", conferenceId = confId, title = "Join meeting")
                     )
                 } else {
                     navController.navigate(

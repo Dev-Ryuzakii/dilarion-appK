@@ -18,6 +18,7 @@ import { userMessage } from '../services/errors';
 import MeetingNotesPanel from './MeetingNotesPanel';
 import './meeting.css';
 import { CaptionsOverlay, TranscriptDrawer, useLiveCaptions } from './LiveCaptions';
+import { loadMediaPrefs } from '../services/mediaPrefs';
 
 // Group video via self-hosted LiveKit — the SFU room every group call (2+
 // people) now renders through, replacing the old mesh-WebRTC conference path
@@ -260,7 +261,16 @@ export default function GalleryView({
           }
         }
 
-        room = new Room({ adaptiveStream: true, dynacast: true });
+        // Devices picked in the setup room. Passed as preferences, so an
+        // unplugged one falls back to the system default instead of failing.
+        const prefs = loadMediaPrefs();
+        room = new Room({
+          adaptiveStream: true,
+          dynacast: true,
+          ...(prefs.videoInput ? { videoCaptureDefaults: { deviceId: prefs.videoInput } } : {}),
+          ...(prefs.audioInput ? { audioCaptureDefaults: { deviceId: prefs.audioInput } } : {}),
+          ...(prefs.audioOutput ? { audioOutput: { deviceId: prefs.audioOutput } } : {}),
+        });
         roomRef.current = room;
 
         room
@@ -308,6 +318,12 @@ export default function GalleryView({
               });
             }
           })
+          // Someone who joined muted or with the camera off publishes a brand
+          // new track when they switch it on; that isn't a TrackUnmuted, so
+          // re-read their mic/camera state on every publish change.
+          .on(RoomEvent.TrackPublished, (_pub, participant) => upsertTile(participant, false))
+          .on(RoomEvent.TrackUnpublished, (_pub, participant) => upsertTile(participant, false))
+          .on(RoomEvent.TrackSubscribed, (_track, _pub, participant) => upsertTile(participant, false))
           .on(RoomEvent.TrackMuted, (pub, participant) => setTrackState(participant, pub, false))
           .on(RoomEvent.TrackUnmuted, (pub, participant) => setTrackState(participant, pub, true))
           .on(RoomEvent.LocalTrackPublished, pub => {
@@ -1099,7 +1115,6 @@ export default function GalleryView({
         <TranscriptDrawer
           segments={captions.segments}
           state={captions.state}
-          isHost={isHost}
           busy={captions.busy}
           error={captions.error}
           available={captions.available}

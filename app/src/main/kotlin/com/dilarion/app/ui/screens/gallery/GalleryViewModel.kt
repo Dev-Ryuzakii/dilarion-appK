@@ -566,6 +566,9 @@ class GalleryViewModel @Inject constructor(
         viewModelScope.launch {
             runCatching { r.localParticipant.setMicrophoneEnabled(next) }
             _uiState.value = _uiState.value.copy(micOn = next)
+            // Own tile follows the button straight away; others get it from
+            // LiveKit's TrackMuted/TrackUnmuted on their side.
+            if (room === r) upsertTile(r.localParticipant, true)
             // Without this, a breakout-room hop reconnects with the stale
             // lastMicOn from connect() and silently re-enables a muted mic.
             lastMicOn = next
@@ -592,6 +595,7 @@ class GalleryViewModel @Inject constructor(
                 }
                 .onFailure { error ->
                     _uiState.value = _uiState.value.copy(cameraError = error.toUserMessage("Could not change the camera. Please try again."))
+                    if (room === r) upsertTile(r.localParticipant, true)
                 }
             _uiState.value = _uiState.value.copy(cameraBusy = false)
         }
@@ -781,7 +785,7 @@ class GalleryViewModel @Inject constructor(
         }
     }
 
-    /** Host only. [language] is a code like "en", or "auto". */
+    /** Anyone in the meeting. [language] is a code like "en", or "auto". */
     fun startCaptions(language: String) {
         val confId = currentConferenceId
         _uiState.value = _uiState.value.copy(captions = _uiState.value.captions.copy(showOverlay = true))
@@ -790,7 +794,7 @@ class GalleryViewModel @Inject constructor(
         }
     }
 
-    /** Host only, while it runs: switch the spoken language. */
+    /** While it runs: switch the spoken language. */
     fun setCaptionsLanguage(language: String) {
         val confId = currentConferenceId
         captionsCall("Couldn't change the transcript language.") { bearer ->

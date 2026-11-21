@@ -1144,7 +1144,7 @@ private fun captionTime(iso: String?): String {
     }.getOrDefault("")
 }
 
-/** Full transcript: search, copy, and the host's language and on/off controls. */
+/** Full transcript: search, copy, language and on/off — anyone in the meeting. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun TranscriptSheet(
@@ -1213,8 +1213,7 @@ private fun TranscriptSheet(
                         query.isNotBlank() -> "Nothing matches \"$query\"."
                         cap.enabled -> "Lines appear here a moment after each person finishes speaking."
                         !cap.available -> "Live transcript isn't available on this server yet."
-                        state.isHost -> "Turn on the live transcript so everyone can follow along in text."
-                        else -> "The host hasn't turned on the live transcript."
+                        else -> "Turn on the live transcript so everyone can follow along in text."
                     },
                     color = TextMuted, fontSize = 13.sp, textAlign = TextAlign.Center, lineHeight = 19.sp,
                     modifier = Modifier.align(Alignment.Center).padding(horizontal = 32.dp),
@@ -1247,7 +1246,7 @@ private fun TranscriptSheet(
             Text(it, color = SoftRed, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp))
         }
 
-        if (state.isHost && cap.available) {
+        if (cap.available) {
             Spacer(Modifier.height(6.dp))
             SectionLabel("Spoken language")
             Box(Modifier.padding(horizontal = 20.dp).fillMaxWidth()) {

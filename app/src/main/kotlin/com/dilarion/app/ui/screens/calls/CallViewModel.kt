@@ -98,6 +98,20 @@ class CallViewModel @Inject constructor(
     private var iceConnectedJob: kotlinx.coroutines.Job? = null
     /** The 1:1 leg is being replaced by the multi-person call. A following "end" is not a hangup. */
     private var upgradedAway = false
+
+    init {
+        // Someone who muted while the call was still ringing or connecting
+        // told nobody, or told a peer who wasn't on the call yet. Say it again
+        // the moment the call is up so the other side shows them as muted.
+        viewModelScope.launch {
+            var wasConnected = false
+            _uiState.collect { st ->
+                val connected = st.state == CallState.CONNECTED
+                if (connected && !wasConnected && st.isMuted) broadcastMuteState(true)
+                wasConnected = connected
+            }
+        }
+    }
     /** User hung up before the server assigned a call id. End it as soon as that id exists. */
     private var endRequested = false
     private var connectWatchdog: kotlinx.coroutines.Job? = null

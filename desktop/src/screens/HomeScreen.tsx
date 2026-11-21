@@ -2323,7 +2323,11 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
   const [galleryMinimized, setGalleryMinimized] = useState(false);
   // Device-setup lobby shown before actually connecting to a group call.
   const [meetingLobby, setMeetingLobby] = useState<
-    { kind: 'instant' } | { kind: 'join'; joinCode: string; title: string | null } | null
+    | { kind: 'instant' }
+    | { kind: 'join'; joinCode: string; title: string | null }
+    // Invited into a meeting that's already running: set up, then go straight in.
+    | { kind: 'invite'; conferenceId: number; title: string | null; camOn: boolean }
+    | null
   >(null);
   const [waitingRoomState, setWaitingRoomState] = useState<{ conferenceId: number; initialMicOn?: boolean; initialCamOn?: boolean; displayName?: string } | null>(null);
   const [chatJoinError, setChatJoinError] = useState<string | null>(null);
@@ -2380,10 +2384,11 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
       // A meeting opens the meeting room. Anything else — a 1:1 that picked
       // up more people — stays a call, in the call window.
       if (kind === 'meeting') {
-        setActiveGalleryCall({
+        setMeetingLobby({
+          kind: 'invite',
           conferenceId: conferenceInvite.conferenceId,
-          initialCamOn: callType === 'video',
-          isAdHocCall: false,
+          title: conferenceInvite.invitedBy ? `Meeting with ${conferenceInvite.invitedBy}` : null,
+          camOn: callType === 'video',
         });
       } else {
         openGroupCallWindow({
@@ -4086,14 +4091,23 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
       {meetingLobby && (
         <MeetingLobby
           title={meetingLobby.kind === 'instant' ? 'Start Meeting' : (meetingLobby.title || 'Join Meeting')}
-          subtitle={meetingLobby.kind === 'join' ? 'Set up your camera and mic before joining' : undefined}
+          subtitle="Check your camera, microphone and speaker before joining"
           defaultName={username}
           onCancel={() => setMeetingLobby(null)}
-          onJoin={opts =>
-            meetingLobby.kind === 'instant'
-              ? confirmInstantMeeting(opts)
-              : confirmScheduledJoin(meetingLobby.joinCode, opts)
-          }
+          onJoin={opts => {
+            if (meetingLobby.kind === 'instant') confirmInstantMeeting(opts);
+            else if (meetingLobby.kind === 'join') confirmScheduledJoin(meetingLobby.joinCode, opts);
+            else {
+              setMeetingLobby(null);
+              setActiveGalleryCall({
+                conferenceId: meetingLobby.conferenceId,
+                initialMicOn: opts.micOn,
+                initialCamOn: opts.camOn,
+                displayName: opts.displayName,
+                isAdHocCall: false,
+              });
+            }
+          }}
         />
       )}
 

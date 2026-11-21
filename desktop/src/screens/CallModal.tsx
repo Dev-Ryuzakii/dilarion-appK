@@ -454,6 +454,20 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
     }
   }, [startLocalMedia, createPc, token, incomingOfferSdp]);
 
+  // Muting while the call rang or connected told nobody (or a peer not yet on
+  // the call). Repeat it once connected so the other side shows us as muted.
+  useEffect(() => {
+    if (state !== 'connected' || !muted) return;
+    if (callIdRef.current) setCallMediaState(token, callIdRef.current, true).catch(() => {});
+    if (conferenceId) {
+      confParticipants.forEach(peer => {
+        conferenceSignal(token, conferenceId, peer, 'media_state', { muted: true }).catch(() => {});
+      });
+    }
+    // Only on reaching "connected"; later toggles send their own update.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state]);
+
   // Re-attach the remote stream after any render that may have remounted the
   // audio/video elements — the fix for desktop calls going silent on state or
   // minimize changes.

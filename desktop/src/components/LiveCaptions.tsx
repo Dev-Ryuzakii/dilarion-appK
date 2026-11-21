@@ -87,7 +87,7 @@ export function useLiveCaptions(token: string, conferenceId: number, active: boo
     finally { setBusy(false); }
   }
 
-  /** Host only, while it's on: switch the spoken language. */
+  /** While it's on: switch the spoken language (anyone in the meeting). */
   async function setLanguage(language: string) {
     setBusy(true);
     setError(null);
@@ -141,13 +141,12 @@ export function CaptionsOverlay({ segments, starting }: { segments: CaptionSegme
   );
 }
 
-/** Full live transcript: search, copy, and the host's stop control. */
+/** Full live transcript: search, copy, language and on/off (anyone in the meeting). */
 export function TranscriptDrawer({
-  segments, state, isHost, busy, error, onStart, onStop, onClose, available, languages, onLanguage,
+  segments, state, busy, error, onStart, onStop, onClose, available, languages, onLanguage,
 }: {
   segments: CaptionSegment[];
   state: CaptionsState;
-  isHost: boolean;
   busy: boolean;
   error: string | null;
   available: boolean;
@@ -223,7 +222,7 @@ export function TranscriptDrawer({
                 : state.enabled
                   ? 'Lines appear here a moment after each person finishes speaking.'
                   : available
-                    ? isHost ? 'Turn on the live transcript so everyone can follow along in text.' : 'The host hasn’t turned on the live transcript.'
+                    ? 'Turn on the live transcript so everyone can follow along in text.'
                     : 'Live transcript isn’t available on this server yet.'}
             </div>
           ) : shown.map((s, i) => {
@@ -246,7 +245,7 @@ export function TranscriptDrawer({
         {error && <div className="mtg-error" style={{ padding: '0 20px 8px' }}>{error}</div>}
         {state.error && !state.enabled && <div className="mtg-error" style={{ padding: '0 20px 8px' }}>{state.error}</div>}
 
-        {isHost && available && (
+        {available && (
           <div style={{ padding: '0 20px 10px', display: 'flex', alignItems: 'center', gap: 10 }}>
             <label htmlFor="mtg-caption-lang" className="mtg-sheet-sub" style={{ marginTop: 0, flexShrink: 0 }}>Spoken language</label>
             <select
@@ -265,7 +264,7 @@ export function TranscriptDrawer({
           </div>
         )}
 
-        {isHost && available && (
+        {available && (
           <div className="mtg-sheet-foot">
             <span className="mtg-sheet-sub" style={{ marginTop: 0, flex: 1 }}>
               Transcribed on your organization’s server. Everyone in the meeting can see it.
