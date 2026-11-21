@@ -103,6 +103,8 @@ data class ChatUiState(
     val isUploadingMedia: Boolean = false,
     val pendingUploads: List<PendingUpload> = emptyList(),
     val currentUsername: String = "",
+    /** The person on the other side of this 1:1 chat is typing right now. */
+    val peerTyping: Boolean = false,
     val error: String? = null,
     // Per-item unlock — "msg_<id>" / "media_<mediaId>". Entering the master token
     // reveals only the ONE item that prompted for it, not the whole conversation
@@ -565,6 +567,7 @@ class ChatViewModel @Inject constructor(
 
     fun sendMessage(text: String) {
         if (text.isBlank()) return
+        sendTypingStop()
         val tagged = _uiState.value.taggedUser
         val editTarget = _uiState.value.editingMessage
         val replyId = _uiState.value.replyTarget?.id
@@ -1204,7 +1207,17 @@ class ChatViewModel @Inject constructor(
             presenceService.events.collect { event ->
                 val d = event.data
                 when (event.type) {
+                    // Sent by the server on every (re)connect. Anything that
+                    // arrived while the socket was down was never pushed, so
+                    // reload to catch up instead of waiting for a reopen.
+                    "connected" -> loadMessages()
+                    "typing" -> {
+                        if (groupId == null && event.sender == peerUsername) {
+                            setPeerTyping(event.isTyping == true)
+                        }
+                    }
                     "new_message" -> {
+                        if (groupId == null && d?.get("sender_username")?.asString == peerUsername) setPeerTyping(false)
                         if (groupId == null && d != null) {
                             val sender = d.get("sender_username")?.asString
                             val recipient = d.get("recipient_username")?.asString
@@ -1438,7 +1451,48 @@ class ChatViewModel @Inject constructor(
 
     fun clearError() { _uiState.value = _uiState.value.copy(error = null) }
 
+    // ── Typing indicator (1:1 chats) ──────────────────────────────────────────
+    private var typingSent = false
+    private var typingStopJob: kotlinx.coroutines.Job? = null
+    private var peerTypingExpiry: kotlinx.coroutines.Job? = null
+
+    /** Call on every keystroke in the message box. */
+    fun onInputChanged(text: String) {
+        if (groupId != null || peerUsername.isBlank()) return
+        if (text.isBlank()) { sendTypingStop(); return }
+        if (!typingSent) {
+            typingSent = presenceService.sendJson(mapOf("type" to "typing", "recipient" to peerUsername, "is_typing" to true))
+        }
+        typingStopJob?.cancel()
+        typingStopJob = viewModelScope.launch {
+            kotlinx.coroutines.delay(2_000)
+            sendTypingStop()
+        }
+    }
+
+    fun sendTypingStop() {
+        typingStopJob?.cancel()
+        typingStopJob = null
+        if (typingSent && groupId == null && peerUsername.isNotBlank()) {
+            presenceService.sendJson(mapOf("type" to "typing", "recipient" to peerUsername, "is_typing" to false))
+        }
+        typingSent = false
+    }
+
+    private fun setPeerTyping(typing: Boolean) {
+        _uiState.value = _uiState.value.copy(peerTyping = typing)
+        // A lost "stopped typing" event must not leave the label up forever.
+        peerTypingExpiry?.cancel()
+        if (typing) {
+            peerTypingExpiry = viewModelScope.launch {
+                kotlinx.coroutines.delay(6_000)
+                _uiState.value = _uiState.value.copy(peerTyping = false)
+            }
+        }
+    }
+
     override fun onCleared() {
+        sendTypingStop()
         super.onCleared()
         timerJob?.cancel()
         runCatching { mediaRecorder?.stop() }

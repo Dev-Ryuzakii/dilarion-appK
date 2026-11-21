@@ -54,6 +54,9 @@ data class MissedCallInfo(
  * server reports a caller hanging up mid-ring; a client that watches only for
  * "end"/"declined" keeps ringing after the other side has given up.
  */
+/** Statuses of a call that is live or finished, so no longer ringing. */
+val CALL_NOT_RINGING_STATUSES = setOf("accept", "accepted", "answered", "connected", "active", "upgraded")
+
 val CALL_TERMINAL_STATUSES = setOf(
     "end", "ended", "decline", "declined", "missed", "busy", "cancelled", "canceled",
 )
@@ -262,8 +265,24 @@ class CallOverlayViewModel @Inject constructor(
         }
     }
 
+    /**
+     * The "Incoming call" notification was tapped. It can outlive the call (it
+     * was answered here or elsewhere, or the caller hung up), so check the call
+     * is still ringing before showing the incoming screen again.
+     */
     fun setFromNotification(call: IncomingCallData) {
-        _incomingCall.value = call
+        viewModelScope.launch {
+            val token = sessionManager.sessionToken.first()
+            val status = if (token == null) null else runCatching {
+                apiService.getCallStatus("Bearer $token", call.callId).body()?.status
+            }.getOrNull()
+            if (status != null && (status in CALL_TERMINAL_STATUSES || status in CALL_NOT_RINGING_STATUSES)) {
+                NotificationHelper.cancelCall(context)
+                return@launch
+            }
+            _incomingCall.value = call
+            watchIncoming(call.callId)
+        }
     }
 
     fun setMinimized(callId: Int, partner: String) {

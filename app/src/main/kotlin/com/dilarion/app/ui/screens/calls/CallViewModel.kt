@@ -62,6 +62,7 @@ data class CallUiState(
 
 @HiltViewModel
 class CallViewModel @Inject constructor(
+    @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
     private val apiService: ApiService,
     private val sessionManager: SessionManager,
     private val presenceService: PresenceService,
@@ -147,6 +148,8 @@ class CallViewModel @Inject constructor(
         storedOfferSdp = null
         cachedAnswerSdp = null
         _uiState.value = CallUiState(state = CallState.CALLING, peerUsername = peerUsername, callType = type)
+        // A person added to the last call must not show up on this one.
+        resetConferenceState()
         observeWsEvents()
         viewModelScope.launch {
             val token = sessionManager.sessionToken.first() ?: return@launch
@@ -198,6 +201,7 @@ class CallViewModel @Inject constructor(
         pendingRemoteCandidates.clear()
         cachedAnswerSdp = null
         storedOfferSdp = incoming.offerSdp
+        resetConferenceState()
         _uiState.value = CallUiState(
             state = CallState.INCOMING,
             peerUsername = incoming.callerUsername,
@@ -284,7 +288,7 @@ class CallViewModel @Inject constructor(
                 }
                 flushPendingCandidates(token, peerUsername, callId)
                 incomingAcceptConfirmed = true
-                NotificationHelper.stopRingtone()
+                NotificationHelper.cancelCall(appContext)
                 armConnectWatchdog()
                 // Keep ANSWERING until ICE connects; accepting the HTTP request
                 // alone does not mean audio is flowing yet.
@@ -310,7 +314,7 @@ class CallViewModel @Inject constructor(
     }
 
     fun declineCall() {
-        NotificationHelper.stopRingtone()
+        NotificationHelper.cancelCall(appContext)
         val callId = _uiState.value.callId
         // Tear the media down first — the connection must die even if the API call
         // fails or the token read returns null.
@@ -331,16 +335,17 @@ class CallViewModel @Inject constructor(
      * back home a beat after we sent it to the gallery.
      */
     fun endCallForConferenceUpgrade() {
-        NotificationHelper.stopRingtone()
+        NotificationHelper.cancelCall(appContext)
         val callId = _uiState.value.callId
         teardownMedia()
         _uiState.value = CallUiState()
+        resetConferenceState()
         // Do not send "end". That push hangs the other person up. The server
         // marks the 1:1 as upgraded without telling either client to leave.
     }
 
     fun endCall() {
-        NotificationHelper.stopRingtone()
+        NotificationHelper.cancelCall(appContext)
         val callId = _uiState.value.callId
         val confId = _conferenceState.value.conferenceId
         teardownMedia()
@@ -487,6 +492,12 @@ class CallViewModel @Inject constructor(
         }
     }
 
+    /** Forget the previous call's group participants and pending room move. */
+    private fun resetConferenceState() {
+        _conferenceState.value = ConferenceUiState()
+        _conferenceUpgrade.value = null
+    }
+
     fun resetToIdle() {
         upgradedAway = false
         timerJob?.cancel()
@@ -543,7 +554,7 @@ class CallViewModel @Inject constructor(
                                 // "missed" belongs here: it is what the server
                                 // reports when the caller gives up mid-ring, and
                                 // leaving it out kept this side ringing after.
-                                NotificationHelper.stopRingtone()
+                                NotificationHelper.cancelCall(appContext)
                                 val confId = _conferenceState.value.conferenceId
                                 teardownMedia()
                                 if (confId != null) notifyConferenceLeft(sessionManager, apiService, confId)
@@ -877,6 +888,34 @@ class CallViewModel @Inject constructor(
                         )
                     }
                 }
+            }
+        }
+    }
+
+    /**
+     * Turn a live 1:1 voice call into video. The mesh leg was negotiated audio
+     * only, so instead of renegotiating it we move both people into the call's
+     * LiveKit room (the same path "add person" uses), joining with the camera on.
+     * The server pushes conference_upgraded to the other person so they follow.
+     */
+    fun switchToVideo() {
+        val callId = _uiState.value.callId ?: return
+        if (_uiState.value.state != CallState.CONNECTED) return
+        viewModelScope.launch {
+            val token = sessionManager.sessionToken.first() ?: return@launch
+            runCatching {
+                val confId = _conferenceState.value.conferenceId ?: run {
+                    val resp = apiService.createConference("Bearer $token", mapOf("call_id" to callId))
+                    if (resp.isSuccessful) resp.body()?.get("conference_id")?.asInt else null
+                }
+                if (confId != null) {
+                    upgradedAway = true
+                    _conferenceUpgrade.value = confId to true
+                } else {
+                    _uiState.value = _uiState.value.copy(error = "Couldn't switch to video. Try again.")
+                }
+            }.onFailure { e ->
+                _uiState.value = _uiState.value.copy(error = e.toUserMessage("Couldn't switch to video. Try again."))
             }
         }
     }

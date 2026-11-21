@@ -736,6 +736,30 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
     setUserPickerOpen(true);
   }
 
+  // A voice call goes to video by moving into the call's LiveKit room, the
+  // same path "add people" uses. The 1:1 mesh was negotiated audio only.
+  // The server pushes conference_upgraded so the other person follows.
+  async function handleSwitchToVideo() {
+    if (!callIdRef.current || !onUpgradeToGallery) return;
+    try {
+      let confId = conferenceIdRef.current;
+      if (!confId) {
+        const res = await createConference(token, callIdRef.current);
+        confId = res.conference_id;
+        conferenceIdRef.current = confId;
+        setConferenceId(confId);
+      }
+      if (!confId) return;
+      upgradingRef.current = true;
+      if (reconnectTimerRef.current) { clearTimeout(reconnectTimerRef.current); reconnectTimerRef.current = null; }
+      if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+      stopAllMedia();
+      onUpgradeToGallery(confId, true);
+    } catch (err: any) {
+      setError(userMessage(err, "Couldn't switch to video. Try again."));
+    }
+  }
+
   async function handleAddParticipant(username: string) {
     if (!username.trim() || !callIdRef.current) return;
     let confId = conferenceIdRef.current;
@@ -1167,6 +1191,9 @@ export default function CallModal({ token, partner, callType, isIncoming, callId
         <div style={cs.barCenter}>
           {inCall && isVideo && state === 'connected' && (
             <IconBtn icon="screen" active={sharing} title={sharing ? 'Stop sharing' : 'Share screen'} onClick={toggleScreenShare} />
+          )}
+          {state === 'connected' && !isVideo && !conferenceId && onUpgradeToGallery && (
+            <IconBtn icon="cam" title="Switch to video" onClick={handleSwitchToVideo} />
           )}
           {state === 'connected' && (
             <IconBtn icon="add-user" active={userPickerOpen} title="Add people" onClick={openUserPicker} />

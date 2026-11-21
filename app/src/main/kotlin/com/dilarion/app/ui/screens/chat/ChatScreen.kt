@@ -409,10 +409,14 @@ fun ChatScreen(
                         Spacer(Modifier.width(10.dp))
                         Column {
                             Text(displayName, style = MaterialTheme.typography.titleMedium, color = SurfaceWhite)
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.Lock, null, modifier = Modifier.size(9.dp), tint = SurfaceWhite.copy(alpha = 0.7f))
-                                Spacer(Modifier.width(3.dp))
-                                Text("end-to-end encrypted", fontSize = 10.sp, color = SurfaceWhite.copy(alpha = 0.7f))
+                            if (groupId == null && uiState.peerTyping) {
+                                Text("typing…", fontSize = 11.sp, color = SurfaceWhite.copy(alpha = 0.9f))
+                            } else {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.Lock, null, modifier = Modifier.size(9.dp), tint = SurfaceWhite.copy(alpha = 0.7f))
+                                    Spacer(Modifier.width(3.dp))
+                                    Text("end-to-end encrypted", fontSize = 10.sp, color = SurfaceWhite.copy(alpha = 0.7f))
+                                }
                             }
                         }
                     }
@@ -786,6 +790,7 @@ fun ChatScreen(
                                 value = inputText,
                                 onValueChange = { v ->
                                     inputText = v
+                                    viewModel.onInputChanged(v)
                                     if (groupId != null) {
                                         val match = Regex("@(\\w*)$").find(v)
                                         viewModel.setMentionQuery(match?.groupValues?.get(1)?.lowercase())

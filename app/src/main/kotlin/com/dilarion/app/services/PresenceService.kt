@@ -34,6 +34,25 @@ class PresenceService @Inject constructor(
     private var currentToken: String? = null
     private val gson = Gson()
 
+    // Reconnect on our own when the socket drops (server restart, network
+    // change, proxy idle cut). Without this the app stayed offline until some
+    // screen happened to reconnect, so messages and typing stopped arriving
+    // live until the user left the chat and came back.
+    @Volatile private var wantConnected = false
+    @Volatile private var reconnectAttempts = 0
+    private val reconnectHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val reconnectRunnable = Runnable { if (wantConnected && !isConnected) open() }
+
+    private fun scheduleReconnect(code: Int?) {
+        // 4001 = session invalid/replaced, 4003 = onboarding required: retrying won't help.
+        if (!wantConnected || currentToken == null || code == 4001 || code == 4003) return
+        reconnectHandler.removeCallbacks(reconnectRunnable)
+        val delayMs = minOf(30_000L, 2_000L shl minOf(reconnectAttempts, 4))
+        reconnectAttempts += 1
+        Log.i(TAG, "WS reconnect in ${delayMs}ms")
+        reconnectHandler.postDelayed(reconnectRunnable, delayMs)
+    }
+
     val isConnected: Boolean get() = isOpen && webSocket != null
 
     private val _events = MutableSharedFlow<WsMessage>(extraBufferCapacity = 64)
@@ -62,7 +81,15 @@ class PresenceService @Inject constructor(
     fun connect(token: String?) {
         if (token.isNullOrBlank()) return
         currentToken = token
-        disconnect()
+        wantConnected = true
+        reconnectAttempts = 0
+        open()
+    }
+
+    private fun open() {
+        val token = currentToken ?: return
+        reconnectHandler.removeCallbacks(reconnectRunnable)
+        closeSocket()
         val url = buildString {
             append(WS_BASE)
             append("?device_id=").append(deviceId)
@@ -77,6 +104,7 @@ class PresenceService @Inject constructor(
         val newWs = okHttpClient.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(ws: WebSocket, response: Response) {
                 Log.i(TAG, "WS connected")
+                reconnectAttempts = 0
                 isOpen = true
                 _connectionState.tryEmit(true)
             }
@@ -90,12 +118,19 @@ class PresenceService @Inject constructor(
             }
             override fun onClosed(ws: WebSocket, code: Int, reason: String) {
                 Log.w(TAG, "WS closed: $code $reason")
-                if (webSocket === ws) { webSocket = null; isOpen = false }
+                if (webSocket === ws) {
+                    webSocket = null; isOpen = false
+                    scheduleReconnect(code)
+                }
                 _connectionState.tryEmit(false)
             }
             override fun onFailure(ws: WebSocket, t: Throwable, response: Response?) {
                 Log.e(TAG, "WS failure: $t")
-                if (webSocket === ws) { webSocket = null; isOpen = false }
+                if (webSocket === ws) {
+                    webSocket = null; isOpen = false
+                    // A rejected handshake (HTTP 401/403) means the session is gone.
+                    scheduleReconnect(if (response?.code == 401 || response?.code == 403) 4001 else null)
+                }
                 _connectionState.tryEmit(false)
             }
         })
@@ -103,9 +138,10 @@ class PresenceService @Inject constructor(
     }
 
     fun reconnectIfNeeded() {
-        if (!isConnected && currentToken != null) {
+        if (!isConnected && currentToken != null && wantConnected) {
             Log.i(TAG, "reconnecting WS")
-            connect(currentToken)
+            reconnectAttempts = 0
+            open()
         }
     }
 
@@ -119,6 +155,12 @@ class PresenceService @Inject constructor(
     }
 
     fun disconnect() {
+        wantConnected = false
+        reconnectHandler.removeCallbacks(reconnectRunnable)
+        closeSocket()
+    }
+
+    private fun closeSocket() {
         val ws = webSocket
         webSocket = null
         isOpen = false

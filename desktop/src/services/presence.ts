@@ -74,8 +74,6 @@ class PresenceService {
   private deviceName: string = 'Desktop';
   private platform: string = 'desktop';
   private failures = 0;          // consecutive failed attempts (backoff)
-  private openedThisAttempt = false;
-  private authFailures = 0;      // closes that never opened → likely bad token
   private stopped = false;       // true once we give up (auth dead)
   private opening = false;
 
@@ -83,11 +81,25 @@ class PresenceService {
     return this.ws?.readyState === WebSocket.OPEN;
   }
 
+  /** Reconnect straight away (network back, window focused) instead of waiting out the backoff. */
+  private nudge = () => {
+    if (!this.token || this.stopped || this.isConnected || this.opening) return;
+    if (this.ws && this.ws.readyState === WebSocket.CONNECTING) return;
+    this.failures = 0;
+    this._open();
+  };
+  private nudgeListening = false;
+
   connect(token: string) {
+    if (!this.nudgeListening && typeof window !== 'undefined') {
+      this.nudgeListening = true;
+      window.addEventListener('online', this.nudge);
+      window.addEventListener('focus', this.nudge);
+      document.addEventListener('visibilitychange', () => { if (!document.hidden) this.nudge(); });
+    }
     this.token = token;
     this.stopped = false;
     this.failures = 0;
-    this.authFailures = 0;
     // Main window only: replay buffered call events to a call window that opens
     // mid-call (answered incoming calls). The call window never calls connect().
     if (isTauri() && !isCallWindow()) startCallEventReplayBridge();
@@ -109,7 +121,6 @@ class PresenceService {
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
     this._cleanup();
 
-    this.openedThisAttempt = false;
     this.opening = true;
     const sessionToken = this.token;
     let ticket: string;
@@ -148,9 +159,7 @@ class PresenceService {
 
     this.ws.onopen = () => {
       console.log('[WS] connected');
-      this.openedThisAttempt = true;
       this.failures = 0;
-      this.authFailures = 0;
       this.pingTimer = setInterval(() => {
         if (this.isConnected) this.ws!.send(JSON.stringify({ type: 'ping' }));
       }, 25_000);
@@ -192,18 +201,11 @@ class PresenceService {
         return;
       }
 
-      // A close before the socket ever opened means the handshake was rejected
-      // — almost always an expired/invalid token. Retrying it forever is the
-      // 403 storm in the logs. Give up after a few and tell the app to re-login.
-      if (!this.openedThisAttempt) {
-        this.authFailures += 1;
-        if (this.authFailures >= 4) {
-          this.stopped = true;
-          console.warn('[WS] auth rejected repeatedly — stopping, needs re-login');
-          this.listeners.forEach(l => l({ type: 'auth_expired' } as WsMessage));
-          return;
-        }
-      }
+      // A close before the socket opened is NOT an auth failure: the ticket
+      // request just succeeded, so the session is valid. It is a server restart
+      // or a network drop. Giving up here after a few tries left desktop with
+      // no live messages or typing until the app was reopened. A dead session
+      // is caught by the ticket request (401/403) above instead.
 
       this.failures += 1;
       const delay = Math.min(30_000, 3_000 * 2 ** Math.min(this.failures, 4)); // 3s→30s

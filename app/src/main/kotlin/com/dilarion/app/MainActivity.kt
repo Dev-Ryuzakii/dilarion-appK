@@ -62,6 +62,8 @@ class MainActivity : FragmentActivity() {
         super.onResume()
         checkIdle()
         idleHandler.postDelayed(idleCheck, 30_000)
+        // Coming back to the app: make sure live messages are flowing again.
+        presenceService.reconnectIfNeeded()
     }
 
     /** Idle past the system timeout → drop the session; the token prompt takes over. */

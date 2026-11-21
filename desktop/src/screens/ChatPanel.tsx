@@ -837,6 +837,7 @@ export default function ChatPanel({
   const [recording, setRecording] = useState(false);
   const [recSeconds, setRecSeconds] = useState(0);
   const [partnerTyping, setPartnerTyping] = useState(false);
+  const typingExpiryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [pendingDocFile, setPendingDocFile] = useState<File | null>(null);
   const [replyTarget, setReplyTarget] = useState<ChatMessage | null>(null);
   const [starredIds, setStarredIds] = useState<Set<number>>(new Set());
@@ -887,6 +888,12 @@ export default function ChatPanel({
 
   useEffect(() => {
     const handler = (msg: WsMessage) => {
+      if (msg.type === 'connected') {
+        // The socket just (re)connected. Messages sent while it was down were
+        // never pushed, so catch up now instead of waiting for a chat reopen.
+        loadConversation();
+        return;
+      }
       if (msg.type === 'new_message') {
         const sender = msg.data?.sender_username as string | undefined;
         if (sender === partner) {
@@ -898,6 +905,9 @@ export default function ChatPanel({
         const isTyping = (msg as any).is_typing as boolean | undefined;
         if (sender === partner) {
           setPartnerTyping(!!isTyping);
+          // A lost "stopped typing" event must not leave the label up forever.
+          if (typingExpiryRef.current) clearTimeout(typingExpiryRef.current);
+          typingExpiryRef.current = isTyping ? setTimeout(() => setPartnerTyping(false), 6000) : null;
         }
       } else if (msg.type === 'conversation_cleared') {
         const withUsername = msg.data?.with_username as string | undefined;

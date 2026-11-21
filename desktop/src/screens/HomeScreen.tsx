@@ -2490,6 +2490,14 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
   const [callTokenInput, setCallTokenInput] = useState('');
   const [callTokenError, setCallTokenError] = useState<string | null>(null);
   const [callTokenLoading, setCallTokenLoading] = useState(false);
+  // Token typed for THIS incoming call only. It is never written to the
+  // session masterToken, so every call asks again, even from the same person.
+  const [callAcceptToken, setCallAcceptToken] = useState<string | null>(null);
+  useEffect(() => {
+    setCallAcceptToken(null);
+    setCallTokenInput('');
+    setCallTokenError(null);
+  }, [incomingCall?.callId]);
 
   // ── New-chat modal state ─────────────────────────────────────────────────────
   const [showNewChat, setShowNewChat] = useState(false);
@@ -4425,8 +4433,8 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
               </div>
             </div>
 
-            {/* Master token required to accept */}
-            {!masterToken && (
+            {/* Master token required to accept, every call */}
+            {!callAcceptToken && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 <span style={{ fontSize: '0.74rem', fontWeight: 600, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 6 }}>
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="11" width="16" height="10" rx="2.5" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg>
@@ -4444,7 +4452,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
                       setCallTokenLoading(true);
                       const ok = await confirmMasterToken(token, trimmed).catch(() => false);
                       setCallTokenLoading(false);
-                      if (ok) { setMasterToken(trimmed); setCallTokenError(null); }
+                      if (ok) { setCallAcceptToken(trimmed); setCallTokenError(null); }
                       else setCallTokenError('Invalid master token');
                     }
                   }}
@@ -4479,9 +4487,9 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
                 Decline
               </button>
               <button
-                disabled={!masterToken}
+                disabled={!callAcceptToken}
                 onClick={() => {
-                  if (!masterToken) return;
+                  if (!callAcceptToken) return;
                   stopRinging();
                   setCallTokenInput('');
                   setCallTokenError(null);
@@ -4490,16 +4498,17 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
                     {
                       token, my_username: username, partner: incomingCall.from, call_type: incomingCall.callType,
                       is_incoming: true, call_id: incomingCall.callId, offer_sdp: incomingCall.offerSdp,
-                      master_token: masterToken ?? undefined,
+                      master_token: callAcceptToken,
                     },
                     () => setCallWindowOpen(false),
                   ).catch(() => setCallWindowOpen(false));
+                  setCallAcceptToken(null);
                   setIncomingCall(null);
                 }}
                 style={{
-                  flex: 1, background: masterToken ? '#16a34a' : 'var(--bg-base)', border: masterToken ? 'none' : '1px solid var(--border-color)', borderRadius: 999,
-                  color: masterToken ? '#fff' : 'var(--text-muted)', fontWeight: 700, fontSize: '0.86rem', fontFamily: 'inherit',
-                  padding: '11px 0', cursor: masterToken ? 'pointer' : 'not-allowed',
+                  flex: 1, background: callAcceptToken ? '#16a34a' : 'var(--bg-base)', border: callAcceptToken ? 'none' : '1px solid var(--border-color)', borderRadius: 999,
+                  color: callAcceptToken ? '#fff' : 'var(--text-muted)', fontWeight: 700, fontSize: '0.86rem', fontFamily: 'inherit',
+                  padding: '11px 0', cursor: callAcceptToken ? 'pointer' : 'not-allowed',
                 }}
               >
                 Accept

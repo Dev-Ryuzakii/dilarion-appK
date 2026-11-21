@@ -137,6 +137,12 @@ fun AppNavigation(pendingIncomingCall: IncomingCallData? = null) {
         IncomingCallOverlay(
             incoming = call,
             onDismiss = { overlayVm.clear() },
+            onConferenceUpgrade = { confId, wasVideo ->
+                overlayVm.clear()
+                navController.navigate(
+                    Screen.GroupCall.route(confId, 0, "Call", if (wasVideo) "video" else "voice")
+                )
+            },
         )
         return
     }

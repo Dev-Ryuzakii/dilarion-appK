@@ -668,6 +668,7 @@ data class WsMessage(
     @SerializedName("command_type") val commandType: String? = null,
     @SerializedName("command_id")   val commandId: Int? = null,
     val params: com.google.gson.JsonObject? = null,
+    @SerializedName("is_typing")    val isTyping: Boolean? = null,
 )
 
 // ─── Calls ────────────────────────────────────────────────────────────────────

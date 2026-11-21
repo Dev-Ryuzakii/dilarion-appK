@@ -165,6 +165,7 @@ fun CallScreen(
 fun IncomingCallOverlay(
     incoming: IncomingCallData,
     onDismiss: () -> Unit,
+    onConferenceUpgrade: (conferenceId: Int, wasVideo: Boolean) -> Unit = { _, _ -> onDismiss() },
 ) {
     val viewModel: CallViewModel = hiltViewModel()
     val uiState by viewModel.uiState.collectAsState()
@@ -173,6 +174,15 @@ fun IncomingCallOverlay(
     var showMasterTokenDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(incoming) { viewModel.setIncoming(incoming) }
+
+    // Switching to video from here moves the call into its group room.
+    val conferenceUpgrade by viewModel.conferenceUpgrade.collectAsState()
+    LaunchedEffect(conferenceUpgrade) {
+        val (confId, wasVideo) = conferenceUpgrade ?: return@LaunchedEffect
+        viewModel.clearConferenceUpgrade()
+        viewModel.endCallForConferenceUpgrade()
+        onConferenceUpgrade(confId, wasVideo)
+    }
 
     LaunchedEffect(uiState.state) {
         if (uiState.state == CallState.ENDED) {
@@ -632,6 +642,10 @@ private fun CallControls(uiState: CallUiState, viewModel: CallViewModel, showFli
                 if (uiState.isSpeaker) DilarionRed else SurfaceWhite,
                 viewModel::toggleSpeaker,
             )
+            // A voice call can go to video without adding anyone first.
+            if (uiState.callType == CallType.VOICE && uiState.state == CallState.CONNECTED && !conferenceState.isActive) {
+                SmallControl(Icons.Default.Videocam, SurfaceWhite, viewModel::switchToVideo)
+            }
         }
     }
 }
