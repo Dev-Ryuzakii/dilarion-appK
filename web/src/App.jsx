@@ -8,6 +8,43 @@ import { forgotOrganizationPassword, getOrganization, getOrganizationUsers, invi
 const DOWNLOAD_BASE = (import.meta.env.VITE_DOWNLOAD_BASE || '').replace(/\/$/, '')
 const downloadUrl = (file) => (DOWNLOAD_BASE ? `${DOWNLOAD_BASE}/${file}` : file)
 
+// Download cards follow the OTA releases: every version pushed to the release
+// repo shows up here on its own, no copying installers to the server. Each
+// platform takes the newest release that actually has its installer (a release
+// whose Android build failed still offers the previous APK). The repo is
+// public and api.github.com allows browser requests; if it can't be reached
+// the cards keep the static files above.
+const RELEASES_API = import.meta.env.VITE_RELEASES_API || 'https://api.github.com/repos/Yamikage-001/Dilarion/releases?per_page=15'
+const PLATFORM_ASSETS = {
+  windows: (name) => /\.msi$/i.test(name),
+  mac: (name) => /\.dmg$/i.test(name),
+  android: (name) => /\.apk$/i.test(name) && !/test/i.test(name),
+}
+
+function useLatestDownloads() {
+  const [latest, setLatest] = useState({})
+  useEffect(() => {
+    const ctrl = new AbortController()
+    fetch(RELEASES_API, { signal: ctrl.signal, headers: { Accept: 'application/vnd.github+json' } })
+      .then(r => (r.ok ? r.json() : []))
+      .then(releases => {
+        const found = {}
+        for (const rel of Array.isArray(releases) ? releases : []) {
+          if (rel.draft || rel.prerelease) continue
+          for (const [platform, matches] of Object.entries(PLATFORM_ASSETS)) {
+            if (found[platform]) continue
+            const asset = (rel.assets || []).find(a => matches(a.name))
+            if (asset) found[platform] = { url: asset.browser_download_url, version: String(rel.tag_name || '').replace(/^v/, '') }
+          }
+        }
+        setLatest(found)
+      })
+      .catch(() => {})
+    return () => ctrl.abort()
+  }, [])
+  return latest
+}
+
 const Icon = ({ name, size = 20 }) => {
   const paths = {
     arrow: <><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></>,
@@ -190,6 +227,7 @@ function PhoneMock() {
 
 function Home({ navigate }) {
   useReveal()
+  const latest = useLatestDownloads()
   return <main className="landing">
     <section className="hero-shell">
       <div className="hero-frame">
@@ -259,9 +297,9 @@ function Home({ navigate }) {
     <section className="section" id="download">
       <div className="section-head reveal"><span className="mono">Get the app</span><h2>Work from anywhere.</h2><p>Download Dilarion for your computer and phone, or open it instantly in your browser.</p></div>
       <div className="downloads">
-        <a className="download-card reveal" href={downloadUrl('dilarion-windows.msi')} download><Icon name="download"/><strong>Windows</strong><small>.msi installer</small></a>
-        <a className="download-card reveal" href={downloadUrl('dilarion-mac.dmg')} download><Icon name="download"/><strong>macOS</strong><small>.dmg disk image</small></a>
-        <a className="download-card reveal" href={downloadUrl('dilarion.apk')} download><Icon name="download"/><strong>Android</strong><small>.apk package</small></a>
+        <a className="download-card reveal" href={latest.windows?.url || downloadUrl('dilarion-windows.msi')} download><Icon name="download"/><strong>Windows</strong><small>.msi installer{latest.windows ? ` · v${latest.windows.version}` : ''}</small></a>
+        <a className="download-card reveal" href={latest.mac?.url || downloadUrl('dilarion-mac.dmg')} download><Icon name="download"/><strong>macOS</strong><small>.dmg disk image{latest.mac ? ` · v${latest.mac.version}` : ''}</small></a>
+        <a className="download-card reveal" href={latest.android?.url || downloadUrl('dilarion.apk')} download><Icon name="download"/><strong>Android</strong><small>.apk package{latest.android ? ` · v${latest.android.version}` : ''}</small></a>
         <a className="download-card web reveal" href={WEB_APP_URL}><Icon name="globe"/><strong>Web app</strong><small>Sign in from a browser</small></a>
       </div>
     </section>
