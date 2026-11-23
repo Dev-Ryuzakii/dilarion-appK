@@ -14,8 +14,8 @@ android {
         applicationId = "com.dilarion.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 221
-        versionName = "2.0.21"
+        versionCode = 222
+        versionName = "2.0.22"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
