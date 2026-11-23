@@ -10,6 +10,7 @@ export default defineConfig({
       'dilarion-appk.afribase.dev',
       'dilarion-webplatform.afribase.dev',
       'dilarion.xyz',
+      'www.dilarion.xyz',
       'web.dilarion.xyz',
     ],
   },
