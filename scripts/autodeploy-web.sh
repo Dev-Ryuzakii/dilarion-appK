@@ -61,7 +61,10 @@ deploy() {
     npm run build
   )
   [ -f "$dir/dist/index.html" ] || { echo "$(date -Is) $app: build has no index.html, not deploying"; return 1; }
-  rsync -a --delete "$dir/dist/" "$target/"
+  # The served folder also holds files the build doesn't make (installers,
+  # downloads/), so only the hashed assets/ folder is cleared of old files.
+  rsync -a "$dir/dist/" "$target/"
+  [ -d "$dir/dist/assets" ] && rsync -a --delete "$dir/dist/assets/" "$target/assets/"
   echo "$new" > "$STATE/$app"
   echo "$(date -Is) $app: deployed ${new:0:7}"
 }
