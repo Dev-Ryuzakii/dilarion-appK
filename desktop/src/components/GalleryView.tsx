@@ -800,7 +800,7 @@ export default function GalleryView({
   }
 
   return (
-    <div className="gallery-call" style={{
+    <div data-watch-block className="gallery-call" style={{
       position: 'fixed', inset: 0, zIndex: 900,
       background: '#0b0b10',
       display: 'flex', flexDirection: 'column',

@@ -58,7 +58,7 @@ export default function SetupWizard({ token, username, children }: {
 
   if (phase === 'loading') {
     return (
-      <div style={s.root}>
+      <div style={s.root} data-watch-block>
         <div style={s.card}><p style={s.sub}>Preparing your account…</p></div>
       </div>
     );
@@ -70,7 +70,7 @@ export default function SetupWizard({ token, username, children }: {
   const total = steps.length;
 
   return (
-    <div style={s.root}>
+    <div style={s.root} data-watch-block>
       <div style={s.logoWrap}>
         <img src="/logo.jpg" alt="Dilarion" style={s.logo} onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
       </div>
