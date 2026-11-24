@@ -686,10 +686,14 @@ class SettingsViewModel @Inject constructor(
     fun logout(onDone: () -> Unit) {
         viewModelScope.launch {
             val token = sessionManager.sessionToken.first()
-            // Tell the server in the background, but never block logout on it — a slow
-            // or unreachable network must not leave the user stuck signed in.
+            // End the session on the server too, or it keeps counting as a signed-in
+            // device and the next sign-in elsewhere asks for an approval nobody can
+            // give. Leaving this screen cancels viewModelScope, so the call runs
+            // NonCancellable; the timeout keeps a dead network from blocking logout.
             if (token != null) {
-                launch { runCatching { apiService.logout("Bearer $token") } }
+                kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                    kotlinx.coroutines.withTimeoutOrNull(4_000) { runCatching { apiService.logout("Bearer $token") } }
+                }
             }
             runCatching { presenceService.disconnect() }
             sessionManager.clearSession()

@@ -104,7 +104,7 @@ class MasterTokenSetupViewModel @Inject constructor(
 
     companion object {
         fun validate(token: String): String? {
-            if (token.length < 12) return "Master token must be at least 12 characters"
+            if (token.length < 6) return "Master token must be at least 6 characters"
             val upper   = token.any { it.isUpperCase() }
             val lower   = token.any { it.isLowerCase() }
             val digit   = token.any { it.isDigit() }
