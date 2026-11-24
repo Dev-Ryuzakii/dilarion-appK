@@ -22,6 +22,8 @@ export const getOrganizationUsers = (token) => request('/organization/users', { 
 // Organizations can invite their own staff (no edit/suspend - that stays with Dilarion admins).
 export const inviteOrganizationStaff = (token, users) => request('/organization/users', { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify({ users }) })
 export const resetStaffLogin = (token, userId) => request(`/organization/users/${userId}/reset-login`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } })
+// Up to 50 at once; no ids = the oldest pending invitations the server can send to now.
+export const resendStaffInvites = (token, userIds) => request('/organization/users/resend-invites', { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify({ user_ids: userIds && userIds.length ? userIds : null }) })
 export const resendStaffInvite = (token, userId) => request(`/organization/users/${userId}/resend-invite`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } })
 
 // Org-wide admin: delegate company-wide privileges to chosen staff, and send

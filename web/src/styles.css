@@ -483,3 +483,18 @@ td>strong,.contact-email{display:block;font-weight:500;color:var(--text)}
   .footer-cols{gap:28px 40px}
 }
 @keyframes phone-up{from{opacity:0;transform:translateY(40px)}to{opacity:1;transform:none}}
+
+/* Bulk resend of pending invitations */
+.roster-filters{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.filter-chip{display:inline-flex;align-items:center;gap:6px;padding:8px 12px;border-radius:999px;border:1px solid var(--line);background:transparent;color:var(--muted);font-size:13px;font-weight:600;cursor:pointer}
+.filter-chip:hover{color:var(--text)}
+.filter-chip.on{border-color:var(--red-hot);color:var(--text);background:rgba(232,72,58,.12)}
+.bulk-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:12px 20px;border-bottom:1px solid var(--line);background:rgba(255,255,255,.02);font-size:13px;color:var(--muted)}
+.bulk-bar strong{color:var(--text)}
+.bulk-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.select-col{width:44px;text-align:center}
+.select-col input{width:16px;height:16px;accent-color:var(--red-hot);cursor:pointer}
+.select-col input:disabled{cursor:not-allowed;opacity:.35}
+tr.selected td{background:rgba(232,72,58,.06)}
+.button.outline{background:transparent;color:var(--text);border:1px solid var(--line)}
+.button.outline:hover{border-color:var(--red-hot)}
