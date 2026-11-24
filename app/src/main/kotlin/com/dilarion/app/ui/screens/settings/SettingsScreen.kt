@@ -1,6 +1,7 @@
 package com.dilarion.app.ui.screens.settings
 
 import android.Manifest
+import com.afribase.watch.compose.watchSecureScreen
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -60,6 +61,9 @@ private enum class SettingsPage(val title: String) {
     RECOVERY("Recovery code"),
     DANGER("Delete account"),
 }
+
+/** Settings pages that Base1 Watch replay shows only as a placeholder. */
+private val WATCH_SECURE_PAGES = setOf(SettingsPage.TWO_FA, SettingsPage.RECOVERY, SettingsPage.VOICE)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -131,6 +135,7 @@ fun SettingsScreen(
     ) { padding ->
         Column(
             modifier = Modifier
+                .then(if (page in WATCH_SECURE_PAGES) Modifier.watchSecureScreen() else Modifier)
                 .fillMaxSize()
                 .padding(padding)
                 .verticalScroll(key(page) { rememberScrollState() }),

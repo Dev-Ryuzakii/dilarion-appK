@@ -1,6 +1,7 @@
 package com.dilarion.app.ui.screens.mastertoken
 
 import androidx.compose.foundation.background
+import com.afribase.watch.compose.watchSecureScreen
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -50,7 +51,7 @@ fun MasterTokenSetupScreen(
     }
 
     Box(
-        modifier = Modifier
+        modifier = Modifier.watchSecureScreen()
             .fillMaxSize()
             .background(
                 Brush.verticalGradient(listOf(DilarionRed, DilarionRedDark))

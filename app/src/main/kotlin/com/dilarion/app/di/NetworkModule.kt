@@ -36,9 +36,13 @@ object NetworkModule {
             // retries cleanly on a stale pooled socket.
             .protocols(listOf(Protocol.HTTP_1_1))
             .retryOnConnectionFailure(true)
+            // Base1 Watch: reports failed requests (status >= 500, network errors).
+            .addInterceptor(com.afribase.watch.WatchInterceptor())
+            // BODY logging writes tokens and message payloads to logcat, so
+            // only debug builds get it.
             .addInterceptor(
                 HttpLoggingInterceptor().apply {
-                    level = HttpLoggingInterceptor.Level.BODY
+                    level = if (BuildConfig.DEBUG) HttpLoggingInterceptor.Level.BODY else HttpLoggingInterceptor.Level.NONE
                 }
             )
             .build()

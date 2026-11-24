@@ -18,7 +18,7 @@ function currentUser(): string | undefined {
 }
 
 export const watch: WatchClient = initWatch({
-  key: 'abw_Sk8xQS84EIBreWKAvDsYFIkxTkJ-Kn7dJ6MwIfIspXQ',
+  key: 'abw_LHTPYnLs9YkTjtMf98qPAd1eqhKoxFvawYqJvTLzfmk',
   endpoint: 'https://api.useafribase.app/watch/ingest',
   release: __APP_VERSION__,
   environment: import.meta.env.MODE === 'production' ? 'production' : import.meta.env.MODE,
