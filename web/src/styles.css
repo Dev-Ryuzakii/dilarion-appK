@@ -498,3 +498,5 @@ td>strong,.contact-email{display:block;font-weight:500;color:var(--text)}
 tr.selected td{background:rgba(232,72,58,.06)}
 .button.outline{background:transparent;color:var(--text);border:1px solid var(--line)}
 .button.outline:hover{border-color:var(--red-hot)}
+
+.verified-note{color:var(--muted,#7a6f71);font-size:12px}

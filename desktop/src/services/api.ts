@@ -2168,16 +2168,32 @@ export async function setAvailabilityStatus(token: string, status: AvailabilityS
 }
 
 // ── Forgot / reset password ───────────────────────────────────────────────────
-// No email on file for accounts — this creates a request an admin has to act
-// on (same shape as account-deletion requests), not a real self-service reset.
+// Without a recovery code: verify the account's email with a 6-digit code,
+// then send the request to the organization / Dilarion admins. Approving it
+// emails the person a fresh recovery code.
 
-export async function requestPasswordReset(phoneNumber: string, reason?: string): Promise<void> {
+async function detailOr(res: Response, fallback: string): Promise<string> {
+  try { const b = await res.json(); if (typeof b?.detail === 'string') return b.detail; } catch { /* no body */ }
+  return fallback;
+}
+
+export async function sendResetEmailCode(email: string): Promise<void> {
+  const res = await apiFetch(`${BASE}/auth/forgot-password/email-code`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email }),
+  });
+  if (!res.ok) throw new Error(await detailOr(res, "Couldn't send the code. Please try again."));
+}
+
+export async function requestPasswordReset(body: { email: string; code: string; reason: string; confirm: boolean }): Promise<string> {
   const res = await apiFetch(`${BASE}/auth/forgot-password`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ phone_number: phoneNumber, reason: reason || null }),
+    body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error('Failed to submit request');
+  if (!res.ok) throw new Error(await detailOr(res, "Couldn't send your request. Please try again."));
+  return (await res.json()).message as string;
 }
 
 // ── Self-service signup / recovery code ──────────────────────────────────────

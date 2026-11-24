@@ -38,6 +38,16 @@ data class AuthUiState(
     val activated: Boolean = false,
 )
 
+/** Forgot access token without a recovery code: email → code + reason → sent. */
+enum class ForgotStep { EMAIL, DETAILS, SENT }
+
+data class ForgotUiState(
+    val step: ForgotStep = ForgotStep.EMAIL,
+    val loading: Boolean = false,
+    val error: String? = null,
+    val message: String? = null,
+)
+
 /**
  * This device is waiting for the owner to approve the sign-in, because the
  * account is already signed in on another device.
@@ -317,6 +327,45 @@ class AuthViewModel @Inject constructor(
             }.onFailure { e ->
                 _uiState.value = AuthUiState(error = e.toUserMessage("Can't reach the server. Check your connection and try again."))
             }
+        }
+    }
+
+    private val _forgot = kotlinx.coroutines.flow.MutableStateFlow(ForgotUiState())
+    val forgot: kotlinx.coroutines.flow.StateFlow<ForgotUiState> = _forgot
+
+    fun resetForgot() { _forgot.value = ForgotUiState() }
+    fun forgotChangeEmail() { _forgot.value = ForgotUiState() }
+
+    fun sendResetEmailCode(email: String) {
+        val e = email.trim()
+        if (e.isBlank()) return
+        viewModelScope.launch {
+            _forgot.value = _forgot.value.copy(loading = true, error = null)
+            runCatching { apiService.sendResetEmailCode(com.dilarion.app.data.model.ResetEmailCodeRequest(e)) }
+                .onSuccess { resp ->
+                    _forgot.value = if (resp.isSuccessful) {
+                        ForgotUiState(step = ForgotStep.DETAILS, message = "If $e is on a Dilarion account, we've emailed it a 6-digit code.")
+                    } else {
+                        _forgot.value.copy(loading = false, error = errorBody(resp.errorBody()?.string()) ?: "Couldn't send the code. Please try again.")
+                    }
+                }
+                .onFailure { _forgot.value = _forgot.value.copy(loading = false, error = it.toUserMessage("Can't reach the server. Check your connection and try again.")) }
+        }
+    }
+
+    fun requestAccessReset(email: String, code: String, reason: String, confirm: Boolean) {
+        viewModelScope.launch {
+            _forgot.value = _forgot.value.copy(loading = true, error = null)
+            runCatching {
+                apiService.requestAccessReset(com.dilarion.app.data.model.AccessResetRequest(email.trim(), code.trim(), reason.trim(), confirm))
+            }.onSuccess { resp ->
+                _forgot.value = if (resp.isSuccessful) {
+                    ForgotUiState(step = ForgotStep.SENT, message = resp.body()?.get("message")?.asString
+                        ?: "Request sent. When it's approved, we'll email you a new recovery code.")
+                } else {
+                    _forgot.value.copy(loading = false, error = errorBody(resp.errorBody()?.string()) ?: "Couldn't send your request. Please try again.")
+                }
+            }.onFailure { _forgot.value = _forgot.value.copy(loading = false, error = it.toUserMessage("Can't reach the server. Check your connection and try again.")) }
         }
     }
 

@@ -34,6 +34,14 @@ interface ApiService {
     @POST("auth/reset-with-recovery-code")
     suspend fun resetWithRecoveryCode(@Body request: RecoveryCodeResetRequest): Response<RecoveryCodeResetResponse>
 
+    /** No recovery code: email a 6-digit code to the account's address. */
+    @POST("auth/forgot-password/email-code")
+    suspend fun sendResetEmailCode(@Body request: ResetEmailCodeRequest): Response<com.google.gson.JsonObject>
+
+    /** With that code: send the request to the organization / admins for approval. */
+    @POST("auth/forgot-password")
+    suspend fun requestAccessReset(@Body request: AccessResetRequest): Response<com.google.gson.JsonObject>
+
     @POST("users/me/recovery-code/regenerate")
     suspend fun regenerateRecoveryCode(@Header("Authorization") bearer: String): Response<RecoveryCodeRegenerateResponse>
 

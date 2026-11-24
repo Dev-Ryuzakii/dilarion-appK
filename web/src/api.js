@@ -34,6 +34,10 @@ export const sendOrgBroadcast = (token, payload) => request('/organization/broad
 export const getOrgBroadcasts = (token) => request('/organization/broadcasts', { headers: { Authorization: `Bearer ${token}` } })
 
 // Org-scoped account-deletion approvals (needs the "approve_deletions" privilege).
+// Staff who lost their recovery code: approving emails them a new one.
+export const getOrgResetRequests = (token) => request('/organization/password-reset-requests', { headers: { Authorization: `Bearer ${token}` } })
+export const approveOrgReset = (token, id) => request(`/organization/password-reset-requests/${id}/approve`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } })
+export const denyOrgReset = (token, id, reason) => request(`/organization/password-reset-requests/${id}/deny`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify({ reason }) })
 export const getOrgDeletionRequests = (token) => request('/organization/account-deletion-requests', { headers: { Authorization: `Bearer ${token}` } })
 export const approveOrgDeletion = (token, id) => request(`/organization/account-deletion-requests/${id}/approve`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } })
 export const denyOrgDeletion = (token, id, reason) => request(`/organization/account-deletion-requests/${id}/deny`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify({ reason }) })

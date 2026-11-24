@@ -37,7 +37,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.collectAsState
 import com.dilarion.app.ui.theme.*
 
-private enum class AuthView { LOGIN, SIGNUP, RECOVERY, ACTIVATE }
+private enum class AuthView { LOGIN, SIGNUP, RECOVERY, FORGOT, ACTIVATE }
 
 @Composable
 fun AuthScreen(
@@ -60,6 +60,11 @@ fun AuthScreen(
     var signupToken by remember { mutableStateOf("") }
 
     var recUsername by remember { mutableStateOf("") }
+    val forgot by viewModel.forgot.collectAsState()
+    var forgotEmail by remember { mutableStateOf("") }
+    var forgotCode by remember { mutableStateOf("") }
+    var forgotReason by remember { mutableStateOf("") }
+    var forgotConfirm by remember { mutableStateOf(false) }
     var recCode by remember { mutableStateOf("") }
     var recNewToken by remember { mutableStateOf("") }
 
@@ -147,6 +152,7 @@ fun AuthScreen(
                 when (view) {
                     AuthView.SIGNUP -> "Create Account"
                     AuthView.RECOVERY -> "Reset Access"
+                    AuthView.FORGOT -> "New Recovery Code"
                     AuthView.ACTIVATE -> "Activate Account"
                     AuthView.LOGIN -> "Welcome Back"
                 },
@@ -159,6 +165,7 @@ fun AuthScreen(
                 when (view) {
                     AuthView.SIGNUP -> "Set up your account"
                     AuthView.RECOVERY -> "Use your recovery code"
+                    AuthView.FORGOT -> "Ask your organization for a new one"
                     AuthView.ACTIVATE -> "Use the code from your invitation email or SMS"
                     AuthView.LOGIN -> "Sign in to continue"
                 },
@@ -429,7 +436,97 @@ fun AuthScreen(
                                     Text("Reset access", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                                 }
                             }
+                            TextButton(onClick = { viewModel.resetForgot(); view = AuthView.FORGOT }, modifier = Modifier.fillMaxWidth()) {
+                                Text("Don't have your recovery code?")
+                            }
                             TextButton(onClick = { view = AuthView.LOGIN }, modifier = Modifier.fillMaxWidth()) {
+                                Text("Back to sign in")
+                            }
+                        }
+
+                        AuthView.FORGOT -> {
+                            when (forgot.step) {
+                                ForgotStep.EMAIL -> {
+                                    Text(
+                                        "Enter the email on your account. We'll send you a code to confirm it's you.",
+                                        style = MaterialTheme.typography.bodyMedium, color = TextSecondary,
+                                    )
+                                    AuthTextField(
+                                        value = forgotEmail,
+                                        onValueChange = { forgotEmail = it },
+                                        label = "Email address",
+                                        singleLine = true,
+                                        modifier = Modifier.fillMaxWidth(),
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = ImeAction.Done),
+                                        keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus(); viewModel.sendResetEmailCode(forgotEmail) }),
+                                    )
+                                    forgot.error?.let { Text(it, color = DilarionRed, style = MaterialTheme.typography.bodySmall) }
+                                    ForgotButton("Send code", forgot.loading, enabled = forgotEmail.isNotBlank()) {
+                                        focusManager.clearFocus(); viewModel.sendResetEmailCode(forgotEmail)
+                                    }
+                                }
+                                ForgotStep.DETAILS -> {
+                                    forgot.message?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = TextSecondary) }
+                                    AuthTextField(
+                                        value = forgotCode,
+                                        onValueChange = { v -> forgotCode = v.filter { it.isDigit() }.take(6) },
+                                        label = "6-digit code",
+                                        singleLine = true,
+                                        modifier = Modifier.fillMaxWidth(),
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword, imeAction = ImeAction.Next),
+                                        keyboardActions = KeyboardActions(onNext = { focusManager.moveFocus(FocusDirection.Down) }),
+                                    )
+                                    AuthTextField(
+                                        value = forgotReason,
+                                        onValueChange = { if (it.length <= 1000) forgotReason = it },
+                                        label = "Why do you need a new access token?",
+                                        singleLine = false,
+                                        modifier = Modifier.fillMaxWidth(),
+                                    )
+                                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                                        Checkbox(
+                                            checked = forgotConfirm,
+                                            onCheckedChange = { forgotConfirm = it },
+                                            colors = CheckboxDefaults.colors(checkedColor = DilarionRed),
+                                        )
+                                        Text(
+                                            "This is my account, and I'm asking my organization for a new recovery code.",
+                                            style = MaterialTheme.typography.bodySmall, color = TextSecondary,
+                                        )
+                                    }
+                                    forgot.error?.let { Text(it, color = DilarionRed, style = MaterialTheme.typography.bodySmall) }
+                                    ForgotButton(
+                                        "Send request for approval", forgot.loading,
+                                        enabled = forgotCode.length == 6 && forgotReason.trim().length >= 3 && forgotConfirm,
+                                    ) {
+                                        focusManager.clearFocus()
+                                        viewModel.requestAccessReset(forgotEmail, forgotCode, forgotReason, forgotConfirm)
+                                    }
+                                    TextButton(onClick = { viewModel.sendResetEmailCode(forgotEmail) }, enabled = !forgot.loading, modifier = Modifier.fillMaxWidth()) {
+                                        Text("Send a new code")
+                                    }
+                                    TextButton(onClick = { forgotCode = ""; viewModel.forgotChangeEmail() }, modifier = Modifier.fillMaxWidth()) {
+                                        Text("Use a different email")
+                                    }
+                                }
+                                ForgotStep.SENT -> {
+                                    forgot.message?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = TextPrimary) }
+                                    Text(
+                                        "Your organization's administrators have been notified. Once one of them approves, check your email for a new recovery code, then use it to set a new access token.",
+                                        style = MaterialTheme.typography.bodyMedium, color = TextSecondary,
+                                    )
+                                    ForgotButton("I have my new recovery code", false, enabled = true) {
+                                        forgotCode = ""; forgotReason = ""; forgotConfirm = false
+                                        viewModel.resetForgot(); view = AuthView.RECOVERY
+                                    }
+                                }
+                            }
+                            if (forgot.step != ForgotStep.SENT) {
+                                TextButton(onClick = { viewModel.resetForgot(); view = AuthView.RECOVERY }, modifier = Modifier.fillMaxWidth()) {
+                                    Text("I have my recovery code")
+                                }
+                            }
+                            TextButton(onClick = { viewModel.resetForgot(); view = AuthView.LOGIN }, modifier = Modifier.fillMaxWidth()) {
                                 Text("Back to sign in")
                             }
                         }
@@ -661,6 +758,23 @@ private fun RecoveryCodeRevealScreen(
  * Label-above, grey-filled input used across the sign-in flows — no outline,
  * rounded corners, brand-colour cursor and focus ring.
  */
+@Composable
+private fun ForgotButton(label: String, loading: Boolean, enabled: Boolean, onClick: () -> Unit) {
+    Button(
+        onClick = onClick,
+        enabled = enabled && !loading,
+        modifier = Modifier.fillMaxWidth().height(54.dp),
+        shape = RoundedCornerShape(50),
+        colors = ButtonDefaults.buttonColors(containerColor = DilarionRed),
+    ) {
+        if (loading) {
+            CircularProgressIndicator(modifier = Modifier.size(20.dp), color = SurfaceWhite, strokeWidth = 2.dp)
+        } else {
+            Text(label, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+        }
+    }
+}
+
 @Composable
 private fun AuthTextField(
     value: String,

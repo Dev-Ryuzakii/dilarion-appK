@@ -71,6 +71,15 @@ data class RecoveryCodeResetRequest(
     @SerializedName("new_token") val newToken: String,
 )
 
+data class ResetEmailCodeRequest(val email: String)
+
+data class AccessResetRequest(
+    val email: String,
+    val code: String,
+    val reason: String,
+    val confirm: Boolean,
+)
+
 data class RecoveryCodeResetResponse(
     val username: String,
     @SerializedName("recovery_code") val recoveryCode: String,

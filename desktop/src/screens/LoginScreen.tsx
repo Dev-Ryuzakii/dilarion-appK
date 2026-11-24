@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { login, requestPasswordReset, signUp, resetWithRecoveryCode, activateAccount, loginOrganization, loginRequestStatus, loginRequestMasterToken, loginRequestCancel, LoginApprovalRequired } from '../services/api';
+import { login, requestPasswordReset, sendResetEmailCode, signUp, resetWithRecoveryCode, activateAccount, loginOrganization, loginRequestStatus, loginRequestMasterToken, loginRequestCancel, LoginApprovalRequired } from '../services/api';
 import OnboardingScreen from './OnboardingScreen';
 import { userMessage } from '../services/errors';
 
@@ -44,9 +44,14 @@ export default function LoginScreen({ onLogin, onBack, initialView = 'login', no
   const [mtBusy, setMtBusy] = useState(false);
   const [now, setNow] = useState(Date.now());
 
-  const [forgotPhone, setForgotPhone] = useState('');
+  // Forgot access token without a recovery code: email → code + reason → sent.
+  const [forgotStep, setForgotStep] = useState<'email' | 'details' | 'sent'>('email');
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotCode, setForgotCode] = useState('');
   const [forgotReason, setForgotReason] = useState('');
+  const [forgotConfirm, setForgotConfirm] = useState(false);
   const [forgotLoading, setForgotLoading] = useState(false);
+  const [forgotError, setForgotError] = useState('');
   const [forgotMessage, setForgotMessage] = useState<string | null>(null);
 
   const [signupUsername, setSignupUsername] = useState('');
@@ -67,17 +72,39 @@ export default function LoginScreen({ onLogin, onBack, initialView = 'login', no
   const [revealedCode, setRevealedCode] = useState<{ username: string; code: string } | null>(null);
   const [savedAck, setSavedAck] = useState(false);
 
+  function resetForgot() {
+    setForgotStep('email'); setForgotCode(''); setForgotReason(''); setForgotConfirm(false);
+    setForgotError(''); setForgotMessage(null);
+  }
+
+  async function handleForgotSendCode(e?: React.FormEvent) {
+    e?.preventDefault();
+    if (!forgotEmail.trim()) return;
+    setForgotLoading(true);
+    setForgotError('');
+    try {
+      await sendResetEmailCode(forgotEmail.trim());
+      setForgotStep('details');
+      setForgotMessage(`If ${forgotEmail.trim()} is on a Dilarion account, we've emailed it a 6-digit code.`);
+    } catch (err) {
+      setForgotError(err instanceof Error ? err.message : "Couldn't send the code. Please try again.");
+    } finally {
+      setForgotLoading(false);
+    }
+  }
+
   async function handleForgotSubmit(e: React.FormEvent) {
     e.preventDefault();
     setForgotLoading(true);
-    setForgotMessage(null);
+    setForgotError('');
     try {
-      await requestPasswordReset(forgotPhone.trim(), forgotReason.trim() || undefined);
-      setForgotMessage('If that phone number is registered, an administrator has been notified and will reach out with a new access token.');
-      setForgotPhone('');
-      setForgotReason('');
-    } catch {
-      setForgotMessage('Something went wrong submitting the request — try again in a moment.');
+      const message = await requestPasswordReset({
+        email: forgotEmail.trim(), code: forgotCode.trim(), reason: forgotReason.trim(), confirm: forgotConfirm,
+      });
+      setForgotMessage(message);
+      setForgotStep('sent');
+    } catch (err) {
+      setForgotError(err instanceof Error ? err.message : "Couldn't send your request. Please try again.");
     } finally {
       setForgotLoading(false);
     }
@@ -353,41 +380,88 @@ export default function LoginScreen({ onLogin, onBack, initialView = 'login', no
         </div>
         <h1 style={s.title}>Dilarion</h1>
         <p style={s.sub}>
-          {view === 'forgot' ? 'Request a token reset'
+          {view === 'forgot' ? 'Get a new recovery code'
             : view === 'signup' ? 'Create your account'
             : view === 'recovery' ? 'Reset with your recovery code'
             : view === 'activate' ? 'Activate your account'
             : 'Sign in to continue'}
         </p>
 
-        {view === 'forgot' && (
-          <form onSubmit={handleForgotSubmit} style={s.form}>
+        {view === 'forgot' && forgotStep === 'email' && (
+          <form onSubmit={handleForgotSendCode} style={s.form}>
+            <p style={s.hint}>No recovery code? Enter the email on your account. We'll send you a code to confirm it's you.</p>
             <input
               style={s.input}
-              type="tel"
-              placeholder="Phone number (used at signup)"
-              value={forgotPhone}
-              onChange={e => setForgotPhone(e.target.value)}
+              type="email"
+              autoComplete="email"
+              placeholder="Email address on your account"
+              value={forgotEmail}
+              onChange={e => setForgotEmail(e.target.value)}
               required
             />
-            <input
-              style={s.input}
-              type="text"
-              placeholder="Reason (optional)"
-              value={forgotReason}
-              onChange={e => setForgotReason(e.target.value)}
-            />
-            {forgotMessage && <p style={{ ...s.error, color: 'var(--accent)' }}>{forgotMessage}</p>}
-            <button style={s.btn} type="submit" disabled={forgotLoading || !forgotPhone.trim()}>
-              {forgotLoading ? 'Submitting…' : 'Submit Request'}
+            {forgotError && <p style={s.error}>{forgotError}</p>}
+            <button style={s.btn} type="submit" disabled={forgotLoading || !forgotEmail.trim()}>
+              {forgotLoading ? 'Sending…' : 'Send code'}
             </button>
-            <button type="button" style={s.linkBtn} onClick={() => setView('recovery')}>
-              I have a recovery code instead
+            <button type="button" style={s.linkBtn} onClick={() => { resetForgot(); setView('recovery'); }}>
+              I have my recovery code
             </button>
-            <button type="button" style={s.linkBtn} onClick={() => { setView('login'); setForgotMessage(null); }}>
+            <button type="button" style={s.linkBtn} onClick={() => { resetForgot(); setView('login'); }}>
               Back to sign in
             </button>
           </form>
+        )}
+
+        {view === 'forgot' && forgotStep === 'details' && (
+          <form onSubmit={handleForgotSubmit} style={s.form}>
+            {forgotMessage && <p style={s.hint}>{forgotMessage}</p>}
+            <input
+              style={s.input}
+              type="text"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              placeholder="6-digit code"
+              value={forgotCode}
+              onChange={e => setForgotCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+              required
+            />
+            <textarea
+              style={{ ...s.input, minHeight: 84, resize: 'vertical', fontFamily: 'inherit' }}
+              placeholder="Why do you need a new access token? (for example: I lost my phone and my recovery code)"
+              value={forgotReason}
+              onChange={e => setForgotReason(e.target.value)}
+              maxLength={1000}
+              required
+            />
+            <label style={s.ackRow}>
+              <input type="checkbox" checked={forgotConfirm} onChange={e => setForgotConfirm(e.target.checked)} />
+              This is my account, and I'm asking my organization for a new recovery code.
+            </label>
+            {forgotError && <p style={s.error}>{forgotError}</p>}
+            <button style={s.btn} type="submit"
+              disabled={forgotLoading || forgotCode.length !== 6 || forgotReason.trim().length < 3 || !forgotConfirm}>
+              {forgotLoading ? 'Sending…' : 'Send request for approval'}
+            </button>
+            <button type="button" style={s.linkBtn} disabled={forgotLoading} onClick={() => handleForgotSendCode()}>
+              Send a new code
+            </button>
+            <button type="button" style={s.linkBtn} onClick={() => { setForgotStep('email'); setForgotError(''); }}>
+              Use a different email
+            </button>
+          </form>
+        )}
+
+        {view === 'forgot' && forgotStep === 'sent' && (
+          <div style={s.form}>
+            <p style={s.hint}>{forgotMessage}</p>
+            <p style={s.hint}>Your organization's administrators have been notified. Once one of them approves, check your email for a new recovery code, then use it here to set a new access token.</p>
+            <button type="button" style={s.btn} onClick={() => { resetForgot(); setView('recovery'); }}>
+              I have my new recovery code
+            </button>
+            <button type="button" style={s.linkBtn} onClick={() => { resetForgot(); setView('login'); }}>
+              Back to sign in
+            </button>
+          </div>
         )}
 
         {view === 'recovery' && (
@@ -420,6 +494,9 @@ export default function LoginScreen({ onLogin, onBack, initialView = 'login', no
             {recError && <p style={s.error}>{recError}</p>}
             <button style={s.btn} type="submit" disabled={recLoading}>
               {recLoading ? 'Resetting…' : 'Reset access'}
+            </button>
+            <button type="button" style={s.linkBtn} onClick={() => { setRecError(''); resetForgot(); setView('forgot'); }}>
+              Don't have your recovery code?
             </button>
             <button type="button" style={s.linkBtn} onClick={() => { setView('login'); setRecError(''); }}>
               Back to sign in
@@ -553,7 +630,7 @@ export default function LoginScreen({ onLogin, onBack, initialView = 'login', no
           <button type="button" style={{ ...s.linkBtn, border: 'none', padding: '4px 0' }} onClick={() => setView('signup')}>
             Don't have an account? Sign up
           </button>
-          <button type="button" style={{ ...s.linkBtn, border: 'none', padding: '4px 0' }} onClick={() => setView('forgot')}>
+          <button type="button" style={{ ...s.linkBtn, border: 'none', padding: '4px 0' }} onClick={() => setView('recovery')}>
             Forgot your access token?
           </button>
         </form>
@@ -742,5 +819,13 @@ const s: Record<string, React.CSSProperties> = {
     color: 'var(--text-muted)',
     width: '100%',
     marginBottom: '0.25rem',
+  },
+  hint: {
+    fontSize: '0.85rem',
+    color: 'var(--text-muted)',
+    lineHeight: 1.5,
+    margin: '0 0 0.25rem',
+    textAlign: 'left',
+    width: '100%',
   },
 };
