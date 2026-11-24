@@ -589,7 +589,7 @@ function BoardAiPrompt({ token, board, onClose, onError }: { token: string; boar
     <div style={{ position: 'absolute', bottom: 96, left: '50%', transform: 'translateX(-50%)', width: 420, background: '#1c1d21', border: '1px solid #2a2b30', borderRadius: 14, padding: 14, color: '#e4e4e7', zIndex: 6 }}>
       <div style={{ fontWeight: 700, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}><SparkleIcon size={14} color="var(--accent)" /> Ask Dilarion AI</div>
       {sent ? (
-        <div style={{ fontSize: '0.84rem', color: '#a1a1aa' }}>Agent sent. Review and approve its plan on the AI page; the notes land here once it runs.
+        <div style={{ fontSize: '0.84rem', color: '#a1a1aa' }}>Agent sent. Approve its plan in the pop-up (or turn on Full control on the AI page); the notes land here once it runs.
           <div style={{ marginTop: 10 }}><button style={{ ...ghostBtn, color: '#e4e4e7' }} onClick={onClose}>Close</button></div></div>
       ) : (<>
         <textarea autoFocus value={text} onChange={e => setText(e.target.value)} rows={3} placeholder="e.g. Add sticky notes for each step of our Q1 launch plan"

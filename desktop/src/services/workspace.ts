@@ -136,6 +136,9 @@ export const sendAiMessage = (token: string, id: number, text: string) =>
   call<{ user_message: AiMessage; assistant_message: AiMessage; agent_run: AgentRun | null; title: string }>(
     token, 'POST', `/ai/conversations/${id}/messages`, { text });
 
+export const getAiPreferences = (token: string) => call<{ auto_approve: boolean }>(token, 'GET', '/ai/preferences');
+export const setAiPreferences = (token: string, autoApprove: boolean) =>
+  call<{ auto_approve: boolean }>(token, 'PUT', '/ai/preferences', { auto_approve: autoApprove });
 export const listAgentRuns = (token: string) => call<{ runs: AgentRun[] }>(token, 'GET', '/ai/agents').then(r => r.runs);
 export const startAgent = (token: string, instruction: string, requireApproval = true, forUserId?: number) =>
   call<AgentRun>(token, 'POST', '/ai/agents', { instruction, require_approval: requireApproval, for_user_id: forUserId });

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
   AgentRun, AiConversation, AiMessage, AiStep, listConversations, createConversation, getConversation,
   deleteConversation, sendAiMessage, listAgentRuns, startAgent, approveAgent, cancelAgent, editAgentPlan, errText,
+  getAiPreferences, setAiPreferences,
 } from '../services/workspace';
 import { presenceService, WsMessage } from '../services/presence';
 import { AgentIcon, AlarmIcon, ArrowUpIcon, CalendarIcon, CheckIcon, CloseIcon, SparkleIcon, TaskIcon, WhiteboardIcon } from './Icons';
@@ -67,10 +68,12 @@ export default function AiPage({ token, username, onMeetingDraft }: { token: str
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
   const endRef = useRef<HTMLDivElement>(null);
+  const [autoApprove, setAutoApprove] = useState(false);
 
   useEffect(() => {
     listConversations(token).then(setConvs).catch(e => setError(errText(e)));
     listAgentRuns(token).then(setRuns).catch(() => {});
+    getAiPreferences(token).then(p => setAutoApprove(p.auto_approve)).catch(() => {});
   }, [token]);
 
   useEffect(() => {
@@ -238,6 +241,16 @@ export default function AiPage({ token, username, onMeetingDraft }: { token: str
           </div>
           <button onClick={() => setAgentMode(true)} style={{ border: 'none', background: 'var(--accent)', color: '#fff', borderRadius: 999, padding: '7px 12px', fontSize: '0.76rem', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>+ New agent</button>
         </div>
+        <label title="Agents act straight away without asking first. They can still only do what your role allows." style={{
+          display: 'flex', alignItems: 'center', gap: 10, margin: '0 12px 12px', padding: '10px 12px', borderRadius: 12, cursor: 'pointer',
+          border: `1px solid ${autoApprove ? 'var(--accent)' : 'var(--border-color)'}`, background: autoApprove ? 'color-mix(in srgb, var(--accent) 8%, transparent)' : 'var(--bg-base)',
+        }}>
+          <span style={{ flex: 1, minWidth: 0 }}>
+            <span style={{ display: 'block', fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-primary)' }}>Full control</span>
+            <span style={{ display: 'block', fontSize: '0.72rem', color: 'var(--text-muted)' }}>{autoApprove ? 'Agents run without asking' : 'Agents ask before they act'}</span>
+          </span>
+          <Switch on={autoApprove} onChange={v => { setAutoApprove(v); setAiPreferences(token, v).catch(e => { setAutoApprove(!v); setError(errText(e)); }); }} />
+        </label>
         <div style={{ flex: 1, overflowY: 'auto', padding: '0 12px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
           {runs.length === 0 && (
             <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', padding: '20px 6px', lineHeight: 1.5 }}>
@@ -301,6 +314,112 @@ function RunCard({ token, run, onChange, onError, onMeetingDraft, compact }: { t
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+function Switch({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button type="button" role="switch" aria-checked={on} onClick={e => { e.preventDefault(); onChange(!on); }} style={{
+      width: 36, height: 20, borderRadius: 999, border: 'none', padding: 2, cursor: 'pointer', flexShrink: 0,
+      background: on ? 'var(--accent)' : 'var(--border-color)', transition: 'background .15s',
+    }}>
+      <span style={{ display: 'block', width: 16, height: 16, borderRadius: '50%', background: '#fff', transform: on ? 'translateX(16px)' : 'none', transition: 'transform .15s' }} />
+    </button>
+  );
+}
+
+/**
+ * Always mounted (outside the AI page): when an agent is waiting for approval,
+ * a card pops up wherever the user is, so they can approve on the spot.
+ */
+export function AgentApprovalPopup({ token, hidden, onOpen }: { token: string; hidden: boolean; onOpen: () => void }) {
+  const [queue, setQueue] = useState<AgentRun[]>([]);
+  const [always, setAlways] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    const onMsg = (m: WsMessage) => {
+      if (m.type !== 'ai_agent_progress' && m.type !== 'ai_agent_finished') return;
+      const run = m.data as unknown as AgentRun;
+      setQueue(prev => {
+        const rest = prev.filter(r => r.id !== run.id);
+        if (run.status === 'awaiting_approval') return [...rest, run];
+        // Keep the card briefly to show the outcome of a run approved from here.
+        if (prev.some(r => r.id === run.id) && (run.status === 'running' || run.status === 'completed' || run.status === 'failed')) {
+          if (run.status !== 'running') setTimeout(() => setQueue(q => q.filter(r => r.id !== run.id)), 4000);
+          return prev.map(r => (r.id === run.id ? run : r));
+        }
+        return rest;
+      });
+    };
+    presenceService.addListener(onMsg);
+    return () => presenceService.removeListener(onMsg);
+  }, []);
+
+  const run = queue[0];
+  if (!run || hidden) return null;
+  const waiting = run.status === 'awaiting_approval';
+  const st = STATUS_STYLE[run.status];
+  const drop = () => setQueue(q => q.filter(r => r.id !== run.id));
+
+  async function approve() {
+    setBusy(true); setError('');
+    try {
+      if (always) await setAiPreferences(token, true);
+      const r = await approveAgent(token, run.id);
+      setQueue(q => q.map(x => (x.id === r.id ? r : x)));
+    } catch (e) { setError(errText(e)); } finally { setBusy(false); }
+  }
+  async function cancel() {
+    setBusy(true); setError('');
+    try { await cancelAgent(token, run.id); drop(); } catch (e) { setError(errText(e)); } finally { setBusy(false); }
+  }
+
+  const steps = run.steps?.length ? run.steps : run.plan;
+  return (
+    <div role="dialog" aria-label="Agent needs approval" style={{
+      position: 'fixed', right: 18, bottom: 18, zIndex: 955, width: 360, maxHeight: '70vh', display: 'flex', flexDirection: 'column',
+      background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 16, boxShadow: '0 16px 40px rgba(0,0,0,0.25)', overflow: 'hidden',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '14px 16px 10px' }}>
+        <span style={aiBadge(28)}><SparkleIcon size={14} /></span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: '0.72rem', fontWeight: 700, color: st.color }}>{waiting ? 'Agent needs your approval' : st.label}</div>
+          <div style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{run.title || run.instruction}</div>
+        </div>
+        <button title="Hide" onClick={drop} style={{ border: 'none', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer', display: 'grid' }}><CloseIcon size={14} /></button>
+      </div>
+      <div style={{ overflowY: 'auto', padding: '0 16px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {steps.map((s, i) => (
+          <div key={i} style={{ display: 'flex', gap: 8, fontSize: '0.78rem', padding: '7px 9px', borderRadius: 9, background: 'var(--bg-base)', border: '1px solid var(--border-color)' }}>
+            <span style={{ width: 16, flexShrink: 0, display: 'grid', placeItems: 'center', color: s.status === 'done' ? '#16a34a' : s.status === 'failed' ? '#dc2626' : 'var(--text-muted)' }}>
+              {s.status === 'done' ? <CheckIcon size={12} /> : s.status === 'failed' ? <CloseIcon size={12} /> : i + 1}
+            </span>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontWeight: 650, color: 'var(--text-primary)' }}>{TOOL_LABEL[s.tool] ?? s.tool}</div>
+              <div style={{ color: 'var(--text-muted)', wordBreak: 'break-word' }}>{describeArgs(s)}</div>
+              {s.error && <div style={{ color: '#dc2626' }}>{s.error}</div>}
+            </div>
+          </div>
+        ))}
+        {steps.length === 0 && <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>The agent didn't find anything it can do for this.</div>}
+      </div>
+      {error && <div style={{ color: '#dc2626', fontSize: '0.78rem', padding: '8px 16px 0' }}>{error}</div>}
+      {waiting ? (
+        <div style={{ padding: '12px 16px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.78rem', color: 'var(--text-secondary)', cursor: 'pointer' }}>
+            <input type="checkbox" checked={always} onChange={e => setAlways(e.target.checked)} style={{ accentColor: 'var(--accent)' }} />
+            Always allow: give agents full control from now on
+          </label>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {steps.length > 0 && <button disabled={busy} onClick={approve} style={{ flex: 1, border: 'none', background: 'var(--accent)', color: '#fff', borderRadius: 9, padding: '9px 0', fontSize: '0.82rem', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>{busy ? 'Starting…' : 'Approve & run'}</button>}
+            <button disabled={busy} onClick={cancel} style={{ border: '1px solid var(--border-color)', background: 'transparent', color: 'var(--text-secondary)', borderRadius: 9, padding: '9px 14px', fontSize: '0.82rem', fontWeight: 650, cursor: 'pointer', fontFamily: 'inherit' }}>Cancel</button>
+            <button onClick={() => { onOpen(); drop(); }} style={{ border: '1px solid var(--border-color)', background: 'transparent', color: 'var(--text-secondary)', borderRadius: 9, padding: '9px 12px', fontSize: '0.82rem', fontWeight: 650, cursor: 'pointer', fontFamily: 'inherit' }}>Review</button>
+          </div>
+        </div>
+      ) : <div style={{ height: 14 }} />}
     </div>
   );
 }

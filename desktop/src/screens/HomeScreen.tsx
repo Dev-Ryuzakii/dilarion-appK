@@ -99,7 +99,7 @@ import WaitingForHostScreen from '../components/WaitingForHostScreen';
 import { fmtRange } from '../components/MeetingCard';
 import CalendarView from '../components/CalendarView';
 import TasksPanel from '../components/TasksPanel';
-import AiPage, { CopilotScheduleDraft } from '../components/AiPage';
+import AiPage, { AgentApprovalPopup, CopilotScheduleDraft } from '../components/AiPage';
 import RemindersPanel, { ReminderAlerts } from '../components/RemindersPanel';
 import WhiteboardPage from '../components/WhiteboardPage';
 import {
@@ -5013,6 +5013,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
       )}
 
       <ReminderAlerts token={token} onOpen={() => switchTab('reminders')} />
+      <AgentApprovalPopup token={token} hidden={activeTab === 'ai'} onOpen={() => switchTab('ai')} />
     </div>
   );
 }
