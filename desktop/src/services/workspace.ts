@@ -92,7 +92,15 @@ export interface Board extends BoardSummary {
 }
 export type BoardOp = { op: 'upsert'; id: string; element: Partial<BoardElement> } | { op: 'delete'; id: string };
 
-export const listBoards = (token: string) => call<{ org: BoardSummary | null; groups: BoardSummary[] }>(token, 'GET', '/whiteboards');
+export interface BoardList {
+  org: BoardSummary | null;
+  groups: BoardSummary[];
+  organization_id: number;
+  /** Only for Dilarion admins: every organization, for the switcher. */
+  organizations: { id: number; name: string }[] | null;
+}
+export const listBoards = (token: string, orgId?: number | null) =>
+  call<BoardList>(token, 'GET', `/whiteboards${orgId ? `?org_id=${orgId}` : ''}`);
 export const getBoard = (token: string, id: number) => call<Board>(token, 'GET', `/whiteboards/${id}`);
 export const createGroupBoard = (token: string, groupId: number, title: string) =>
   call<Board>(token, 'POST', `/groups/${groupId}/whiteboards`, { title });

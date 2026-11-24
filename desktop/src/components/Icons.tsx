@@ -172,3 +172,61 @@ export function CheckIcon({ size = 14, color = 'currentColor' }: { size?: number
     </svg>
   );
 }
+
+type IconProps = { size?: number; color?: string };
+const stroke = (size: number, color: string, w = 1.8) => ({
+  width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: color,
+  strokeWidth: w, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const,
+});
+
+export function AlarmIcon({ size = 18, color = 'currentColor' }: IconProps) {
+  return <svg {...stroke(size, color)}><circle cx="12" cy="13" r="8" /><path d="M12 9v4l2 2" /><path d="M5 3 2 6" /><path d="m22 6-3-3" /></svg>;
+}
+export function RepeatIcon({ size = 14, color = 'currentColor' }: IconProps) {
+  return <svg {...stroke(size, color)}><path d="m17 2 4 4-4 4" /><path d="M3 11v-1a4 4 0 0 1 4-4h14" /><path d="m7 22-4-4 4-4" /><path d="M21 13v1a4 4 0 0 1-4 4H3" /></svg>;
+}
+export function TaskIcon({ size = 18, color = 'currentColor' }: IconProps) {
+  return <svg {...stroke(size, color)}><path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></svg>;
+}
+export function WhiteboardIcon({ size = 18, color = 'currentColor' }: IconProps) {
+  return <svg {...stroke(size, color)}><rect x="3" y="4" width="18" height="13" rx="2" /><path d="M7 13c2-3 3-1 5-4s3 0 5-2" /><path d="M12 17v3" /><path d="M8 21h8" /></svg>;
+}
+export function CalendarIcon({ size = 18, color = 'currentColor' }: IconProps) {
+  return <svg {...stroke(size, color)}><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M3 10h18M8 3v4M16 3v4" /></svg>;
+}
+export function AgentIcon({ size = 16, color = 'currentColor' }: IconProps) {
+  return <svg {...stroke(size, color)}><rect x="4" y="8" width="16" height="12" rx="3" /><path d="M12 8V4" /><circle cx="12" cy="3" r="1" /><path d="M9 13v1M15 13v1" /><path d="M2 13v2M22 13v2" /></svg>;
+}
+export function GlobeIcon({ size = 14, color = 'currentColor' }: IconProps) {
+  return <svg {...stroke(size, color)}><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg>;
+}
+export function TrashIcon({ size = 16, color = 'currentColor' }: IconProps) {
+  return <svg {...stroke(size, color)}><path d="M3 6h18" /><path d="M8 6V4h8v2" /><path d="M19 6l-1 14H6L5 6" /></svg>;
+}
+export function StarIcon({ size = 15, color = 'currentColor', filled = false }: IconProps & { filled?: boolean }) {
+  return <svg {...stroke(size, color)} fill={filled ? color : 'none'}><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1 6.2L12 17.3 6.5 20.2l1-6.2L3 9.6l6.2-.9z" /></svg>;
+}
+export function MoreIcon({ size = 18, color = 'currentColor' }: IconProps) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill={color}><circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" /></svg>;
+}
+export function ExpandIcon({ size = 16, color = 'currentColor' }: IconProps) {
+  return <svg {...stroke(size, color)}><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" /></svg>;
+}
+export function ShrinkIcon({ size = 16, color = 'currentColor' }: IconProps) {
+  return <svg {...stroke(size, color)}><path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7" /></svg>;
+}
+export function MenuIcon({ size = 16, color = 'currentColor' }: IconProps) {
+  return <svg {...stroke(size, color)}><path d="M4 7h16M4 12h16M4 17h16" /></svg>;
+}
+export function UndoIcon({ size = 15, color = 'currentColor' }: IconProps) {
+  return <svg {...stroke(size, color)}><path d="M9 14 4 9l5-5" /><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" /></svg>;
+}
+export function RedoIcon({ size = 15, color = 'currentColor' }: IconProps) {
+  return <svg {...stroke(size, color)}><path d="m15 14 5-5-5-5" /><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13" /></svg>;
+}
+export function FitIcon({ size = 15, color = 'currentColor' }: IconProps) {
+  return <svg {...stroke(size, color)}><path d="M3 8V5a2 2 0 0 1 2-2h3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M8 21H5a2 2 0 0 1-2-2v-3" /></svg>;
+}
+export function ArrowUpIcon({ size = 16, color = 'currentColor' }: IconProps) {
+  return <svg {...stroke(size, color, 2.2)}><path d="M12 19V5M5 12l7-7 7 7" /></svg>;
+}

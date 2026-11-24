@@ -4,6 +4,7 @@ import {
   completeReminder, dismissReminder, deleteReminder, errText,
 } from '../services/workspace';
 import { presenceService, WsMessage } from '../services/presence';
+import { AlarmIcon, CheckIcon, RepeatIcon, SparkleIcon } from './Icons';
 
 /** Personal alarms: "remind me to do X at Y". Separate from Calendar and Tasks. */
 
@@ -133,7 +134,7 @@ export default function RemindersPanel({ token }: { token: string }) {
           <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Loading…</div>
         ) : shown.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '60px 20px', color: 'var(--text-muted)' }}>
-            <div style={{ fontSize: '2rem', marginBottom: 8 }}>⏰</div>
+            <div style={{ display: 'inline-grid', placeItems: 'center', width: 56, height: 56, borderRadius: 16, marginBottom: 10, background: 'color-mix(in srgb, var(--accent) 12%, transparent)', color: 'var(--accent)' }}><AlarmIcon size={26} /></div>
             <div style={{ fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 4 }}>
               {filter === 'done' ? 'Nothing finished yet' : 'No reminders'}
             </div>
@@ -156,16 +157,16 @@ export default function RemindersPanel({ token }: { token: string }) {
                     <button title={finished ? 'Done' : 'Mark done'} onClick={() => !finished && act(() => completeReminder(token, r.id))} style={{
                       width: 22, height: 22, borderRadius: '50%', flexShrink: 0, marginTop: 1, cursor: finished ? 'default' : 'pointer',
                       border: `2px solid ${finished ? '#16a34a' : 'var(--border-color)'}`, background: r.status === 'done' ? '#16a34a' : 'transparent',
-                      color: '#fff', fontSize: 12, lineHeight: '16px', padding: 0,
-                    }}>{r.status === 'done' ? '✓' : ''}</button>
+                      color: '#fff', padding: 0, display: 'grid', placeItems: 'center',
+                    }}>{r.status === 'done' && <CheckIcon size={12} />}</button>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontWeight: 650, color: 'var(--text-primary)', fontSize: '0.92rem', textDecoration: r.status === 'done' ? 'line-through' : 'none' }}>{r.title}</div>
                       {r.note && <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: 3, whiteSpace: 'pre-wrap' }}>{r.note}</div>}
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 6, fontSize: '0.74rem', color: 'var(--text-muted)' }}>
                         <span>{at.toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}</span>
-                        {r.recurrence && <span>· {RECURRENCE_LABEL[r.recurrence]}</span>}
+                        {r.recurrence && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>· <RepeatIcon size={12} /> {RECURRENCE_LABEL[r.recurrence]}</span>}
                         {r.snooze_count > 0 && <span>· snoozed {r.snooze_count}×</span>}
-                        {r.source === 'ai_agent' && <span style={{ color: 'var(--accent)' }}>· set by Dilarion AI</span>}
+                        {r.source === 'ai_agent' && <span style={{ color: 'var(--accent)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>· <SparkleIcon size={11} /> set by Dilarion AI</span>}
                       </div>
                     </div>
                     {!finished && (
@@ -255,7 +256,7 @@ export function ReminderAlerts({ token, onOpen }: { token: string; onOpen: () =>
     <div style={{ position: 'fixed', top: 18, right: 18, zIndex: 960, display: 'flex', flexDirection: 'column', gap: 10, width: 320 }}>
       {due.map(r => (
         <div key={r.id} role="alert" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderLeft: '4px solid var(--accent)', borderRadius: 14, padding: '14px 16px', boxShadow: '0 12px 32px rgba(0,0,0,0.22)' }}>
-          <div style={{ fontSize: '0.7rem', fontWeight: 750, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--accent)' }}>⏰ Reminder</div>
+          <div style={{ fontSize: '0.7rem', fontWeight: 750, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--accent)', display: 'flex', alignItems: 'center', gap: 6 }}><AlarmIcon size={14} /> Reminder</div>
           <div style={{ fontWeight: 700, color: 'var(--text-primary)', margin: '4px 0 2px' }}>{r.title}</div>
           {r.note && <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{r.note}</div>}
           <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>

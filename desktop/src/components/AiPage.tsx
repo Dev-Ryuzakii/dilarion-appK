@@ -4,6 +4,7 @@ import {
   deleteConversation, sendAiMessage, listAgentRuns, startAgent, approveAgent, cancelAgent, editAgentPlan, errText,
 } from '../services/workspace';
 import { presenceService, WsMessage } from '../services/presence';
+import { AgentIcon, AlarmIcon, ArrowUpIcon, CalendarIcon, CheckIcon, CloseIcon, SparkleIcon, TaskIcon, WhiteboardIcon } from './Icons';
 
 /**
  * Dilarion AI: its own page (replaces the floating copilot widget).
@@ -35,10 +36,10 @@ function draftFromStep(s: AiStep): CopilotScheduleDraft | null {
 }
 
 const SUGGESTIONS = [
-  { icon: '⏰', title: 'Set a reminder', text: 'Remind me to send the weekly report every Friday at 4pm' },
-  { icon: '☑', title: 'Assign a task', text: 'Create a task for the ops team to review the vendor contracts by Thursday' },
-  { icon: '✎', title: 'Fill a whiteboard', text: 'Add sticky notes for each phase of our product launch to the org whiteboard' },
-  { icon: '📅', title: 'Draft a meeting', text: 'Draft a 30 minute sync with the design team tomorrow at 10am' },
+  { icon: <AlarmIcon />, title: 'Set a reminder', text: 'Remind me to send the weekly report every Friday at 4pm' },
+  { icon: <TaskIcon />, title: 'Assign a task', text: 'Create a task for the ops team to review the vendor contracts by Thursday' },
+  { icon: <WhiteboardIcon />, title: 'Fill a whiteboard', text: 'Add sticky notes for each phase of our product launch to the org whiteboard' },
+  { icon: <CalendarIcon />, title: 'Draft a meeting', text: 'Draft a 30 minute sync with the design team tomorrow at 10am' },
 ];
 
 const TOOL_LABEL: Record<string, string> = {
@@ -47,9 +48,9 @@ const TOOL_LABEL: Record<string, string> = {
 };
 
 const STATUS_STYLE: Record<AgentRun['status'], { label: string; color: string }> = {
-  planning: { label: 'Planning…', color: '#a855f7' },
+  planning: { label: 'Planning…', color: 'var(--accent)' },
   awaiting_approval: { label: 'Needs your approval', color: '#f59e0b' },
-  running: { label: 'Working…', color: '#3b82f6' },
+  running: { label: 'Working…', color: 'var(--accent)' },
   completed: { label: 'Done', color: '#16a34a' },
   failed: { label: 'Failed', color: '#dc2626' },
   cancelled: { label: 'Cancelled', color: '#71717a' },
@@ -132,11 +133,11 @@ export default function AiPage({ token, username, onMeetingDraft }: { token: str
       <div style={{ width: 240, flexShrink: 0, borderRight: '1px solid var(--border-color)', background: 'var(--bg-panel)', display: 'flex', flexDirection: 'column' }}>
         <div style={{ padding: '22px 14px 10px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
-            <span style={aiBadge(26)}>✦</span>
+            <span style={aiBadge(26)}><SparkleIcon size={13} /></span>
             <span style={{ fontSize: '1.15rem', fontWeight: 800, letterSpacing: '-0.02em', color: 'var(--text-primary)' }}>Dilarion AI</span>
           </div>
           <button onClick={() => { setActiveId(null); setAgentMode(false); }} style={{ width: '100%', border: '1px solid var(--border-color)', background: 'var(--bg-base)', color: 'var(--text-primary)', borderRadius: 10, padding: '9px 12px', fontSize: '0.84rem', fontWeight: 650, cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}>
-            ＋ New chat
+            + New chat
           </button>
           <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search chats" style={{ width: '100%', boxSizing: 'border-box', marginTop: 8, border: '1px solid var(--border-color)', background: 'transparent', color: 'var(--text-primary)', borderRadius: 10, padding: '8px 12px', fontSize: '0.8rem', fontFamily: 'inherit', outline: 'none' }} />
         </div>
@@ -160,7 +161,7 @@ export default function AiPage({ token, username, onMeetingDraft }: { token: str
           <div style={{ maxWidth: 760, margin: '0 auto', padding: '32px 28px 16px' }}>
             {messages.length === 0 && !sending ? (
               <div style={{ paddingTop: '8vh' }}>
-                <span style={aiBadge(48)}>✦</span>
+                <span style={aiBadge(48)}><SparkleIcon size={24} /></span>
                 <h1 style={{ fontSize: '2rem', fontWeight: 800, letterSpacing: '-0.03em', margin: '18px 0 6px', color: 'var(--text-primary)' }}>Hi {firstName}, what can I do for you?</h1>
                 <div style={{ color: 'var(--text-muted)', fontSize: '0.92rem', marginBottom: 26 }}>
                   Ask anything, or send an agent to set reminders, assign tasks, fill whiteboards and draft meetings.
@@ -168,7 +169,7 @@ export default function AiPage({ token, username, onMeetingDraft }: { token: str
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
                   {SUGGESTIONS.map(s => (
                     <button key={s.title} onClick={() => { setInput(s.text); }} style={{ textAlign: 'left', border: '1px solid var(--border-color)', background: 'var(--bg-panel)', borderRadius: 14, padding: '14px 16px', cursor: 'pointer', fontFamily: 'inherit' }}>
-                      <div style={{ fontSize: 18, marginBottom: 6 }}>{s.icon}</div>
+                      <div style={{ width: 34, height: 34, borderRadius: 10, display: 'grid', placeItems: 'center', marginBottom: 10, background: 'color-mix(in srgb, var(--accent) 12%, transparent)', color: 'var(--accent)' }}>{s.icon}</div>
                       <div style={{ fontWeight: 700, fontSize: '0.86rem', color: 'var(--text-primary)', marginBottom: 3 }}>{s.title}</div>
                       <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', lineHeight: 1.4 }}>{s.text}</div>
                     </button>
@@ -179,7 +180,7 @@ export default function AiPage({ token, username, onMeetingDraft }: { token: str
               <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
                 {messages.map(m => (
                   <div key={m.id} style={{ display: 'flex', gap: 12, justifyContent: m.role === 'user' ? 'flex-end' : 'flex-start' }}>
-                    {m.role === 'assistant' && <span style={aiBadge(28)}>✦</span>}
+                    {m.role === 'assistant' && <span style={aiBadge(28)}><SparkleIcon size={14} /></span>}
                     <div style={{ maxWidth: '78%' }}>
                       <div style={{
                         padding: m.role === 'user' ? '10px 14px' : '4px 0', borderRadius: 16, whiteSpace: 'pre-wrap', fontSize: '0.92rem', lineHeight: 1.55,
@@ -194,7 +195,7 @@ export default function AiPage({ token, username, onMeetingDraft }: { token: str
                   </div>
                 ))}
                 {sending && (
-                  <div style={{ display: 'flex', gap: 12 }}><span style={aiBadge(28)}>✦</span><span style={{ color: 'var(--text-muted)', fontSize: '0.88rem', paddingTop: 5 }}>Thinking…</span></div>
+                  <div style={{ display: 'flex', gap: 12 }}><span style={aiBadge(28)}><SparkleIcon size={14} /></span><span style={{ color: 'var(--text-muted)', fontSize: '0.88rem', paddingTop: 5 }}>Thinking…</span></div>
                 )}
                 <div ref={endRef} />
               </div>
@@ -205,20 +206,21 @@ export default function AiPage({ token, username, onMeetingDraft }: { token: str
         {/* Composer */}
         <div style={{ maxWidth: 760, width: '100%', margin: '0 auto', padding: '0 28px 22px', boxSizing: 'border-box' }}>
           {error && <div style={{ color: '#dc2626', fontSize: '0.8rem', marginBottom: 8 }}>{error}</div>}
-          <div style={{ border: `1px solid ${agentMode ? '#8b5cf6' : 'var(--border-color)'}`, background: 'var(--bg-panel)', borderRadius: 18, padding: '12px 14px 10px', boxShadow: '0 8px 24px rgba(0,0,0,0.06)' }}>
+          <div style={{ border: `1px solid ${agentMode ? 'var(--accent)' : 'var(--border-color)'}`, background: 'var(--bg-panel)', borderRadius: 18, padding: '12px 14px 10px', boxShadow: '0 8px 24px rgba(0,0,0,0.06)' }}>
             <textarea value={input} onChange={e => setInput(e.target.value)} rows={2}
               onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
               placeholder={agentMode ? 'Describe the job for the agent…' : 'Ask Dilarion AI anything…'}
               style={{ width: '100%', border: 'none', outline: 'none', background: 'transparent', resize: 'none', color: 'var(--text-primary)', fontSize: '0.92rem', fontFamily: 'inherit' }} />
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 6 }}>
               <button onClick={() => setAgentMode(a => !a)} title="Send this as a job for an AI agent" style={{
-                border: `1px solid ${agentMode ? '#8b5cf6' : 'var(--border-color)'}`, background: agentMode ? 'rgba(139,92,246,0.12)' : 'transparent',
-                color: agentMode ? '#8b5cf6' : 'var(--text-secondary)', borderRadius: 999, padding: '5px 12px', fontSize: '0.76rem', fontWeight: 650, cursor: 'pointer', fontFamily: 'inherit',
-              }}>🤖 {agentMode ? 'Agent mode on' : 'Send as agent'}</button>
+                border: `1px solid ${agentMode ? 'var(--accent)' : 'var(--border-color)'}`, background: agentMode ? 'color-mix(in srgb, var(--accent) 12%, transparent)' : 'transparent',
+                color: agentMode ? 'var(--accent)' : 'var(--text-secondary)', borderRadius: 999, padding: '5px 12px', fontSize: '0.76rem', fontWeight: 650, cursor: 'pointer', fontFamily: 'inherit',
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              }}><AgentIcon size={14} /> {agentMode ? 'Agent mode on' : 'Send as agent'}</button>
               <button onClick={() => send()} disabled={!input.trim() || sending} style={{
                 width: 34, height: 34, borderRadius: '50%', border: 'none', cursor: input.trim() ? 'pointer' : 'default',
-                background: input.trim() ? 'var(--accent)' : 'var(--border-color)', color: '#fff', fontSize: 16,
-              }}>↑</button>
+                background: input.trim() ? 'var(--accent)' : 'var(--border-color)', color: '#fff', display: 'grid', placeItems: 'center',
+              }}><ArrowUpIcon size={16} /></button>
             </div>
           </div>
           <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textAlign: 'center', marginTop: 8 }}>
@@ -234,7 +236,7 @@ export default function AiPage({ token, username, onMeetingDraft }: { token: str
             <div style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--text-primary)' }}>Agents</div>
             <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>{pending ? `${pending} waiting for approval` : 'Jobs you sent out'}</div>
           </div>
-          <button onClick={() => setAgentMode(true)} style={{ border: 'none', background: 'linear-gradient(135deg,#ec4899,#8b5cf6 55%,#3b82f6)', color: '#fff', borderRadius: 999, padding: '7px 12px', fontSize: '0.76rem', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>＋ New agent</button>
+          <button onClick={() => setAgentMode(true)} style={{ border: 'none', background: 'var(--accent)', color: '#fff', borderRadius: 999, padding: '7px 12px', fontSize: '0.76rem', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>+ New agent</button>
         </div>
         <div style={{ flex: 1, overflowY: 'auto', padding: '0 12px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
           {runs.length === 0 && (
@@ -272,7 +274,7 @@ function RunCard({ token, run, onChange, onError, onMeetingDraft, compact }: { t
             {steps.map((s, i) => (
               <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: '0.78rem', padding: '7px 9px', borderRadius: 9, background: 'var(--bg-panel)', border: '1px solid var(--border-color)' }}>
                 <span style={{ flexShrink: 0, width: 16, textAlign: 'center', color: s.status === 'done' ? '#16a34a' : s.status === 'failed' ? '#dc2626' : 'var(--text-muted)' }}>
-                  {s.status === 'done' ? '✓' : s.status === 'failed' ? '✕' : i + 1}
+                  {s.status === 'done' ? <CheckIcon size={12} /> : s.status === 'failed' ? <CloseIcon size={12} /> : i + 1}
                 </span>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontWeight: 650, color: 'var(--text-primary)' }}>{TOOL_LABEL[s.tool] ?? s.tool}</div>
@@ -319,6 +321,6 @@ function describeArgs(s: AiStep): string {
 function aiBadge(size: number): React.CSSProperties {
   return {
     width: size, height: size, borderRadius: size * 0.3, flexShrink: 0, display: 'inline-grid', placeItems: 'center',
-    background: 'linear-gradient(135deg,#ec4899,#8b5cf6 55%,#3b82f6)', color: '#fff', fontSize: size * 0.5,
+    background: 'var(--accent)', color: '#fff',
   };
 }

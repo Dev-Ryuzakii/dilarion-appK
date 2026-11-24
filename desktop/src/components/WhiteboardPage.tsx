@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Board, BoardElement, BoardOp, BoardSummary, ElementType, listBoards, getBoard, createGroupBoard,
+  Board, BoardElement, BoardList, BoardOp, BoardSummary, ElementType, listBoards, getBoard, createGroupBoard,
   updateBoard, deleteBoard, sendBoardOps, favoriteBoard, sendBoardCursor, startAgent, errText,
 } from '../services/workspace';
 import { Group } from '../services/api';
 import { presenceService, WsMessage } from '../services/presence';
+import { CheckIcon, ExpandIcon, FitIcon, GlobeIcon, LockIcon, MenuIcon, MoreIcon, RedoIcon, ShrinkIcon, SparkleIcon, StarIcon, TaskIcon, TrashIcon, UndoIcon, UsersIcon, WhiteboardIcon } from './Icons';
 
 /**
  * Whiteboard page: the organization board everyone sees, plus group boards.
@@ -22,18 +23,20 @@ const SHORTCUTS: Record<string, Tool> = { v: 'select', h: 'hand', t: 'task', d: 
 const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
 
 export default function WhiteboardPage({ token, groups }: { token: string; groups: Group[] }) {
-  const [boards, setBoards] = useState<{ org: BoardSummary | null; groups: BoardSummary[] }>({ org: null, groups: [] });
+  const [boards, setBoards] = useState<BoardList>({ org: null, groups: [], organization_id: 0, organizations: null });
+  const [orgId, setOrgId] = useState<number | null>(null);
   const [activeId, setActiveId] = useState<number | null>(null);
   const [error, setError] = useState('');
   const [showNew, setShowNew] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
 
   const reload = useCallback(() => {
-    listBoards(token).then(b => {
+    listBoards(token, orgId).then(b => {
       setBoards(b);
-      setActiveId(prev => prev ?? b.org?.id ?? b.groups[0]?.id ?? null);
+      const ids = [b.org?.id, ...b.groups.map(g => g.id)];
+      setActiveId(prev => (prev && ids.includes(prev) ? prev : b.org?.id ?? b.groups[0]?.id ?? null));
     }).catch(e => setError(errText(e)));
-  }, [token]);
+  }, [token, orgId]);
   useEffect(() => { reload(); }, [reload]);
 
   useEffect(() => {
@@ -57,12 +60,12 @@ export default function WhiteboardPage({ token, groups }: { token: string; group
       background: activeId === b.id ? 'var(--item-active-bg)' : 'transparent', color: 'var(--text-primary)',
     }}>
       <span style={{ width: 26, height: 26, borderRadius: 8, display: 'grid', placeItems: 'center', flexShrink: 0,
-        background: b.scope === 'org' ? 'var(--accent)' : '#f59e0b', color: '#fff', fontSize: 13 }}>{b.scope === 'org' ? '◎' : '✎'}</span>
+        background: b.scope === 'org' ? 'var(--accent)' : '#f59e0b', color: '#fff' }}>{b.scope === 'org' ? <GlobeIcon size={14} /> : <WhiteboardIcon size={14} />}</span>
       <span style={{ minWidth: 0, flex: 1 }}>
         <span style={{ display: 'block', fontSize: '0.84rem', fontWeight: 650, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
         {sub && <span style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-muted)' }}>{sub}</span>}
       </span>
-      {b.favorite && <span style={{ color: '#f59e0b', fontSize: 12 }}>★</span>}
+      {b.favorite && <StarIcon size={13} color="#f59e0b" filled />}
     </button>
   );
 
@@ -74,6 +77,14 @@ export default function WhiteboardPage({ token, groups }: { token: string; group
             <h2 style={{ margin: 0, fontSize: '1.3rem', fontWeight: 800, letterSpacing: '-0.03em', color: 'var(--text-primary)' }}>Whiteboards</h2>
             <button title="New group whiteboard" onClick={() => setShowNew(true)} style={{ border: 'none', background: 'var(--accent)', color: '#fff', borderRadius: 999, width: 28, height: 28, cursor: 'pointer', fontSize: 16 }}>+</button>
           </div>
+          {boards.organizations && boards.organizations.length > 0 && (
+            <div style={{ padding: '0 16px 8px' }}>
+              <select aria-label="Organization" value={boards.organization_id} onChange={e => { setActiveId(null); setOrgId(Number(e.target.value)); }}
+                style={{ width: '100%', border: '1px solid var(--border-color)', background: 'var(--bg-base)', color: 'var(--text-primary)', borderRadius: 10, padding: '8px 10px', fontSize: '0.8rem', fontFamily: 'inherit' }}>
+                {boards.organizations.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+              </select>
+            </div>
+          )}
           <div style={{ flex: 1, overflowY: 'auto', padding: '0 8px 16px' }}>
             {boards.org && (<>
               <div style={secLabel}>Organization</div>
@@ -455,26 +466,26 @@ function BoardCanvas({ token, boardId, onError, onChanged, onDeleted, sidebarCol
 
       {/* Header: title chip (left), share/actions (right) */}
       <div style={{ position: 'absolute', top: 14, left: 14, display: 'flex', gap: 8 }}>
-        <button title={sidebarCollapsed ? 'Show boards' : 'Hide boards'} onClick={onToggleSidebar} style={chip}>☰</button>
+        <button title={sidebarCollapsed ? 'Show boards' : 'Hide boards'} onClick={onToggleSidebar} style={chip}><MenuIcon /></button>
         <div style={{ ...chip, gap: 10, padding: '0 12px' }}>
-          <span style={{ width: 20, height: 20, borderRadius: 6, background: '#f59e0b', display: 'grid', placeItems: 'center', fontSize: 11, color: '#111' }}>✎</span>
+          <span style={{ width: 20, height: 20, borderRadius: 6, background: '#f59e0b', display: 'grid', placeItems: 'center', color: '#111' }}><WhiteboardIcon size={12} /></span>
           <span style={{ fontWeight: 650 }}>{board?.title ?? 'Whiteboard'}</span>
           {board && (
             <button title={board.favorite ? 'Unfavourite' : 'Favourite'} onClick={() => {
               const fav = !board.favorite; setBoard({ ...board, favorite: fav }); favoriteBoard(token, board.id, fav).then(onChanged).catch(() => {});
-            }} style={{ border: 'none', background: 'transparent', color: board.favorite ? '#f59e0b' : '#a1a1aa', cursor: 'pointer', fontSize: 15, padding: 0 }}>{board.favorite ? '★' : '☆'}</button>
+            }} style={{ border: 'none', background: 'transparent', color: board.favorite ? '#f59e0b' : '#a1a1aa', cursor: 'pointer', padding: 0, display: 'grid' }}><StarIcon filled={board.favorite} /></button>
           )}
-          {board?.locked && <span title="Locked: only admins can edit" style={{ fontSize: 12 }}>🔒</span>}
+          {board?.locked && <span title="Locked: only admins can edit" style={{ display: 'grid' }}><LockIcon size={13} color="#a1a1aa" /></span>}
           {!canEdit && board && <span style={{ fontSize: '0.7rem', color: '#a1a1aa' }}>View only</span>}
         </div>
       </div>
       <div style={{ position: 'absolute', top: 14, right: 14, display: 'flex', gap: 6, alignItems: 'center' }}>
         <div style={{ ...chip, padding: '0 12px', gap: 6 }}>
-          <span style={{ fontSize: 12 }}>{board?.scope === 'org' ? '🌐' : '👥'}</span>
+          {board?.scope === 'org' ? <GlobeIcon size={14} /> : <UsersIcon size={14} />}
           <span style={{ fontSize: '0.78rem' }}>{board?.scope === 'org' ? 'Organization' : 'Group'} · {Object.keys(cursors).length + 1} here</span>
         </div>
         <div style={{ position: 'relative' }}>
-          <button style={chip} onClick={() => setMenuOpen(o => !o)} title="More">⋯</button>
+          <button style={chip} onClick={() => setMenuOpen(o => !o)} title="More"><MoreIcon /></button>
           {menuOpen && board && (
             <div style={{ position: 'absolute', right: 0, top: 40, background: '#1c1d21', border: '1px solid #2a2b30', borderRadius: 12, padding: 6, width: 200, zIndex: 10 }}>
               <MenuItem label="Rename" onClick={() => { const t = window.prompt('Board name', board.title); setMenuOpen(false); if (t?.trim()) updateBoard(token, board.id, { title: t.trim() }).then(s => { setBoard({ ...board, title: s.title }); onChanged(); }).catch(e => onError(errText(e))); }} />
@@ -484,12 +495,12 @@ function BoardCanvas({ token, boardId, onError, onChanged, onDeleted, sidebarCol
             </div>
           )}
         </div>
-        <button style={chip} title={fullscreen ? 'Exit full screen' : 'Full screen'} onClick={() => setFullscreen(f => !f)}>{fullscreen ? '⤡' : '⤢'}</button>
+        <button style={chip} title={fullscreen ? 'Exit full screen' : 'Full screen'} onClick={() => setFullscreen(f => !f)}>{fullscreen ? <ShrinkIcon /> : <ExpandIcon />}</button>
       </div>
 
       {/* Zoom (bottom-left) */}
       <div style={{ position: 'absolute', left: 14, bottom: 14, ...chip, padding: 0, gap: 0 }}>
-        <button style={zoomBtn} title="Zoom to fit" onClick={fitAll}>⤒</button>
+        <button style={zoomBtn} title="Zoom to fit" onClick={fitAll}><FitIcon /></button>
         <button style={zoomBtn} title="Zoom out" onClick={() => zoomAt(1 / 1.2)}>−</button>
         <button style={{ ...zoomBtn, width: 56, fontSize: '0.8rem' }} title="Reset to 100%" onClick={() => zoomAt(1 / view.zoom)}>{Math.round(view.zoom * 100)}%</button>
         <button style={zoomBtn} title="Zoom in" onClick={() => zoomAt(1.2)}>+</button>
@@ -500,7 +511,7 @@ function BoardCanvas({ token, boardId, onError, onChanged, onDeleted, sidebarCol
         <div style={{ position: 'absolute', top: 64, left: '50%', transform: 'translateX(-50%)', ...chip, gap: 6, padding: '0 8px' }}>
           {sel.type === 'sticky' && STICKY_COLORS.map(c => <Swatch key={c} c={c} active={sel.color === c} onClick={() => upsert({ ...sel, color: c })} />)}
           {['pen', 'arrow', 'rect', 'text'].includes(sel.type) && INK_COLORS.map(c => <Swatch key={c} c={c} active={(sel.stroke ?? sel.color) === c} onClick={() => upsert({ ...sel, ...(sel.type === 'text' ? { color: c } : { stroke: c }) })} />)}
-          <button style={{ ...zoomBtn, color: '#f87171' }} title="Delete (⌫)" onClick={() => { remove(sel.id); setSelected(null); }}>🗑</button>
+          <button style={{ ...zoomBtn, color: '#f87171' }} title="Delete (⌫)" onClick={() => { remove(sel.id); setSelected(null); }}><TrashIcon /></button>
         </div>
       )}
 
@@ -517,7 +528,7 @@ function BoardCanvas({ token, boardId, onError, onChanged, onDeleted, sidebarCol
           <Sep />
           <ToolBtn k="T" label="Task" active={tool === 'task'} onClick={() => setTool('task')} wide>
             <div style={{ width: 70, height: 34, borderRadius: 7, background: '#2a2b30', display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '0 6px', gap: 4 }}>
-              <span style={{ fontSize: 10, color: '#d4d4d8' }}>☑ Task</span>
+              <span style={{ fontSize: 10, color: '#d4d4d8', display: 'flex', alignItems: 'center', gap: 4 }}><TaskIcon size={10} /> Task</span>
               <span style={{ display: 'flex', gap: 3 }}><i style={{ flex: 1, height: 3, background: '#71717a', borderRadius: 2 }} /><i style={{ flex: 1, height: 3, background: '#3b82f6', borderRadius: 2 }} /></span>
             </div>
           </ToolBtn>
@@ -543,12 +554,12 @@ function BoardCanvas({ token, boardId, onError, onChanged, onDeleted, sidebarCol
             <div style={{ width: 34, height: 26, borderRadius: 4, background: 'linear-gradient(160deg,#fcd34d 0%,#fb923c 45%,#60a5fa 46%,#93c5fd 100%)' }} />
           </ToolBtn>
           <ToolBtn k="" label="Ask Dilarion AI" active={aiOpen} onClick={() => setAiOpen(o => !o)}>
-            <div style={{ width: 32, height: 28, borderRadius: 8, background: 'linear-gradient(135deg,#ec4899,#8b5cf6 55%,#3b82f6)', display: 'grid', placeItems: 'center', color: '#fff', fontSize: 15 }}>✦</div>
+            <div style={{ width: 32, height: 28, borderRadius: 8, background: 'var(--accent)', display: 'grid', placeItems: 'center', color: '#fff' }}><SparkleIcon size={15} /></div>
           </ToolBtn>
           <Sep />
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2, paddingBottom: 2 }}>
-            <button title="Undo (⌘Z)" onClick={undo} style={undoBtn}>↶</button>
-            <button title="Redo (⇧⌘Z)" onClick={redo} style={undoBtn}>↷</button>
+            <button title="Undo (⌘Z)" onClick={undo} style={undoBtn}><UndoIcon /></button>
+            <button title="Redo (⇧⌘Z)" onClick={redo} style={undoBtn}><RedoIcon /></button>
           </div>
         </div>
       )}
@@ -576,7 +587,7 @@ function BoardAiPrompt({ token, board, onClose, onError }: { token: string; boar
   const target = board.scope === 'org' ? 'the org whiteboard' : `the "${board.group_name ?? board.title}" group whiteboard`;
   return (
     <div style={{ position: 'absolute', bottom: 96, left: '50%', transform: 'translateX(-50%)', width: 420, background: '#1c1d21', border: '1px solid #2a2b30', borderRadius: 14, padding: 14, color: '#e4e4e7', zIndex: 6 }}>
-      <div style={{ fontWeight: 700, marginBottom: 8 }}>✦ Ask Dilarion AI</div>
+      <div style={{ fontWeight: 700, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}><SparkleIcon size={14} color="var(--accent)" /> Ask Dilarion AI</div>
       {sent ? (
         <div style={{ fontSize: '0.84rem', color: '#a1a1aa' }}>Agent sent. Review and approve its plan on the AI page; the notes land here once it runs.
           <div style={{ marginTop: 10 }}><button style={{ ...ghostBtn, color: '#e4e4e7' }} onClick={onClose}>Close</button></div></div>
@@ -657,7 +668,7 @@ function ElementView({ el, boardId, selected, editing, canEdit, onPointerDown, o
         <foreignObject x={el.x} y={el.y} width={w} height={h} {...common}>
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: 12, height: '100%', boxSizing: 'border-box' }}>
             <button onPointerDown={e => e.stopPropagation()} onClick={onToggle} style={{ width: 18, height: 18, borderRadius: 5, flexShrink: 0, marginTop: 2, cursor: 'pointer',
-              border: `2px solid ${el.done ? '#22c55e' : '#71717a'}`, background: el.done ? '#22c55e' : 'transparent', color: '#fff', fontSize: 11, padding: 0, lineHeight: '14px' }}>{el.done ? '✓' : ''}</button>
+              border: `2px solid ${el.done ? '#22c55e' : '#71717a'}`, background: el.done ? '#22c55e' : 'transparent', color: '#fff', padding: 0, display: 'grid', placeItems: 'center' }}>{el.done && <CheckIcon size={10} />}</button>
             {editing ? (
               <textarea autoFocus defaultValue={el.text ?? ''} onChange={e => onText(e.target.value)} onBlur={onDone} onPointerDown={e => e.stopPropagation()}
                 onKeyDown={e => { if (e.key === 'Escape') (e.target as HTMLTextAreaElement).blur(); }}
