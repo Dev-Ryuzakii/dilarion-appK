@@ -166,7 +166,7 @@ class SecuritySetupViewModel @Inject constructor(
     // ── Master token ───────────────────────────────────────────────────────
     fun setMasterToken(value: String, confirm: String) {
         val v = value.trim()
-        if (v.length < 6) { _uiState.value = _uiState.value.copy(error = "Master token must be at least 6 characters"); return }
+        if (v.length < 8) { _uiState.value = _uiState.value.copy(error = "Master token must be at least 8 characters"); return }
         if (v != confirm.trim()) { _uiState.value = _uiState.value.copy(error = "The two entries do not match"); return }
         viewModelScope.launch {
             val bearer = bearer() ?: return@launch

@@ -188,7 +188,7 @@ private fun CreateStep(isLoading: Boolean, twoFaRequired: Boolean, onCreate: (St
                 Text("Requirements:", fontWeight = FontWeight.SemiBold, fontSize = 12.sp, color = DilarionRed)
                 Spacer(Modifier.height(4.dp))
                 listOf(
-                    "At least 6 characters",
+                    "At least 12 characters",
                     "At least 3 of: uppercase, lowercase, digit, special (!@#\$%^&*)",
                     "Store it safely — cannot be recovered",
                     "Never share it with anyone",
