@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import logoUrl from '../logo.jpg'
 import { parseStaffSheet, downloadStaffTemplate } from './staffSheet'
-import { forgotOrganizationPassword, getOrganization, getOrganizationUsers, inviteOrganizationStaff, loginOrganization, resendStaffInvite, resetOrganizationPassword, resetStaffLogin, submitOrganization, getOrgStaffPrivileges, setStaffPrivileges, sendOrgBroadcast, getOrgBroadcasts, getOrgDeletionRequests, approveOrgDeletion, denyOrgDeletion } from './api'
+import { forgotOrganizationPassword, getOrganization, getOrganizationUsers, inviteOrganizationStaff, loginOrganization, resendStaffInvite, resetOrganizationPassword, resetStaffLogin, submitOrganization, getOrgStaffPrivileges, setStaffPrivileges, sendOrgBroadcast, getOrgBroadcasts, getOrgDeletionRequests, approveOrgDeletion, denyOrgDeletion, getPermissionCatalog, getOrgRoles, createOrgRole, updateOrgRole, deleteOrgRole, getMemberRoles, assignMemberRole, getGroupPolicies, setGroupPolicy } from './api'
 // Installers are served from file storage (e.g. a public Afribase bucket) set
 // in VITE_DOWNLOAD_BASE.
 // Empty = same folder as the site, for local testing.
@@ -384,6 +384,48 @@ function DeletionRequestsView({ token }){
     <p className="readonly-note"><Icon name="lock" size={15}/> Approving permanently deletes the staff member's account and all their data. Admins and your organization account can never be deleted here.</p></div>
 }
 
+const PERMISSION_SECTIONS = { messaging:'Messaging', groups_channels:'Groups & channels', meetings:'Meetings', whiteboard:'Whiteboard', ai:'Dilarion AI', people:'People', admin:'Administration' }
+const GROUP_SETTING_LABELS = { create_channels:'Create channels', edit_channels:'Edit channels', delete_channels:'Delete channels', add_members:'Add members', edit_messages:'Edit messages', delete_messages:'Delete messages', mention_everyone:'@everyone', share_files:'Share files', start_meetings:'Start meetings', edit_whiteboard:'Edit whiteboards', use_ai:'Use AI' }
+const groupSettingLabel=(key)=>GROUP_SETTING_LABELS[key.replace(/^(members|guests)_can_/,'')]||key
+
+function RolesView({ token }){
+  const [data,setData]=useState({catalog:null,roles:[],members:[],groups:[],loading:true,error:''})
+  const [roleId,setRoleId]=useState(null); const [draft,setDraft]=useState(new Set()); const [tab,setTab]=useState('roles')
+  const [query,setQuery]=useState(''); const [busy,setBusy]=useState(''); const [notice,setNotice]=useState('')
+  const load=()=>Promise.all([getPermissionCatalog(token),getOrgRoles(token),getMemberRoles(token),getGroupPolicies(token)]).then(([catalog,r,m,g])=>{setData({catalog,roles:r.roles,members:m.members,groups:g.groups,loading:false,error:''});setRoleId(id=>r.roles.some(x=>x.id===id)?id:r.roles.find(x=>x.is_default)?.id??r.roles[0]?.id??null)}).catch(e=>setData(d=>({...d,loading:false,error:e.message})))
+  useEffect(()=>{load()},[token])
+  const role=data.roles.find(r=>r.id===roleId)
+  useEffect(()=>{setDraft(new Set(role?.permissions||[]))},[role?.id,role?.permissions?.join(',')])
+  const act=async(key,fn,ok)=>{setBusy(key);setNotice('');try{await fn();if(ok)setNotice(ok);await load()}catch(e){setNotice(e.message)}finally{setBusy('')}}
+  const toggle=(p)=>setDraft(d=>{const n=new Set(d);n.has(p)?n.delete(p):n.add(p);return n})
+  const newRole=()=>{const name=window.prompt('Name for the new role (e.g. Team lead). It starts with Member permissions.');if(name?.trim())act('new',async()=>{const r=await createOrgRole(token,{name:name.trim(),permissions:[],base_role:'member'});setRoleId(r.id)},`${name.trim()} created.`)}
+  const renameRole=()=>{const name=window.prompt('Rename role',role.name);if(name?.trim())act('rename',()=>updateOrgRole(token,role.id,{name:name.trim()}),'Role renamed.')}
+  const removeRole=()=>{if(window.confirm(`Delete the ${role.name} role? Its members move to the default role.`))act('delete',()=>deleteOrgRole(token,role.id),`${role.name} deleted.`)}
+  const flipGroup=(g,key)=>act(`g${g.id}${key}`,()=>setGroupPolicy(token,g.id,{[key]:!g.settings[key]}))
+  if(data.loading)return <div className="loader-inline"><div className="loader"/><p>Loading roles…</p></div>
+  if(data.error)return <div className="form-error">{data.error}</div>
+  const dirty=role&&[...draft].sort().join(',')!==[...role.permissions].sort().join(',')
+  const members=data.members.filter(m=>`${m.full_name||''} ${m.username} ${m.role_name||''}`.toLowerCase().includes(query.toLowerCase()))
+  const groups=data.groups.filter(g=>g.name.toLowerCase().includes(query.toLowerCase()))
+  const settingKeys=(kind)=>Object.keys(data.catalog.group_settings[kind])
+  return <>
+    <div className="segmented">{[['roles','Roles'],['members','Members'],['groups','Group settings']].map(([k,l])=><button key={k} className={tab===k?'active':''} onClick={()=>{setTab(k);setQuery('')}}>{l}</button>)}</div>
+    {notice&&<div className="notice-bar">{notice}<button className="icon-button" onClick={()=>setNotice('')} aria-label="Dismiss"><Icon name="close" size={14}/></button></div>}
+    {tab==='roles'&&<div className="roster-card"><div className="roster-tools"><div><h2>Roles</h2><span>Everyone gets the default role until you assign another</span></div><button className="button primary small" disabled={busy==='new'} onClick={newRole}><Icon name="plus" size={15}/> New role</button></div>
+      <div className="role-chips">{data.roles.map(r=><button key={r.id} className={r.id===roleId?'active':''} onClick={()=>setRoleId(r.id)}>{r.name}{r.is_default&&<em>Default</em>}<small>{r.member_count??0}</small></button>)}</div>
+      {role&&<><div className="perm-sections">{Object.entries(data.catalog.permissions).map(([sec,perms])=><div className="perm-section" key={sec}><h3>{PERMISSION_SECTIONS[sec]||sec}</h3><div className="priv-grid">{Object.entries(perms).map(([p,label])=><label key={p} className="priv-check"><input type="checkbox" checked={draft.has(p)} disabled={role.key==='owner'} onChange={()=>toggle(p)}/><span>{label}</span></label>)}</div></div>)}</div>
+        <div className="role-actions"><button className="button primary small" disabled={!dirty||busy==='save'} onClick={()=>act('save',()=>updateOrgRole(token,role.id,{permissions:[...draft]}),`${role.name} saved.`)}>{busy==='save'?'Saving…':dirty?'Save changes':'Saved'}</button>{!role.is_default&&!['owner','admin'].includes(role.key)&&<button className="text-button inline" onClick={()=>act('default',()=>updateOrgRole(token,role.id,{make_default:true}),`${role.name} is now the default role.`)}>Make default</button>}{!role.is_builtin&&<button className="text-button inline" onClick={renameRole}>Rename</button>}{!role.is_builtin&&<button className="text-button inline" onClick={removeRole}>Delete role</button>}</div></>}
+      <p className="readonly-note"><Icon name="lock" size={15}/> The Owner role always holds every permission. Your organization account is always an owner.</p></div>}
+    {tab==='members'&&<div className="roster-card"><div className="roster-tools"><div><h2>Members</h2><span>{members.length} {members.length===1?'person':'people'}</span></div><label className="search"><Icon name="search"/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search staff"/></label></div>
+      <div className="table-wrap"><table><thead><tr><th>Staff member</th><th>Role</th></tr></thead><tbody>{members.map(m=><tr key={m.user_id}><td><div className="person"><span>{(m.full_name||m.username).split(' ').map(x=>x[0]).join('').slice(0,2).toUpperCase()}</span><div><strong>{m.full_name||m.username}</strong><small>@{m.username}</small></div></div></td><td className="row-action"><select className="role-select" value={m.role_id??''} disabled={busy===`m${m.user_id}`} onChange={e=>act(`m${m.user_id}`,()=>assignMemberRole(token,m.user_id,Number(e.target.value)),`@${m.username} is now ${data.roles.find(r=>r.id===Number(e.target.value))?.name}.`)}>{data.roles.map(r=><option key={r.id} value={r.id}>{r.name}</option>)}</select></td></tr>)}</tbody></table>
+        {members.length===0&&<div className="empty-state"><Icon name="users" size={34}/><h3>{query?'No matching staff':'No staff yet'}</h3><p>{query?'Try a different search term.':'Invite staff from the directory first.'}</p></div>}</div></div>}
+    {tab==='groups'&&<div className="roster-card"><div className="roster-tools"><div><h2>Group settings</h2><span>Limit what members and guests can do in each group. Group owners and admins are never limited.</span></div><label className="search"><Icon name="search"/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search groups"/></label></div>
+      <div className="table-wrap"><table><thead><tr><th>Group</th><th>Members can</th><th>Guests can</th></tr></thead><tbody>{groups.map(g=><tr key={g.id}><td><div className="person"><span>{g.kind==='channel'?'#':g.name.slice(0,2).toUpperCase()}</span><div><strong>{g.name}</strong><small>{g.member_count} {g.member_count===1?'member':'members'}{g.kind==='channel'?' · channel':''}</small></div></div></td>
+        {['member','guest'].map(kind=><td key={kind}><div className="priv-grid">{settingKeys(kind).map(k=><label key={k} className="priv-check"><input type="checkbox" checked={!!g.settings[k]} disabled={busy===`g${g.id}${k}`} onChange={()=>flipGroup(g,k)}/><span>{groupSettingLabel(k)}</span></label>)}</div></td>)}</tr>)}</tbody></table>
+        {groups.length===0&&<div className="empty-state"><Icon name="users" size={34}/><h3>{query?'No matching groups':'No groups yet'}</h3><p>{query?'Try a different search term.':'Groups and channels your staff create will appear here.'}</p></div>}</div></div>}
+  </>
+}
+
 function TeamAdminView({ token }){
   const [data,setData]=useState({staff:[],available:[],loading:true,error:''})
   const [draft,setDraft]=useState({}) // username -> Set-like object of privileges
@@ -433,7 +475,8 @@ function Dashboard({ token,logout }) {
   if(data.loading)return <main className="loading-screen"><div className="loader"/><p>Opening your organization portal…</p></main>
   if(data.error)return <main className="loading-screen"><p>{data.error}</p><button className="button primary" onClick={logout}>Return to login</button></main>
   const canInvite=data.organization?.permissions?.invite_staff!==false; const canReset=data.organization?.permissions?.reset_staff_login===true
-  return <main className="dashboard"><aside className="sidebar"><div><div className="side-org"><div className="org-avatar">{data.organization?.name?.slice(0,2).toUpperCase()}</div><div><small>ORGANIZATION</small><strong>{data.organization?.name}</strong></div></div><nav><button className={section==='staff'?'active':''} onClick={()=>setSection('staff')}><Icon name="users"/> Staff directory</button><button className={section==='team'?'active':''} onClick={()=>setSection('team')}><Icon name="sliders"/> Team admins</button><button className={section==='broadcast'?'active':''} onClick={()=>setSection('broadcast')}><Icon name="megaphone"/> Broadcast</button><button className={section==='deletions'?'active':''} onClick={()=>setSection('deletions')}><Icon name="lock"/> Deletion requests</button></nav></div><button className="logout" onClick={logout}><Icon name="logout"/> Sign out</button></aside><section className="dash-content">
+  return <main className="dashboard"><aside className="sidebar"><div><div className="side-org"><div className="org-avatar">{data.organization?.name?.slice(0,2).toUpperCase()}</div><div><small>ORGANIZATION</small><strong>{data.organization?.name}</strong></div></div><nav><button className={section==='staff'?'active':''} onClick={()=>setSection('staff')}><Icon name="users"/> Staff directory</button><button className={section==='roles'?'active':''} onClick={()=>setSection('roles')}><Icon name="shield"/> Roles &amp; permissions</button><button className={section==='team'?'active':''} onClick={()=>setSection('team')}><Icon name="sliders"/> Team admins</button><button className={section==='broadcast'?'active':''} onClick={()=>setSection('broadcast')}><Icon name="megaphone"/> Broadcast</button><button className={section==='deletions'?'active':''} onClick={()=>setSection('deletions')}><Icon name="lock"/> Deletion requests</button></nav></div><button className="logout" onClick={logout}><Icon name="logout"/> Sign out</button></aside><section className="dash-content">
+    {section==='roles'&&<><div className="dash-top"><div><span className="kicker">ORGANIZATION PORTAL</span><h1>Roles &amp; permissions</h1><p>Decide who can do what across {data.organization?.name}.</p></div></div><RolesView token={token}/></>}
     {section==='team'&&<><div className="dash-top"><div><span className="kicker">ORGANIZATION PORTAL</span><h1>Team admins</h1><p>Delegate company-wide powers to staff in {data.organization?.name}.</p></div></div><TeamAdminView token={token}/></>}
     {section==='broadcast'&&<><div className="dash-top"><div><span className="kicker">ORGANIZATION PORTAL</span><h1>Broadcast</h1><p>Send an official message to everyone in {data.organization?.name}.</p></div></div><BroadcastView token={token} orgName={data.organization?.name}/></>}
     {section==='deletions'&&<><div className="dash-top"><div><span className="kicker">ORGANIZATION PORTAL</span><h1>Deletion requests</h1><p>Review staff account-deletion requests for {data.organization?.name}.</p></div></div><DeletionRequestsView token={token}/></>}

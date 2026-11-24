@@ -99,7 +99,9 @@ import WaitingForHostScreen from '../components/WaitingForHostScreen';
 import { fmtRange } from '../components/MeetingCard';
 import CalendarView from '../components/CalendarView';
 import TasksPanel from '../components/TasksPanel';
-import CopilotWidget, { CopilotScheduleDraft } from '../components/CopilotWidget';
+import AiPage, { CopilotScheduleDraft } from '../components/AiPage';
+import RemindersPanel, { ReminderAlerts } from '../components/RemindersPanel';
+import WhiteboardPage from '../components/WhiteboardPage';
 import {
   PhoneIncomingIcon,
   PhoneOutgoingIcon,
@@ -118,7 +120,9 @@ interface Props {
   onLogout: () => void;
 }
 
-type Tab = 'chats' | 'groups' | 'channels' | 'meetings' | 'calendar' | 'tasks' | 'calls' | 'settings';
+type Tab = 'chats' | 'groups' | 'channels' | 'meetings' | 'calendar' | 'tasks' | 'reminders' | 'whiteboard' | 'ai' | 'calls' | 'settings';
+/** Tabs that own the whole main panel and have no list in the sidebar. */
+const FULL_PAGE_TABS: Tab[] = ['calendar', 'tasks', 'reminders', 'whiteboard', 'ai'];
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -228,6 +232,30 @@ function TasksTabIcon({ active }: { active: boolean }) {
   );
 }
 
+function ReminderTabIcon({ active }: { active: boolean }) {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={active ? 'var(--accent)' : 'var(--text-secondary)'} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="13" r="8" /><path d="M12 9v4l2 2" /><path d="M5 3 2 6" /><path d="m22 6-3-3" />
+    </svg>
+  );
+}
+
+function WhiteboardTabIcon({ active }: { active: boolean }) {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={active ? 'var(--accent)' : 'var(--text-secondary)'} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="4" width="18" height="13" rx="2" /><path d="M7 13c2-3 3-1 5-4s3 0 5-2" /><path d="M12 17v3" /><path d="M8 21h8" />
+    </svg>
+  );
+}
+
+function AiTabIcon({ active }: { active: boolean }) {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={active ? 'var(--accent)' : 'var(--text-secondary)'} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z" /><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z" />
+    </svg>
+  );
+}
+
 function CallTabIcon({ active }: { active: boolean }) {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={active ? 'var(--accent)' : 'var(--text-secondary)'} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -249,7 +277,7 @@ function SettingsTabIcon({ active }: { active: boolean }) {
 
 const SECTION_TITLES: Record<Tab, string> = {
   chats: 'Direct messages', groups: 'Groups', channels: 'Your channels', meetings: 'Upcoming',
-  calendar: 'Calendar', tasks: 'Tasks', calls: 'Recent calls', settings: 'Settings',
+  calendar: 'Calendar', tasks: 'Tasks', reminders: 'Reminders', whiteboard: 'Whiteboards', ai: 'Dilarion AI', calls: 'Recent calls', settings: 'Settings',
 };
 
 function HashIcon({ active }: { active: boolean }) {
@@ -2875,7 +2903,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
   // Tab changes: reset selections
   function switchTab(tab: Tab) {
     setActiveTab(tab);
-    setMobilePane(tab === 'calendar' || tab === 'tasks' || tab === 'meetings' ? 'main' : 'list');
+    setMobilePane(FULL_PAGE_TABS.includes(tab) || tab === 'meetings' ? 'main' : 'list');
     if (tab !== 'chats') setSelectedChat(null);
     if (tab !== 'groups') setSelectedGroup(null);
     if (tab !== 'channels') setSelectedChannel(null);
@@ -3179,7 +3207,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
    * pick attendees and hit Schedule, same as manual entry.
    */
   /**
-   * Hand-off from the floating CopilotWidget — prefills the same schedule
+   * Hand-off from the AI page's meeting drafts — prefills the same schedule
    * form manual entry uses and opens it, but never creates the meeting or
    * picks attendees itself; the user still reviews and confirms.
    */
@@ -3896,6 +3924,18 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
       return <TasksPanel token={token} myUsername={username} groups={groups} />;
     }
 
+    if (activeTab === 'reminders') {
+      return <RemindersPanel token={token} />;
+    }
+
+    if (activeTab === 'whiteboard') {
+      return <WhiteboardPage token={token} groups={groups} />;
+    }
+
+    if (activeTab === 'ai') {
+      return <AiPage token={token} username={username} onMeetingDraft={draft => { switchTab('meetings'); applyCopilotDraft(draft); }} />;
+    }
+
     if (activeTab === 'calls') {
       const selectedCall = calls.find(c => c.id === selectedCallId) ?? null;
       return <CallDetailPanel call={selectedCall} onCall={handleCall} onGroupCall={handleGroupRedial} />;
@@ -4079,6 +4119,9 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
               <NavRow icon={<MeetingsTabIcon active={activeTab === 'meetings'} />} label="Meetings" active={activeTab === 'meetings'} onClick={() => switchTab('meetings')} />
               <NavRow icon={<CalendarTabIcon active={activeTab === 'calendar'} />} label="Calendar" active={activeTab === 'calendar'} onClick={() => switchTab('calendar')} />
               <NavRow icon={<TasksTabIcon active={activeTab === 'tasks'} />} label="Tasks" active={activeTab === 'tasks'} onClick={() => switchTab('tasks')} />
+              <NavRow icon={<ReminderTabIcon active={activeTab === 'reminders'} />} label="Reminders" active={activeTab === 'reminders'} onClick={() => switchTab('reminders')} />
+              <NavRow icon={<WhiteboardTabIcon active={activeTab === 'whiteboard'} />} label="Whiteboard" active={activeTab === 'whiteboard'} onClick={() => switchTab('whiteboard')} />
+              <NavRow icon={<AiTabIcon active={activeTab === 'ai'} />} label="Dilarion AI" active={activeTab === 'ai'} onClick={() => switchTab('ai')} />
               <NavRow icon={<CallTabIcon active={activeTab === 'calls'} />} label="Calls" active={activeTab === 'calls'} onClick={() => switchTab('calls')} />
               <div className="mobile-settings-tab">
                 <NavRow icon={<SettingsTabIcon active={activeTab === 'settings'} />} label="Settings" active={activeTab === 'settings'} onClick={() => switchTab('settings')} />
@@ -4103,7 +4146,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
                 </button>
               </SidebarSection>
             )}
-            {activeTab !== 'settings' && (
+            {activeTab !== 'settings' && !FULL_PAGE_TABS.includes(activeTab) && (
               <SidebarSection title={SECTION_TITLES[activeTab]} open={sectionsOpen.list} onToggle={() => setSectionsOpen(o => ({ ...o, list: !o.list }))}>
                 {renderListContent()}
               </SidebarSection>
@@ -4116,7 +4159,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
 
         {/* ── MAIN PANEL (flex 1) ─────────────────────────────────────────── */}
         <main className="app-main-panel" style={hs.mainPanel}>
-          {(['calls', 'settings', 'meetings', 'calendar', 'tasks'] as Tab[]).includes(activeTab) && mobilePane === 'main' && (
+          {(['calls', 'settings', 'meetings', ...FULL_PAGE_TABS] as Tab[]).includes(activeTab) && mobilePane === 'main' && (
             <button className="mobile-pane-back" onClick={() => { if (activeTab === 'calls' || activeTab === 'settings') setMobilePane('list'); else switchTab('chats'); }}>
               <span aria-hidden="true">‹</span> {activeTab === 'calls' || activeTab === 'settings' ? (activeTab === 'calls' ? 'Calls' : 'Settings') : 'Home'}
             </button>
@@ -4969,7 +5012,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
         </div>
       )}
 
-      <CopilotWidget token={token} onScheduleDraft={applyCopilotDraft} />
+      <ReminderAlerts token={token} onOpen={() => switchTab('reminders')} />
     </div>
   );
 }

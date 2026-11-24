@@ -330,6 +330,23 @@ td>strong,.contact-email{display:block;font-weight:500;color:var(--text)}
 .priv-check:hover{background:rgba(255,255,255,.05)}
 .priv-check input{accent-color:var(--red);margin:0}
 .priv-check:has(input:checked){background:rgba(216,52,40,.14);border-color:rgba(216,52,40,.4);color:#fff}
+.segmented{display:inline-flex;gap:4px;padding:4px;margin-bottom:16px;border-radius:14px;background:var(--panel);border:1px solid var(--line)}
+.segmented button{border:0;background:none;color:var(--muted);padding:9px 16px;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;transition:background .2s,color .2s}
+.segmented button:hover{color:var(--text)}
+.segmented button.active{background:rgba(216,52,40,.14);color:#fff}
+.role-chips{display:flex;flex-wrap:wrap;gap:8px;padding:18px 20px 4px}
+.role-chips button{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border-radius:999px;border:1px solid var(--line-2);background:none;color:var(--muted);font-size:13.5px;font-weight:600;cursor:pointer;transition:background .2s,border-color .2s,color .2s}
+.role-chips button:hover{background:rgba(255,255,255,.05)}
+.role-chips button.active{background:rgba(216,52,40,.14);border-color:rgba(216,52,40,.4);color:#fff}
+.role-chips em{font-style:normal;font-size:11px;padding:2px 7px;border-radius:999px;background:rgba(60,207,122,.12);color:var(--green)}
+.role-chips small{color:var(--faint);font-size:12px}
+.perm-sections{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;padding:16px 20px}
+.perm-section{padding:14px 16px;border-radius:16px;background:var(--panel-2);border:1px solid var(--line)}
+.perm-section h3{margin:0 0 10px;font-size:13px;font-weight:600;color:#d8cbc7;letter-spacing:.02em}
+.role-actions{display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding:0 20px 18px}
+.role-select{padding:8px 12px;border-radius:12px;border:1px solid var(--line-2);background:#0a0707;color:var(--text);font-size:13.5px;outline:none;cursor:pointer}
+.role-select:focus{border-color:var(--red);box-shadow:0 0 0 4px rgba(216,52,40,.18)}
+.priv-check:has(input:disabled){cursor:default;opacity:.75}
 .broadcast-wrap{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:16px;align-items:start}
 .broadcast-card{margin:0}
 .broadcast-body{padding:20px}

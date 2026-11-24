@@ -35,3 +35,24 @@ export const getOrgBroadcasts = (token) => request('/organization/broadcasts', {
 export const getOrgDeletionRequests = (token) => request('/organization/account-deletion-requests', { headers: { Authorization: `Bearer ${token}` } })
 export const approveOrgDeletion = (token, id) => request(`/organization/account-deletion-requests/${id}/approve`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } })
 export const denyOrgDeletion = (token, id, reason) => request(`/organization/account-deletion-requests/${id}/deny`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify({ reason }) })
+
+// Roles & permissions (Teams-style): org roles, who holds which role, and
+// per-group settings that limit what members and guests can do.
+export const getPermissionCatalog = (token) => request('/org/permissions/catalog', { headers: { Authorization: `Bearer ${token}` } })
+export const getOrgRoles = (token) => request('/org/roles', { headers: { Authorization: `Bearer ${token}` } })
+export const createOrgRole = (token, payload) => request('/org/roles', { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify(payload) })
+export const updateOrgRole = (token, id, payload) => request(`/org/roles/${id}`, { method: 'PATCH', headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify(payload) })
+export const deleteOrgRole = (token, id) => fetchNoContent(`/org/roles/${id}`, token)
+export const getMemberRoles = (token) => request('/org/members/roles', { headers: { Authorization: `Bearer ${token}` } })
+export const assignMemberRole = (token, userId, roleId) => request(`/org/members/${userId}/role`, { method: 'PUT', headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify({ role_id: roleId }) })
+export const getGroupPolicies = (token) => request('/org/groups/policies', { headers: { Authorization: `Bearer ${token}` } })
+export const setGroupPolicy = (token, groupId, settings) => request(`/groups/${groupId}/policy`, { method: 'PUT', headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify({ settings }) })
+
+// DELETE endpoints answer 204 with no body.
+async function fetchNoContent(path, token) {
+  const response = await fetch(`${API_BASE}${path}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } })
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}))
+    throw new Error(typeof data.detail === 'string' ? data.detail : 'Something went wrong. Please try again.')
+  }
+}
