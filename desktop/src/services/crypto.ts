@@ -131,6 +131,30 @@ export async function decryptMessage(
 }
 
 /**
+ * Every wrapped key in a message's `encrypted_key`, this device's own entry
+ * first (device_uuid, then username), then all the others. RSA-OAEP rejects a key
+ * wrapped for a different public key, so the caller can safely try each in turn:
+ * that keeps a message readable when the saved device_uuid is stale or missing
+ * but the message was still wrapped for this device's key.
+ */
+export function encryptedKeyCandidates(
+  encryptedKey: string,
+  deviceUuid: string | null,
+  username: string,
+): string[] {
+  const trimmed = encryptedKey?.trim();
+  if (!trimmed) return [];
+  if (!trimmed.startsWith('{')) return [trimmed];
+  try {
+    const map = JSON.parse(trimmed) as Record<string, string>;
+    const preferred = [deviceUuid ? map[deviceUuid] : undefined, map[username]];
+    return [...new Set([...preferred, ...Object.values(map)].filter((v): v is string => typeof v === 'string' && v.length > 0))];
+  } catch {
+    return [trimmed];
+  }
+}
+
+/**
  * Find this device's wrapped AES key inside a message's `encrypted_key`.
  *
  * Multi-device messages store a JSON map keyed by device_uuid. Older messages used

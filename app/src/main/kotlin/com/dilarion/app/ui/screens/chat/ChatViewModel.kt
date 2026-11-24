@@ -370,13 +370,7 @@ class ChatViewModel @Inject constructor(
             val me = _uiState.value.currentUsername
             if (privKey.isNullOrBlank()) return@launch
             val plain = try {
-                var encKey = msg.encryptedKey
-                if (encKey.startsWith("{")) {
-                    val mapType = object : com.google.gson.reflect.TypeToken<Map<String, String>>() {}.type
-                    val keysMap: Map<String, String> = com.google.gson.Gson().fromJson(encKey, mapType)
-                    encKey = keysMap[myDeviceUuid] ?: keysMap[me] ?: encKey
-                }
-                cryptoManager.decryptMessage(msg.content, encKey, msg.iv, privKey)
+                cryptoManager.decryptForMe(msg.content, msg.encryptedKey, msg.iv, privKey, listOf(myDeviceUuid, me))
             } catch (e: Exception) {
                 "[Decryption Failed]"
             }
@@ -394,13 +388,7 @@ class ChatViewModel @Inject constructor(
         val me = _uiState.value.currentUsername
         if (privKey.isNullOrBlank()) return null
         return try {
-            var encKey = msg.encryptedKey
-            if (encKey.startsWith("{")) {
-                val mapType = object : com.google.gson.reflect.TypeToken<Map<String, String>>() {}.type
-                val keysMap: Map<String, String> = com.google.gson.Gson().fromJson(encKey, mapType)
-                encKey = keysMap[myDeviceUuid] ?: keysMap[me] ?: encKey
-            }
-            cryptoManager.decryptMessage(msg.content, encKey, msg.iv, privKey)
+            cryptoManager.decryptForMe(msg.content, msg.encryptedKey, msg.iv, privKey, listOf(myDeviceUuid, me))
         } catch (e: Exception) {
             null
         }
@@ -525,6 +513,12 @@ class ChatViewModel @Inject constructor(
                         if (d.publicKey.isNotBlank()) deviceKeys[d.deviceUuid] = d.publicKey
                     }
                 }
+                // Always wrap for this phone's own key too, even if the server's
+                // device list has dropped it (revoked, or registration failed), so
+                // our own sent messages stay readable here.
+                sessionManager.publicKey.first()?.takeIf { it.isNotBlank() && it !in deviceKeys.values }?.let { own ->
+                    deviceKeys[sessionManager.deviceUuid.first() ?: "self:$me"] = own
+                }
                 if (deviceKeys.isEmpty()) throw Exception("$targetUsername has no linked devices with encryption keys yet")
                 val (ciphertext, encKeysMap, iv) = cryptoManager.encryptGroupMessage(plain, deviceKeys)
                 val encryptedKeyJson = com.google.gson.Gson().toJson(encKeysMap)
@@ -627,6 +621,12 @@ class ChatViewModel @Inject constructor(
                         if (d.publicKey.isNotBlank()) deviceKeys[d.deviceUuid] = d.publicKey
                     }
                 }
+                // Always wrap for this phone's own key too, even if the server's
+                // device list has dropped it (revoked, or registration failed), so
+                // our own sent messages stay readable here.
+                sessionManager.publicKey.first()?.takeIf { it.isNotBlank() && it !in deviceKeys.values }?.let { own ->
+                    deviceKeys[sessionManager.deviceUuid.first() ?: "self:$me"] = own
+                }
                 if (deviceKeys.isEmpty()) throw Exception("No linked devices with encryption keys")
 
                 val (ciphertext, encKeysMap, iv) = cryptoManager.encryptGroupMessage(text.trim(), deviceKeys)
@@ -676,6 +676,12 @@ class ChatViewModel @Inject constructor(
                     apiService.getUserDevices(bearer, u).body()?.devices?.forEach { d ->
                         if (d.publicKey.isNotBlank()) deviceKeys[d.deviceUuid] = d.publicKey
                     }
+                }
+                // Always wrap for this phone's own key too, even if the server's
+                // device list has dropped it (revoked, or registration failed), so
+                // our own sent messages stay readable here.
+                sessionManager.publicKey.first()?.takeIf { it.isNotBlank() && it !in deviceKeys.values }?.let { own ->
+                    deviceKeys[sessionManager.deviceUuid.first() ?: "self:$me"] = own
                 }
                 if (deviceKeys.isEmpty()) throw Exception("No linked devices with encryption keys")
 

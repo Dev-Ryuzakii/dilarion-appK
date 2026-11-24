@@ -82,6 +82,33 @@ class CryptoManager @Inject constructor() {
         return String(plain)
     }
 
+    /**
+     * Decrypts a message whose key field is either one wrapped key or a JSON map
+     * {deviceUuid | username: wrappedKey}. The preferred ids (this device's uuid,
+     * then the username) are tried first, then every other entry: RSA-OAEP rejects
+     * a key wrapped for a different public key, so trying the rest is safe. This
+     * keeps messages readable when the saved device id is stale or missing but the
+     * message was still wrapped for this device's key.
+     */
+    fun decryptForMe(
+        ciphertextB64: String,
+        encryptedKeyField: String,
+        ivB64: String,
+        privateKeyB64: String,
+        preferredIds: List<String?>,
+    ): String {
+        val field = encryptedKeyField.trim()
+        if (!field.startsWith("{")) return decryptMessage(ciphertextB64, field, ivB64, privateKeyB64)
+        val json = org.json.JSONObject(field)
+        val all = json.keys().asSequence().mapNotNull { k -> json.optString(k).takeIf { it.isNotBlank() } }.toList()
+        val ordered = (preferredIds.filterNotNull().mapNotNull { id -> json.optString(id).takeIf { it.isNotBlank() } } + all).distinct()
+        var last: Exception? = null
+        for (wrapped in ordered) {
+            try { return decryptMessage(ciphertextB64, wrapped, ivB64, privateKeyB64) } catch (e: Exception) { last = e }
+        }
+        throw last ?: IllegalStateException("This message was not encrypted for this device")
+    }
+
     // ─── Internal helpers ──────────────────────────────────────────────────────
 
     private fun generateAesKey(): SecretKey {

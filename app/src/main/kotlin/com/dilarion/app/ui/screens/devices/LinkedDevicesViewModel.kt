@@ -14,6 +14,8 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 import com.dilarion.app.utils.toUserMessage
 
+private val PHONE_PLATFORMS = setOf("android", "ios", "legacy")
+
 data class LinkedDevicesUiState(
     val devices: List<MyDevice> = emptyList(),
     val loading: Boolean = true,
@@ -36,7 +38,14 @@ class LinkedDevicesViewModel @Inject constructor(
         viewModelScope.launch {
             val token = sessionManager.sessionToken.first() ?: return@launch
             _uiState.value = _uiState.value.copy(loading = true, error = null)
-            runCatching { apiService.getMyDevices("Bearer $token").body()?.devices ?: emptyList() }
+            val myUuid = sessionManager.deviceUuid.first()
+            // "Linked devices" are the OTHER devices on this account. This phone's
+            // own row is not a link, and an account has one phone, so any other
+            // phone row is a key left behind by an earlier install of this app.
+            runCatching {
+                (apiService.getMyDevices("Bearer $token").body()?.devices ?: emptyList())
+                    .filter { it.deviceUuid != myUuid && it.platform.lowercase() !in PHONE_PLATFORMS }
+            }
                 .onSuccess { _uiState.value = _uiState.value.copy(devices = it, loading = false) }
                 .onFailure { _uiState.value = _uiState.value.copy(loading = false, error = it.toUserMessage("Couldn't load your devices. Check your connection and try again.")) }
         }

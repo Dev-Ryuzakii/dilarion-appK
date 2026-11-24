@@ -20,6 +20,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import kotlinx.coroutines.flow.first
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.dilarion.app.data.api.ApiService
@@ -64,6 +65,9 @@ class IdleLockViewModel @Inject constructor(
                     if (resp.isSuccessful && !token.isNullOrBlank()) {
                         sessionManager.saveSessionToken(token)
                         presenceService.connect(token)
+                        sessionManager.publicKey.first()?.takeIf { it.isNotBlank() }?.let {
+                            com.dilarion.app.ui.screens.auth.registerKeysAndConnect(apiService, sessionManager, token, it)
+                        }
                         IdleLogoutManager.unlock(context)
                     } else {
                         error = when (resp.code()) {

@@ -1,4 +1,4 @@
-import { decryptMessage as decryptMessageLocal, resolveEncryptedKey } from './crypto';
+import { decryptMessage as decryptMessageLocal, encryptedKeyCandidates } from './crypto';
 import { apiFetch } from './apiTransport';
 
 // VITE_API_BASE comes from .env.production / .env.test (see package.json build:test).
@@ -679,14 +679,15 @@ export async function decryptChatMessage(
   if (!privateKey) throw new MissingKeyError();
   if (!msg.encrypted_key || !msg.iv) throw new LegacyMessageError();
 
-  const wrapped = resolveEncryptedKey(msg.encrypted_key, deviceUuid, currentUsername);
-  if (!wrapped) throw new LegacyMessageError();
+  const candidates = encryptedKeyCandidates(msg.encrypted_key, deviceUuid, currentUsername);
+  if (!candidates.length) throw new LegacyMessageError();
 
-  try {
-    return await decryptMessageLocal(msg.content, wrapped, msg.iv, privateKey);
-  } catch {
-    throw new Error('Could not decrypt — this message was encrypted for a different key.');
+  for (const wrapped of candidates) {
+    try {
+      return await decryptMessageLocal(msg.content, wrapped, msg.iv, privateKey);
+    } catch { /* wrapped for another device: try the next entry */ }
   }
+  throw new Error('Could not decrypt — this message was encrypted for a different key.');
 }
 
 // ── Groups ─────────────────────────────────────────────────────────────────────
