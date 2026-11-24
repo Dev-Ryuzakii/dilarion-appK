@@ -36,6 +36,10 @@ object NetworkModule {
             // retries cleanly on a stale pooled socket.
             .protocols(listOf(Protocol.HTTP_1_1))
             .retryOnConnectionFailure(true)
+            // Lets the AI read times like "4pm" in the user's own zone.
+            .addInterceptor { chain ->
+                chain.proceed(chain.request().newBuilder().header("X-Timezone", java.util.TimeZone.getDefault().id).build())
+            }
             // Base1 Watch: reports failed requests (status >= 500, network errors).
             .addInterceptor(com.afribase.watch.WatchInterceptor())
             // BODY logging writes tokens and message payloads to logcat, so

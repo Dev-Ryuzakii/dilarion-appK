@@ -318,7 +318,7 @@ function RunCard({ token, run, onChange, onError, onMeetingDraft, compact }: { t
   );
 }
 
-function Switch({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
+export function Switch({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
   return (
     <button type="button" role="switch" aria-checked={on} onClick={e => { e.preventDefault(); onChange(!on); }} style={{
       width: 36, height: 20, borderRadius: 999, border: 'none', padding: 2, cursor: 'pointer', flexShrink: 0,

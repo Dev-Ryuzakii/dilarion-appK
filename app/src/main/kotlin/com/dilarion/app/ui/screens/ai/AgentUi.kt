@@ -23,7 +23,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.dilarion.app.data.api.ApiService
 import com.dilarion.app.data.model.AgentRun
-import com.dilarion.app.data.model.AiPreferences
+import com.dilarion.app.data.model.AiPreferencesUpdate
 import com.dilarion.app.data.model.AiStep
 import com.dilarion.app.security.SessionManager
 import com.dilarion.app.services.PresenceService
@@ -175,7 +175,7 @@ class AgentApprovalViewModel @Inject constructor(
         watching += run.id
         viewModelScope.launch {
             val b = bearer() ?: return@launch
-            if (alwaysAllow) runCatching { api.setAiPreferences(b, AiPreferences(true)) }
+            if (alwaysAllow) runCatching { api.setAiPreferences(b, AiPreferencesUpdate(autoApprove = true)) }
             runCatching { api.approveAgent(b, run.id) }
         }
     }

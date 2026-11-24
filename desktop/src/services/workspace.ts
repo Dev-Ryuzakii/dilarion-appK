@@ -14,10 +14,15 @@ export function errText(e: unknown, fallback = 'Something went wrong. Please try
   return userMessage(e, fallback);
 }
 
+function localZone(): string {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; } catch { return 'UTC'; }
+}
+
 async function call<T>(token: string, method: string, path: string, body?: unknown): Promise<T> {
   const res = await apiFetch(`${BASE}${path}`, {
     method,
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    // X-Timezone lets the AI read times like "4pm" in the user's own zone.
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, 'X-Timezone': localZone() },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   if (!res.ok) {
@@ -136,9 +141,39 @@ export const sendAiMessage = (token: string, id: number, text: string) =>
   call<{ user_message: AiMessage; assistant_message: AiMessage; agent_run: AgentRun | null; title: string }>(
     token, 'POST', `/ai/conversations/${id}/messages`, { text });
 
-export const getAiPreferences = (token: string) => call<{ auto_approve: boolean }>(token, 'GET', '/ai/preferences');
-export const setAiPreferences = (token: string, autoApprove: boolean) =>
-  call<{ auto_approve: boolean }>(token, 'PUT', '/ai/preferences', { auto_approve: autoApprove });
+export interface AiPreferences {
+  /** Full control: agents run their plans without asking first. */
+  auto_approve: boolean;
+  /** Other members' agents may set reminders / assign tasks to me. */
+  allow_from_others: boolean;
+  /** Tools agents may not use for me. */
+  disabled_tools: string[];
+  timezone: string;
+  tools: { id: string; label: string }[];
+}
+const DEFAULT_AI_TOOLS = [
+  { id: 'create_reminder', label: 'Set reminders' },
+  { id: 'create_task', label: 'Create and assign tasks' },
+  { id: 'add_whiteboard_note', label: 'Add whiteboard notes' },
+  { id: 'draft_meeting', label: 'Draft meetings' },
+  { id: 'find_people', label: 'Find people' },
+];
+/** Older servers return only auto_approve; fill in the rest. */
+function withPrefDefaults(p: Partial<AiPreferences>): AiPreferences {
+  return {
+    auto_approve: !!p.auto_approve,
+    allow_from_others: p.allow_from_others ?? true,
+    disabled_tools: p.disabled_tools ?? [],
+    timezone: p.timezone ?? localZone(),
+    tools: p.tools?.length ? p.tools : DEFAULT_AI_TOOLS,
+  };
+}
+export const getAiPreferences = (token: string) =>
+  call<Partial<AiPreferences>>(token, 'GET', '/ai/preferences').then(withPrefDefaults);
+export const updateAiPreferences = (token: string, patch: Partial<Pick<AiPreferences, 'auto_approve' | 'allow_from_others' | 'disabled_tools' | 'timezone'>>) =>
+  call<Partial<AiPreferences>>(token, 'PUT', '/ai/preferences', patch).then(withPrefDefaults);
+export const setAiPreferences = (token: string, autoApprove: boolean) => updateAiPreferences(token, { auto_approve: autoApprove });
+export const clearAiConversations = (token: string) => call<void>(token, 'DELETE', '/ai/conversations');
 export const listAgentRuns = (token: string) => call<{ runs: AgentRun[] }>(token, 'GET', '/ai/agents').then(r => r.runs);
 export const startAgent = (token: string, instruction: string, requireApproval = true, forUserId?: number) =>
   call<AgentRun>(token, 'POST', '/ai/agents', { instruction, require_approval: requireApproval, for_user_id: forUserId });

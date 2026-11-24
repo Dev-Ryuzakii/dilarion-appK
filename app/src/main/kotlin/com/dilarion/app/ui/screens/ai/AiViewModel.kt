@@ -178,7 +178,7 @@ class AiViewModel @Inject constructor(
             val b = bearer() ?: return@launch
             val before = _ui.value.autoApprove
             _ui.value = _ui.value.copy(autoApprove = on)
-            runCatching { api.setAiPreferences(b, AiPreferences(on)) }
+            runCatching { api.setAiPreferences(b, AiPreferencesUpdate(autoApprove = on)) }
                 .onSuccess { r -> if (!r.isSuccessful) _ui.value = _ui.value.copy(autoApprove = before, error = "Couldn't change Full control") }
                 .onFailure { _ui.value = _ui.value.copy(autoApprove = before); fail(it, "Couldn't change Full control.") }
         }

@@ -99,6 +99,7 @@ import WaitingForHostScreen from '../components/WaitingForHostScreen';
 import { fmtRange } from '../components/MeetingCard';
 import CalendarView from '../components/CalendarView';
 import TasksPanel from '../components/TasksPanel';
+import AiSettingsSection from '../components/AiSettingsSection';
 import AiPage, { AgentApprovalPopup, CopilotScheduleDraft } from '../components/AiPage';
 import RemindersPanel, { ReminderAlerts } from '../components/RemindersPanel';
 import WhiteboardPage from '../components/WhiteboardPage';
@@ -439,12 +440,13 @@ const settingsPageStyle: React.CSSProperties = {
   display: 'flex', flexDirection: 'column', gap: 20, background: 'var(--bg-base)',
 };
 
-type SettingsPage = 'profile' | 'notifications' | 'security' | 'voice' | 'appearance' | 'account';
+type SettingsPage = 'profile' | 'notifications' | 'security' | 'ai' | 'voice' | 'appearance' | 'account';
 
 const SETTINGS_PAGES: { id: SettingsPage; label: string; hint: string; icon: string }[] = [
   { id: 'profile',       label: 'Profile',        hint: 'Photo, status and username',          icon: 'M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2|C12 7 4' },
   { id: 'notifications', label: 'Notifications',  hint: 'Alerts, quiet hours, disappearing',   icon: 'M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9|M13.73 21a2 2 0 0 1-3.46 0' },
   { id: 'security',      label: 'Security',       hint: 'Master token, 2FA, encryption key',   icon: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z' },
+  { id: 'ai',            label: 'Dilarion AI',    hint: 'Full control, agent permissions, chat history', icon: 'M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z|M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z' },
   { id: 'voice',         label: 'Voice decoy',    hint: 'Your enrolled voice sample',           icon: 'M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z|M19 10v2a7 7 0 0 1-14 0v-2|M12 19v4' },
   { id: 'appearance',    label: 'Appearance',     hint: 'Light or dark, accent, text size',    icon: 'C12 12 9|M12 3a9 9 0 0 0 0 18z' },
   { id: 'account',       label: 'Account',        hint: 'Delete account, log out',             icon: 'M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4|M16 17l5-5-5-5|M21 12H9' },
@@ -1970,6 +1972,7 @@ function SettingsMainPanel({ token, username, onLogout, page }: SettingsMainProp
 
       {/* Encryption key section */}
       {page === 'security' && <EncryptionKeySection token={token} username={username} />}
+      {page === 'ai' && <AiSettingsSection token={token} />}
 
       {page === 'account' && (<>
 {/* Danger zone: account deletion request */}

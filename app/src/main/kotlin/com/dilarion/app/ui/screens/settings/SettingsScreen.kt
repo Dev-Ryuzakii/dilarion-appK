@@ -13,6 +13,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.activity.compose.BackHandler
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Circle
@@ -56,6 +57,7 @@ private enum class SettingsPage(val title: String) {
     BIO("Bio"),
     NOTIFICATIONS("Notifications"),
     TWO_FA("Two-factor (2FA)"),
+    AI("Dilarion AI"),
     VOICE("AI voice decoy"),
     USERNAME("Username"),
     RECOVERY("Recovery code"),
@@ -256,6 +258,8 @@ fun SettingsScreen(
                         HubRow(Icons.Default.Restore, "Recovery code", "Reset your access token without an admin") { page = SettingsPage.RECOVERY }
                         HubDivider()
                         HubRow(Icons.Default.Devices, "Linked devices", "Link your desktop by QR, unlink devices") { onLinkedDevices() }
+                        HubDivider()
+                        HubRow(Icons.Filled.AutoAwesome, "Dilarion AI", "Full control, agent permissions, chat history") { page = SettingsPage.AI }
                     }
 
                     Spacer(Modifier.height(20.dp))
@@ -753,6 +757,10 @@ fun SettingsScreen(
 
                     Spacer(Modifier.height(24.dp))
                 }
+                SettingsPage.AI -> {
+                    AiSettingsContent()
+                }
+
                 SettingsPage.DANGER -> {
                     SettingsIntro("Ask an admin to delete your account and its data.")
 

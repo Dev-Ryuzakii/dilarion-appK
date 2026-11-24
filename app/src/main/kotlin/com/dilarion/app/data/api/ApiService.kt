@@ -1187,5 +1187,8 @@ interface ApiService {
     suspend fun getAiPreferences(@Header("Authorization") bearer: String): Response<AiPreferences>
 
     @PUT("ai/preferences")
-    suspend fun setAiPreferences(@Header("Authorization") bearer: String, @Body request: AiPreferences): Response<AiPreferences>
+    suspend fun setAiPreferences(@Header("Authorization") bearer: String, @Body request: AiPreferencesUpdate): Response<AiPreferences>
+
+    @DELETE("ai/conversations")
+    suspend fun clearAiConversations(@Header("Authorization") bearer: String): Response<Unit>
 }

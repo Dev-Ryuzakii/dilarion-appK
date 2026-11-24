@@ -1072,4 +1072,20 @@ data class AiSendResponse(
     val title: String? = null,
 )
 
-data class AiPreferences(@SerializedName("auto_approve") val autoApprove: Boolean = false)
+data class AiToolOption(val id: String, val label: String)
+
+data class AiPreferences(
+    @SerializedName("auto_approve") val autoApprove: Boolean = false,
+    @SerializedName("allow_from_others") val allowFromOthers: Boolean? = null,
+    @SerializedName("disabled_tools") val disabledTools: List<String>? = null,
+    val timezone: String? = null,
+    val tools: List<AiToolOption>? = null,
+)
+
+/** Partial update: Gson leaves out null fields, so only what is set changes. */
+data class AiPreferencesUpdate(
+    @SerializedName("auto_approve") val autoApprove: Boolean? = null,
+    @SerializedName("allow_from_others") val allowFromOthers: Boolean? = null,
+    @SerializedName("disabled_tools") val disabledTools: List<String>? = null,
+    val timezone: String? = null,
+)
