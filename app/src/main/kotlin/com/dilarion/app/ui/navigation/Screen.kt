@@ -49,6 +49,8 @@ sealed class Screen(val route: String) {
     }
     object MasterToken   : Screen("master_token")
     object LinkedDevices : Screen("linked_devices")
+    object Reminders     : Screen("reminders")
+    object Ai            : Screen("ai")
 }
 
 private fun String.encodeToUrl() = java.net.URLEncoder.encode(this, "UTF-8")

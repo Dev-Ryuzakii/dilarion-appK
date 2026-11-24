@@ -96,6 +96,8 @@ fun HomeScreen(
     onNewGroup: () -> Unit = {},
     onNewMeeting: () -> Unit,
     onMeetings: () -> Unit,
+    onReminders: () -> Unit = {},
+    onAi: () -> Unit = {},
     onJoinMeeting: (joinCode: String, title: String?) -> Unit,
     onSettings: () -> Unit,
     onSearch: () -> Unit = {},
@@ -151,6 +153,8 @@ fun HomeScreen(
                     onJoinGroup = { showJoinGroup = true },
                     onNewMeeting = onNewMeeting,
                     onMeetings = onMeetings,
+                    onReminders = onReminders,
+                    onAi = onAi,
                     onSearch = onSearch,
                     onSettings = onSettings,
                     onLogout = { showLogoutDialog = true },
@@ -282,6 +286,8 @@ private fun HomeTabContent(
     onJoinGroup: () -> Unit,
     onNewMeeting: () -> Unit,
     onMeetings: () -> Unit,
+    onReminders: () -> Unit = {},
+    onAi: () -> Unit = {},
     onSearch: () -> Unit,
     onSettings: () -> Unit,
     onLogout: () -> Unit,
@@ -337,7 +343,7 @@ private fun HomeTabContent(
         item { JumpToField("Jump to…", onSearch) }
 
         // Quick actions
-        item {
+        item { Column {
             Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -346,7 +352,14 @@ private fun HomeTabContent(
                 QuickAction(Icons.Default.Event, "Meetings", Modifier.weight(1f), onMeetings)
                 QuickAction(Icons.Default.Edit, "New chat", Modifier.weight(1f), onNewChat)
             }
-        }
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 14.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                QuickAction(Icons.Default.Alarm, "Reminders", Modifier.weight(1f), onReminders)
+                QuickAction(Icons.Default.AutoAwesome, "Dilarion AI", Modifier.weight(1f), onAi)
+            }
+        } }
 
         if (showSkeleton) return@LazyColumn
 

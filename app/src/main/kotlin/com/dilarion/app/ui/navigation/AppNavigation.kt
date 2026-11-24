@@ -13,6 +13,7 @@ import androidx.compose.ui.Modifier
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
@@ -92,6 +93,16 @@ fun AppNavigation(pendingIncomingCall: IncomingCallData? = null) {
 
     // "Is this you signing in on <device>?" from a new device's sign-in.
     com.dilarion.app.ui.components.LoginApprovalPrompt()
+
+    // A reminder that is due rings over whatever screen is showing.
+    com.dilarion.app.reminders.ReminderAlert()
+
+    // Agent plans waiting for approval pop up anywhere except the AI page itself.
+    val navEntry by navController.currentBackStackEntryAsState()
+    com.dilarion.app.ui.screens.ai.AgentApprovalPrompt(
+        hidden = navEntry?.destination?.route == Screen.Ai.route,
+        onReview = { navController.navigate(Screen.Ai.route) { launchSingleTop = true } },
+    )
 
     // Our 1:1 call was turned into a group call by the other party. Group calls
     // run in the LiveKit room — staying on the mesh leg would leave us connected
@@ -273,6 +284,12 @@ fun AppNavigation(pendingIncomingCall: IncomingCallData? = null) {
                 },
                 onMeetings = {
                     navController.navigate(Screen.Meetings.route)
+                },
+                onReminders = {
+                    navController.navigate(Screen.Reminders.route)
+                },
+                onAi = {
+                    navController.navigate(Screen.Ai.route)
                 },
                 onJoinMeeting = { joinCode, title ->
                     navController.navigate(Screen.Lobby.route(mode = "join", joinCode = joinCode, title = title))
@@ -556,6 +573,14 @@ fun AppNavigation(pendingIncomingCall: IncomingCallData? = null) {
                 startedByMe = startedByMe,
                 onBack = { navController.popBackStack() },
             )
+        }
+
+        composable(Screen.Reminders.route) {
+            com.dilarion.app.ui.screens.reminders.RemindersScreen(onBack = { navController.popBackStack() })
+        }
+
+        composable(Screen.Ai.route) {
+            com.dilarion.app.ui.screens.ai.AiScreen(onBack = { navController.popBackStack() })
         }
 
         composable(Screen.Settings.route) {

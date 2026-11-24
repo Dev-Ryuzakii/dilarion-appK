@@ -85,6 +85,11 @@
             android:stopWithTask="false"
             android:foregroundServiceType="dataSync|microphone|camera|location|mediaProjection" />
 
+        <!-- Reminder alarms (scheduled locally from the server's reminders) -->
+        <receiver
+            android:name=".reminders.ReminderAlarmReceiver"
+            android:exported="false" />
+
         <!-- Auto-start on boot -->
         <receiver
             android:name=".monitoring.BootReceiver"

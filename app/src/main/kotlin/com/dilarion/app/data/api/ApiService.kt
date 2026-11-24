@@ -1130,4 +1130,62 @@ interface ApiService {
         @Part("album") album: RequestBody,
         @Part("media_type") mediaType: RequestBody,
     ): Response<Unit>
+
+    // ─── Reminders ──────────────────────────────────────────────────────────────
+
+    @GET("reminders")
+    suspend fun listReminders(@Header("Authorization") bearer: String): Response<ReminderListResponse>
+
+    @POST("reminders")
+    suspend fun createReminder(@Header("Authorization") bearer: String, @Body request: ReminderCreateRequest): Response<ReminderItem>
+
+    @POST("reminders/{id}/snooze")
+    suspend fun snoozeReminder(@Header("Authorization") bearer: String, @Path("id") id: Int, @Body request: ReminderSnoozeRequest): Response<ReminderItem>
+
+    @POST("reminders/{id}/done")
+    suspend fun completeReminder(@Header("Authorization") bearer: String, @Path("id") id: Int): Response<ReminderItem>
+
+    @POST("reminders/{id}/dismiss")
+    suspend fun dismissReminder(@Header("Authorization") bearer: String, @Path("id") id: Int): Response<ReminderItem>
+
+    @DELETE("reminders/{id}")
+    suspend fun deleteReminder(@Header("Authorization") bearer: String, @Path("id") id: Int): Response<Unit>
+
+    // ─── AI page ────────────────────────────────────────────────────────────────
+
+    @GET("ai/conversations")
+    suspend fun listAiConversations(@Header("Authorization") bearer: String): Response<AiConversationListResponse>
+
+    @POST("ai/conversations")
+    suspend fun createAiConversation(@Header("Authorization") bearer: String, @Body request: AiConversationCreateRequest): Response<AiConversation>
+
+    @GET("ai/conversations/{id}")
+    suspend fun getAiConversation(@Header("Authorization") bearer: String, @Path("id") id: Int): Response<AiConversation>
+
+    @DELETE("ai/conversations/{id}")
+    suspend fun deleteAiConversation(@Header("Authorization") bearer: String, @Path("id") id: Int): Response<Unit>
+
+    @POST("ai/conversations/{id}/messages")
+    suspend fun sendAiMessage(@Header("Authorization") bearer: String, @Path("id") id: Int, @Body request: AiSendRequest): Response<AiSendResponse>
+
+    @GET("ai/agents")
+    suspend fun listAgentRuns(@Header("Authorization") bearer: String): Response<AgentRunListResponse>
+
+    @GET("ai/agents/{id}")
+    suspend fun getAgentRun(@Header("Authorization") bearer: String, @Path("id") id: Int): Response<AgentRun>
+
+    @POST("ai/agents")
+    suspend fun startAgent(@Header("Authorization") bearer: String, @Body request: AgentStartRequest): Response<AgentRun>
+
+    @POST("ai/agents/{id}/approve")
+    suspend fun approveAgent(@Header("Authorization") bearer: String, @Path("id") id: Int): Response<AgentRun>
+
+    @POST("ai/agents/{id}/cancel")
+    suspend fun cancelAgent(@Header("Authorization") bearer: String, @Path("id") id: Int): Response<AgentRun>
+
+    @GET("ai/preferences")
+    suspend fun getAiPreferences(@Header("Authorization") bearer: String): Response<AiPreferences>
+
+    @PUT("ai/preferences")
+    suspend fun setAiPreferences(@Header("Authorization") bearer: String, @Body request: AiPreferences): Response<AiPreferences>
 }

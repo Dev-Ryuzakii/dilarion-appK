@@ -990,3 +990,86 @@ data class CaptionsResponse(
 )
 
 data class CaptionsStartRequest(val language: String? = null)
+
+// ─── Reminders ────────────────────────────────────────────────────────────────
+
+data class ReminderItem(
+    val id: Int,
+    val title: String,
+    val note: String? = null,
+    @SerializedName("remind_at") val remindAt: String,
+    val recurrence: String? = null,
+    val status: String = "scheduled",
+    val source: String = "user",
+    @SerializedName("snooze_count") val snoozeCount: Int = 0,
+    @SerializedName("fired_at") val firedAt: String? = null,
+)
+
+data class ReminderListResponse(val reminders: List<ReminderItem> = emptyList())
+
+data class ReminderCreateRequest(
+    val title: String,
+    @SerializedName("remind_at") val remindAt: String,
+    val note: String? = null,
+    val recurrence: String? = null,
+)
+
+data class ReminderSnoozeRequest(val minutes: Int)
+
+// ─── AI page (conversations + agents) ────────────────────────────────────────
+
+data class AiStep(
+    val tool: String,
+    val args: com.google.gson.JsonObject? = null,
+    val why: String? = null,
+    val status: String? = null,
+    val error: String? = null,
+)
+
+data class AgentRun(
+    val id: Int,
+    val title: String? = null,
+    val instruction: String = "",
+    val status: String,
+    @SerializedName("require_approval") val requireApproval: Boolean = false,
+    val plan: List<AiStep> = emptyList(),
+    val steps: List<AiStep> = emptyList(),
+    val summary: String? = null,
+    val error: String? = null,
+    @SerializedName("created_at") val createdAt: String? = null,
+)
+
+data class AgentRunListResponse(val runs: List<AgentRun> = emptyList())
+
+data class AgentStartRequest(
+    val instruction: String,
+    @SerializedName("require_approval") val requireApproval: Boolean = true,
+)
+
+data class AiChatMessage(
+    val id: Int,
+    val role: String,
+    val content: String,
+    @SerializedName("agent_run_id") val agentRunId: Int? = null,
+    @SerializedName("created_at") val createdAt: String? = null,
+)
+
+data class AiConversation(
+    val id: Int,
+    val title: String = "New chat",
+    @SerializedName("updated_at") val updatedAt: String? = null,
+    val messages: List<AiChatMessage>? = null,
+)
+
+data class AiConversationListResponse(val conversations: List<AiConversation> = emptyList())
+data class AiConversationCreateRequest(val title: String? = null)
+data class AiSendRequest(val text: String)
+
+data class AiSendResponse(
+    @SerializedName("user_message") val userMessage: AiChatMessage,
+    @SerializedName("assistant_message") val assistantMessage: AiChatMessage,
+    @SerializedName("agent_run") val agentRun: AgentRun? = null,
+    val title: String? = null,
+)
+
+data class AiPreferences(@SerializedName("auto_approve") val autoApprove: Boolean = false)
