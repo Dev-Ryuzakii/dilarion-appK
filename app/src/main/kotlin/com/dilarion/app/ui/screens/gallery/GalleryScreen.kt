@@ -1,6 +1,7 @@
 package com.dilarion.app.ui.screens.gallery
 
 import android.app.Activity
+import com.afribase.watch.compose.watchBlock
 import android.content.Context
 import android.media.projection.MediaProjectionManager
 import android.view.WindowManager
@@ -146,7 +147,7 @@ fun GalleryScreen(
     // PiP: system has shrunk the window to a small floating overlay — show just
     // the active tile, no chrome (toolbar/sheets don't make sense that small).
     if (isInPip) {
-        Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+        Box(modifier = Modifier.watchBlock().fillMaxSize().background(Color.Black)) {
             val mainTile = state.tiles.firstOrNull { it.isSpeaking && !it.isLocal }
                 ?: state.tiles.firstOrNull { !it.isLocal }
                 ?: state.tiles.firstOrNull()
@@ -191,7 +192,7 @@ fun GalleryScreen(
     }
 
     Box(
-        modifier = Modifier
+        modifier = Modifier.watchBlock()
             .fillMaxSize()
             .background(Brush.verticalGradient(listOf(Color(0xFF2A1210), Stage, Stage)))
             .systemBarsPadding(),

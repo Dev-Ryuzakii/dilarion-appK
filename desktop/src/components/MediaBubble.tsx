@@ -78,7 +78,7 @@ function MediaLightbox({ src, kind, onClose }: { src: string; kind: MediaKind; o
   }, [onClose]);
 
   return createPortal(
-    <div
+    <div data-watch-block
       className="media-lightbox"
       onClick={onClose}
       style={{
@@ -395,7 +395,7 @@ function VoiceBubble({ token, mediaId, masterToken, onMasterTokenSaved, isMine, 
 
   if (stage === 'loading') {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 4px', color: isMine ? 'rgba(255,255,255,0.85)' : 'var(--text-muted)', fontSize: '0.83rem' }}>
+      <div data-watch-block style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 4px', color: isMine ? 'rgba(255,255,255,0.85)' : 'var(--text-muted)', fontSize: '0.83rem' }}>
         <SpinnerIcon size={20} />
         <span>Loading voice note...</span>
       </div>
@@ -403,7 +403,7 @@ function VoiceBubble({ token, mediaId, masterToken, onMasterTokenSaved, isMine, 
   }
   if (stage === 'error') {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: isMine ? 'rgba(255,255,255,0.85)' : 'var(--text-muted)', fontSize: '0.83rem' }}>
+      <div data-watch-block style={{ display: 'flex', alignItems: 'center', gap: 8, color: isMine ? 'rgba(255,255,255,0.85)' : 'var(--text-muted)', fontSize: '0.83rem' }}>
         <MicIconSvg size={18} color={isMine ? 'rgba(255,255,255,0.7)' : '#9ca3af'} />
         <span>{error}</span>
       </div>
@@ -415,7 +415,7 @@ function VoiceBubble({ token, mediaId, masterToken, onMasterTokenSaved, isMine, 
   const unplayedColor = isMine ? 'rgba(255,255,255,0.4)' : 'rgba(239,68,68,0.3)';
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 220 }}>
+    <div data-watch-block style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 220 }}>
       {/* Double-click unlocks the real audio — same gesture as photos, no
           padlock on the bubble hinting that a decoy is playing. */}
       <div
@@ -757,7 +757,7 @@ function VisualMediaBubble({
       else if (isVideoAttachment) { iconEl = <CameraIcon size={22} color="#9ca3af" />; label = 'Video'; }
     }
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <div data-watch-block style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         <button
           onClick={handleClick}
           disabled={loading}
@@ -779,7 +779,7 @@ function VisualMediaBubble({
   // decoy / revealed — a thumbnail that looks the same either way, nothing
   // in the UI hints which state it's in until the token prompt is opened.
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+    <div data-watch-block style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
       <div
         onClick={handleClick}
         onDoubleClick={handleDoubleClick}
@@ -992,7 +992,7 @@ export function DocumentBubble({
   const label = stage === 'loading' ? 'Loading...' : stage === 'revealing' ? 'Verifying...' : 'Document.pdf';
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+    <div data-watch-block style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
       <button
         onClick={handleClick}
         onDoubleClick={handleDoubleClick}

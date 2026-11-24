@@ -42,7 +42,7 @@ export default function MasterTokenPromptModal({ token, onConfirmed, onCancel }:
   }
 
   return (
-    <div className="responsive-overlay" onClick={onCancel} style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.40)', backdropFilter: 'blur(3px)', zIndex: 980, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+    <div data-watch-block className="responsive-overlay" onClick={onCancel} style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.40)', backdropFilter: 'blur(3px)', zIndex: 980, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <div className="responsive-dialog" onClick={e => e.stopPropagation()} style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 20, width: 360, padding: 24, boxShadow: '0 24px 60px rgba(15,23,42,0.20)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
           <div style={{ width: 40, height: 40, borderRadius: 12, background: 'rgba(216,52,40,0.10)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>

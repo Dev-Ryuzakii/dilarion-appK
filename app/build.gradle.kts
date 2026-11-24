@@ -98,6 +98,8 @@ android {
 }
 
 dependencies {
+    // Base1 Watch: error/UX monitoring and wireframe session replay
+    implementation("com.github.Afribase-Dev:afribase-sdks:watch-0.1.1")
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)

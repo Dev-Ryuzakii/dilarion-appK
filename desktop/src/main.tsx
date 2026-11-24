@@ -1,3 +1,5 @@
+// Start Base1 Watch before anything else so early errors are caught.
+import "./services/watch";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";

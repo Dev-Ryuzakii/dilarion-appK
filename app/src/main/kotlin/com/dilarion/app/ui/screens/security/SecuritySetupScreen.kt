@@ -1,6 +1,7 @@
 package com.dilarion.app.ui.screens.security
 
 import android.Manifest
+import com.afribase.watch.compose.watchSecureScreen
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -43,7 +44,7 @@ fun SecuritySetupScreen(onComplete: () -> Unit, viewModel: SecuritySetupViewMode
 
     LaunchedEffect(state.done) { if (state.done) onComplete() }
 
-    val bg = Modifier
+    val bg = Modifier.watchSecureScreen()
         .fillMaxSize()
         .background(
             Brush.verticalGradient(

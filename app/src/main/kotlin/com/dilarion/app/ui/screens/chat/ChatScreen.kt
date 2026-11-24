@@ -3,6 +3,7 @@
 package com.dilarion.app.ui.screens.chat
 
 import android.Manifest
+import com.afribase.watch.compose.watchBlock
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -933,7 +934,7 @@ private fun VoiceMessageBubble(
     // gesture as photos and documents, so nothing hints a decoy is playing.
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
+        modifier = Modifier.watchBlock()
             .combinedClickable(onClick = {}, onDoubleClick = { if (!isUnlocked) onLockTap() })
             .padding(4.dp)
             .widthIn(min = 220.dp),
@@ -1057,7 +1058,7 @@ private fun MediaBubble(
     }
 
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.watchBlock().fillMaxWidth(),
         horizontalArrangement = if (isMine) Arrangement.End else Arrangement.Start,
     ) {
         Column(
@@ -1168,7 +1169,7 @@ private fun DocumentBubble(
     }
 
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.watchBlock().fillMaxWidth(),
         horizontalArrangement = if (isMine) Arrangement.End else Arrangement.Start,
     ) {
         Column(
@@ -1284,7 +1285,7 @@ private fun DocumentViewerDialog(bytes: ByteArray, onDismiss: () -> Unit, onAsk:
     }
 
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Box(Modifier.fillMaxSize().background(Color(0xFF1C1C1E))) {
+        Box(Modifier.watchBlock().fillMaxSize().background(Color(0xFF1C1C1E))) {
             when {
                 loading -> CircularProgressIndicator(Modifier.align(Alignment.Center), color = SurfaceWhite)
                 error != null -> Text(error ?: "", color = Color(0xFFEF4444), modifier = Modifier.align(Alignment.Center).padding(24.dp))
@@ -1367,7 +1368,7 @@ private fun FullScreenImageViewer(imagePath: String, onDismiss: () -> Unit) {
         var offset by remember { mutableStateOf(Offset.Zero) }
 
         Box(
-            Modifier
+            Modifier.watchBlock()
                 .fillMaxSize()
                 .background(Color.Black)
                 .pointerInput(Unit) {
@@ -1425,7 +1426,7 @@ private fun FullScreenVideoViewer(videoPath: String, onDismiss: () -> Unit) {
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
-        Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
+        Box(Modifier.watchBlock().fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
             androidx.compose.ui.viewinterop.AndroidView(
                 factory = { ctx ->
                     android.widget.VideoView(ctx).apply {
