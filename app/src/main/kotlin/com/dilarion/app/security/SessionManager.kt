@@ -33,6 +33,9 @@ class SessionManager @Inject constructor(
         // Invited staff must finish the profile + live camera step before the
         // server lets them use anything else.
         val ONBOARDING_PENDING = stringPreferencesKey("onboarding_pending")
+        // Which account the stored keypair/device id belong to. Survives
+        // logout so the same account signing back in keeps its identity.
+        val KEY_OWNER = stringPreferencesKey("key_owner")
     }
 
     val sessionToken: Flow<String?> = context.dataStore.data.map { it[Keys.SESSION_TOKEN] }
@@ -57,6 +60,7 @@ class SessionManager @Inject constructor(
             prefs[Keys.USERNAME]      = username
             prefs[Keys.PRIVATE_KEY]   = privateKey
             prefs[Keys.PUBLIC_KEY]    = publicKey
+            prefs[Keys.KEY_OWNER]     = username
         }
     }
 
@@ -65,6 +69,7 @@ class SessionManager @Inject constructor(
             // Same account renamed — its master token goes with it.
             if (prefs[Keys.MASTER_TOKEN] != null) prefs[Keys.MASTER_TOKEN_OWNER] = newUsername
             prefs[Keys.USERNAME] = newUsername
+            if (prefs[Keys.KEY_OWNER] != null) prefs[Keys.KEY_OWNER] = newUsername
         }
     }
 
@@ -88,7 +93,9 @@ class SessionManager @Inject constructor(
      */
     suspend fun prepareForAccount(username: String) {
         val prefs = context.dataStore.data.first()
-        val previous = prefs[Keys.USERNAME]
+        // After a logout USERNAME is gone but KEY_OWNER still names whose
+        // keypair is stored. Older installs have neither after logout.
+        val previous = prefs[Keys.USERNAME] ?: prefs[Keys.KEY_OWNER]
         if (previous != null && !previous.equals(username, ignoreCase = true)) {
             context.dataStore.edit { it.clear() }
         }
@@ -98,8 +105,26 @@ class SessionManager @Inject constructor(
         context.dataStore.edit { it[Keys.DEVICE_UUID] = deviceUuid }
     }
 
+    /**
+     * Sign out. The device keypair and device id stay (bound to KEY_OWNER):
+     * deleting them would make every message already sent to this phone
+     * permanently unreadable, because a new sign-in would create a new key.
+     * A different account signing in wipes them (prepareForAccount).
+     */
     suspend fun clearSession() {
-        context.dataStore.edit { it.clear() }
+        context.dataStore.edit { prefs ->
+            val priv = prefs[Keys.PRIVATE_KEY]
+            val pub = prefs[Keys.PUBLIC_KEY]
+            val device = prefs[Keys.DEVICE_UUID]
+            val owner = prefs[Keys.KEY_OWNER] ?: prefs[Keys.USERNAME]
+            prefs.clear()
+            if (owner != null && !priv.isNullOrBlank() && !pub.isNullOrBlank()) {
+                prefs[Keys.KEY_OWNER] = owner
+                prefs[Keys.PRIVATE_KEY] = priv
+                prefs[Keys.PUBLIC_KEY] = pub
+                if (device != null) prefs[Keys.DEVICE_UUID] = device
+            }
+        }
     }
 
     /** Idle logout: drop only the session token — the device keypair, username
