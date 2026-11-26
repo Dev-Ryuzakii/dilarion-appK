@@ -451,10 +451,13 @@ class GalleryViewModel @Inject constructor(
             val token = sessionManager.sessionToken.first() ?: return@launch
             runCatching {
                 val resp = apiService.getLiveKitToken("Bearer $token", conferenceId, displayName)
-                if (!resp.isSuccessful) throw IllegalStateException(
-                    if (resp.code() == 503) "Group video is not set up on this server yet"
-                    else "Failed to get video token (${resp.code()})"
-                )
+                if (!resp.isSuccessful) throw when (resp.code()) {
+                    // The conference closed (everyone left) before this join.
+                    404 -> CallJoinException("This call has already ended.")
+                    403 -> CallJoinException("You're not part of this call.")
+                    503 -> CallJoinException("Group video isn't set up on this server yet.")
+                    else -> IllegalStateException("Failed to get video token (${resp.code()})")
+                }
                 val body = resp.body() ?: throw IllegalStateException("Failed to get video token")
 
                 val kind = body.kind ?: if (_uiState.value.isAdHocCall) "call" else "meeting"
@@ -539,6 +542,7 @@ class GalleryViewModel @Inject constructor(
                 }.getOrElse { emptyList() }
 
                 r.connect(body.url, body.token, ConnectOptions(iceServers = iceServers))
+                com.dilarion.app.services.BackgroundConnectionService.setCallActive(context, "meeting", true)
                 r.localParticipant.setMicrophoneEnabled(initialMicOn)
                 r.localParticipant.setCameraEnabled(cam)
                 val actualCamOn = r.localParticipant.isCameraEnabled
@@ -550,7 +554,9 @@ class GalleryViewModel @Inject constructor(
 
                 _uiState.value = _uiState.value.copy(connecting = false)
             }.onFailure { e ->
-                _uiState.value = _uiState.value.copy(connecting = false, error = e.toUserMessage("Couldn't join the group video call. Check your connection and retry."))
+                val msg = if (e is CallJoinException) e.message
+                    else e.toUserMessage("Couldn't join the group video call. Check your connection and retry.")
+                _uiState.value = _uiState.value.copy(connecting = false, error = msg)
             }
         }
     }
@@ -825,6 +831,7 @@ class GalleryViewModel @Inject constructor(
         room?.disconnect()
         room?.release()
         room = null
+        com.dilarion.app.services.BackgroundConnectionService.setCallActive(context, "meeting", false)
         _uiState.value = _uiState.value.copy(sharingScreen = false)
         if (id > 0) notifyConferenceLeft(sessionManager, apiService, id)
         if (parent > 0 && parent != id) notifyConferenceLeft(sessionManager, apiService, parent)
@@ -835,5 +842,9 @@ class GalleryViewModel @Inject constructor(
         room?.disconnect()
         room?.release()
         room = null
+        com.dilarion.app.services.BackgroundConnectionService.setCallActive(context, "meeting", false)
     }
 }
+
+/** A join failure with a clear reason the user should see as-is. */
+private class CallJoinException(override val message: String) : Exception(message)

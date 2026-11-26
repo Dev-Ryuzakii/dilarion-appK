@@ -1,12 +1,9 @@
 use base64::{engine::general_purpose, Engine as _};
 use enigo::{Axis, Button, Coordinate, Direction, Enigo, Key as EnigoKey, Keyboard, Mouse, Settings};
-use screenshots::Screen;
-use screenshots::image::{DynamicImage, ImageFormat};
 use serde::{Deserialize, Serialize};
 use sysinfo::System;
 use tauri::{Manager, State};
 use std::sync::Mutex;
-use std::io::Cursor;
 
 // ── State ─────────────────────────────────────────────────────────────────────
 
@@ -49,20 +46,6 @@ fn get_token(state: State<'_, AppState>) -> Option<String> {
     state.token.lock().unwrap().clone()
 }
 
-#[tauri::command]
-fn capture_screenshot() -> Result<String, String> {
-    let screens = Screen::all().map_err(|e| e.to_string())?;
-    let screen = screens.into_iter().next().ok_or("No screen found")?;
-    let image = screen.capture().map_err(|e| e.to_string())?;
-
-    let mut buf = Cursor::new(Vec::new());
-    DynamicImage::ImageRgba8(image)
-        .write_to(&mut buf, ImageFormat::Png)
-        .map_err(|e| e.to_string())?;
-
-    Ok(general_purpose::STANDARD.encode(buf.into_inner()))
-}
-
 #[derive(Serialize)]
 struct DeviceInfo {
     os: String,
@@ -86,20 +69,6 @@ fn get_device_info() -> DeviceInfo {
             .map(|c| c.brand().to_string())
             .unwrap_or_else(|| "Unknown".into()),
         total_memory_mb: sys.total_memory() / 1024 / 1024,
-    }
-}
-
-#[derive(Serialize)]
-struct BatteryInfo {
-    status: String,
-    percent: Option<f32>,
-}
-
-#[tauri::command]
-fn get_battery_info() -> BatteryInfo {
-    BatteryInfo {
-        status: "AC Powered".to_string(),
-        percent: None,
     }
 }
 
@@ -136,9 +105,8 @@ fn inject_remote_input(event: RemoteInputEvent, state: State<'_, AppState>) -> R
 
     match event {
         RemoteInputEvent::Move { x, y } => {
-            let screens = Screen::all().map_err(|e| e.to_string())?;
-            let screen = screens.into_iter().next().ok_or("No screen found")?;
-            let (w, h) = (screen.display_info.width as f64, screen.display_info.height as f64);
+            let (sw, sh) = enigo.main_display().map_err(|e| e.to_string())?;
+            let (w, h) = (sw as f64, sh as f64);
             let px = (x.clamp(0.0, 1.0) * w) as i32;
             let py = (y.clamp(0.0, 1.0) * h) as i32;
             enigo.move_mouse(px, py, Coordinate::Abs).map_err(|e| e.to_string())?;
@@ -198,27 +166,6 @@ fn named_key(key: &str) -> Option<EnigoKey> {
         "PageDown" => EnigoKey::PageDown,
         _ => return None,
     })
-}
-
-// ── Org device-policy compliance agent ──────────────────────────────────────
-// Only ever runs when the backend has this device's MonitoringConsent with
-// allow_app_policy_monitoring set — see AppComplianceMonitor.tsx, which polls
-// the admin-defined blocklist and calls this only in that state. This command
-// itself just answers "what's currently running", app-level (process names),
-// not window/tab titles — it doesn't gate or decide anything on its own.
-
-#[tauri::command]
-fn list_running_processes() -> Vec<String> {
-    let mut sys = System::new_all();
-    sys.refresh_all();
-    let mut names: Vec<String> = sys
-        .processes()
-        .values()
-        .map(|p| p.name().to_string_lossy().to_lowercase())
-        .collect();
-    names.sort();
-    names.dedup();
-    names
 }
 
 // ── RustDesk remote control ─────────────────────────────────────────────────
@@ -496,16 +443,13 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             set_token,
             get_token,
-            capture_screenshot,
             get_device_info,
-            get_battery_info,
             set_badge_count,
             set_control_session_active,
             inject_remote_input,
             rustdesk_prepare,
             rustdesk_connect,
             rustdesk_reset_password,
-            list_running_processes,
             set_pending_call,
             take_pending_call,
             save_download,

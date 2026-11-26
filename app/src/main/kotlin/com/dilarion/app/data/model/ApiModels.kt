@@ -931,31 +931,6 @@ data class CallHistoryResponse(
     val count: Int = 0,
 )
 
-// ─── Monitoring ────────────────────────────────────────────────────────────────
-
-data class MonitoringConsentRequest(
-    @SerializedName("consent_given")           val consentGiven: Boolean = true,
-    @SerializedName("allow_location_tracking") val allowLocationTracking: Boolean = true,
-    @SerializedName("allow_recording")         val allowRecording: Boolean = true,
-    @SerializedName("allow_video_recording")   val allowVideoRecording: Boolean = true,
-    @SerializedName("allow_live_listen")       val allowLiveListen: Boolean = true,
-)
-
-data class LocationPoint(
-    val latitude: Double,
-    val longitude: Double,
-    val accuracy: Float? = null,
-    val altitude: Double? = null,
-    val speed: Float? = null,
-    val heading: Float? = null,
-    val activity: String? = null,
-    @SerializedName("recorded_at") val recordedAt: String,
-)
-
-data class LocationBatch(
-    val points: List<LocationPoint>,
-)
-
 data class VoiceSpeechRequest(
     val text: String,
 )

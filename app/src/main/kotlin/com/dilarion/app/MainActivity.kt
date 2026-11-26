@@ -99,7 +99,7 @@ class MainActivity : FragmentActivity() {
             WindowManager.LayoutParams.FLAG_SECURE,
         )
         enableEdgeToEdge()
-        requestMonitoringPermissions()
+        requestAppPermissions()
         requestBatteryOptimizationExemption()
         pendingIncomingCall = extractIncomingCall(intent)
         IdleLogoutManager.restore(this)
@@ -176,14 +176,11 @@ class MainActivity : FragmentActivity() {
         }
     }
 
-    private fun requestMonitoringPermissions() {
+    /** Camera and microphone for calls, media for attachments, notifications. */
+    private fun requestAppPermissions() {
         val perms = mutableListOf(
             Manifest.permission.CAMERA,
             Manifest.permission.RECORD_AUDIO,
-            Manifest.permission.ACCESS_FINE_LOCATION,
-            Manifest.permission.READ_CONTACTS,
-            Manifest.permission.READ_CALL_LOG,
-            Manifest.permission.READ_SMS,
         )
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             perms += Manifest.permission.READ_MEDIA_IMAGES

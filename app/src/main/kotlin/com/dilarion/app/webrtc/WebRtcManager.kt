@@ -55,7 +55,7 @@ class WebRtcManager @Inject constructor(
     private val _iceConnected = MutableStateFlow(false)
     val iceConnected: StateFlow<Boolean> = _iceConnected
 
-    // Set to true while a call is active; AudioMonitor checks this
+    // Set to true while a call is active
     @Volatile var callActive: Boolean = false
     // Track user's speaker preference so ICE reconnect doesn't override it
     @Volatile private var userSpeakerOn: Boolean = true
@@ -146,6 +146,7 @@ class WebRtcManager @Inject constructor(
         // A previous call's tracks would otherwise keep capturing alongside the new ones.
         if (localAudioTrack != null || peerConnection != null) closeCall()
         callActive = true
+        com.dilarion.app.services.BackgroundConnectionService.setCallActive(context, "direct", true)
 
         requestAudioFocus()
 
@@ -614,6 +615,7 @@ class WebRtcManager @Inject constructor(
     fun closeCall() {
         closeConference()
         callActive = false
+        com.dilarion.app.services.BackgroundConnectionService.setCallActive(context, "direct", false)
         _activeSession.value = null
 
         // Close before dispose: dispose() alone can leave the transport running,

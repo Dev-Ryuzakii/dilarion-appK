@@ -213,6 +213,7 @@ class GroupCallViewModel @Inject constructor(
             if (!connected) {
                 throw lastError ?: IllegalStateException("Couldn't connect the call")
             }
+            com.dilarion.app.services.BackgroundConnectionService.setCallActive(context, "group", true)
             runCatching { r.localParticipant.setMicrophoneEnabled(true) }
             if (camOn) runCatching { r.localParticipant.setCameraEnabled(true) }
             _uiState.value = _uiState.value.copy(camOn = r.localParticipant.isCameraEnabled)
@@ -384,6 +385,7 @@ class GroupCallViewModel @Inject constructor(
         room?.disconnect()
         room?.release()
         room = null
+        com.dilarion.app.services.BackgroundConnectionService.setCallActive(context, "group", false)
         val confId = conferenceId
         if (confId > 0) notifyConferenceLeft(sessionManager, apiService, confId)
         _uiState.value = _uiState.value.copy(status = GroupCallStatus.ENDED, endReason = reason)

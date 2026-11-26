@@ -352,8 +352,14 @@ private fun ScheduleForm(
         uiState.scheduledAtMillis?.let { formatMeetingTime(java.time.Instant.ofEpochMilli(it).toString()) }
     }
     var query by rememberSaveable { mutableStateOf("") }
-    val people = remember(uiState.users, query) {
-        uiState.users.filter { query.isBlank() || (it.username ?: "").contains(query.trim(), ignoreCase = true) }
+    val people = remember(uiState.users, query, uiState.selected) {
+        val q = query.trim()
+        uiState.users
+            .filter { u ->
+                q.isEmpty() || listOf(u.username, u.fullName, u.jobTitle).any { (it ?: "").contains(q, ignoreCase = true) }
+            }
+            // People already picked stay on top, so a search never hides them.
+            .sortedByDescending { uiState.selected.contains(it.username) }
     }
 
     Column(modifier.fillMaxSize()) {
@@ -449,7 +455,7 @@ private fun ScheduleForm(
                             Icon(Icons.Default.Search, null, tint = TextMuted, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(8.dp))
                             Box(Modifier.weight(1f)) {
-                                if (query.isEmpty()) Text("Search people", color = TextMuted, fontSize = 15.sp)
+                                if (query.isEmpty()) Text("Search by name, username or role", color = TextMuted, fontSize = 15.sp)
                                 inner()
                             }
                         }
@@ -533,14 +539,23 @@ private fun InviteRow(user: UserInfo, checked: Boolean, onTap: () -> Unit) {
             contentAlignment = Alignment.Center,
         ) {
             Text(
-                user.username?.firstOrNull()?.uppercaseChar()?.toString() ?: "?",
+                (user.fullName?.takeIf { it.isNotBlank() } ?: user.username)?.firstOrNull()?.uppercaseChar()?.toString() ?: "?",
                 color = DilarionRed,
                 fontSize = 15.sp,
                 fontWeight = FontWeight.Bold,
             )
         }
         Spacer(Modifier.width(12.dp))
-        Text(user.username ?: "", modifier = Modifier.weight(1f), color = TextPrimary, fontSize = 15.sp)
+        val name = user.fullName?.takeIf { it.isNotBlank() } ?: user.username ?: ""
+        Column(Modifier.weight(1f)) {
+            Text(name, color = TextPrimary, fontSize = 15.sp, maxLines = 1)
+            if (name != user.username) {
+                Text(
+                    "@${user.username ?: ""}" + (user.jobTitle?.takeIf { it.isNotBlank() }?.let { " · $it" } ?: ""),
+                    color = TextMuted, fontSize = 12.sp, maxLines = 1,
+                )
+            }
+        }
         Box(
             modifier = Modifier
                 .size(22.dp)

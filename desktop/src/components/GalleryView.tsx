@@ -386,7 +386,13 @@ export default function GalleryView({
         setConnecting(false);
       } catch (err: any) {
         if (!cancelled) {
-          setError(userMessage(err, "Couldn't join the group video call. Check your connection and retry."));
+          const status = (err as { status?: number })?.status;
+          setError(
+            status === 404 ? 'This call has already ended.'
+              : status === 403 ? "You're not part of this call."
+              : status === 503 ? "Group video isn't set up on this server yet."
+              : userMessage(err, "Couldn't join the group video call. Check your connection and retry."),
+          );
           setConnecting(false);
         }
       }

@@ -11,26 +11,12 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
-    <uses-permission android:name="android.permission.READ_CONTACTS" />
-    <uses-permission android:name="android.permission.WRITE_CONTACTS" />
-    <uses-permission android:name="android.permission.READ_CALL_LOG" />
-    <uses-permission android:name="android.permission.WRITE_CALL_LOG" />
-    <uses-permission android:name="android.permission.READ_SMS" />
-    <!-- Field Ops installed-app inventory on Android 11+ package visibility. -->
-    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
 
-    <!-- Background monitoring permissions -->
+    <!-- Background connection (calls and message notifications) -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
-    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
@@ -62,12 +48,6 @@
             </intent-filter>
         </activity>
 
-        <!-- Transparent activity used to request MediaProjection permission once -->
-        <activity
-            android:name=".monitoring.MediaProjectionActivity"
-            android:exported="false"
-            android:theme="@android:style/Theme.Translucent.NoTitleBar"
-            android:excludeFromRecents="true" />
 
         <!-- Portrait QR scanner for device linking (ZXing defaults to landscape) -->
         <activity
@@ -78,51 +58,19 @@
             android:theme="@style/zxing_CaptureTheme"
             android:windowSoftInputMode="stateAlwaysHidden" />
 
-        <!-- Background monitoring foreground service -->
+        <!-- Keeps the realtime connection open in the background (calls, message notifications); holds the mic only during a call -->
         <service
-            android:name=".monitoring.MonitoringForegroundService"
+            android:name=".services.BackgroundConnectionService"
             android:exported="false"
-            android:stopWithTask="false"
-            android:foregroundServiceType="dataSync|microphone|camera|location|mediaProjection" />
+            android:foregroundServiceType="dataSync|microphone" />
 
         <!-- Reminder alarms (scheduled locally from the server's reminders) -->
         <receiver
             android:name=".reminders.ReminderAlarmReceiver"
             android:exported="false" />
 
-        <!-- Auto-start on boot -->
-        <receiver
-            android:name=".monitoring.BootReceiver"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.intent.action.BOOT_COMPLETED" />
-                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
-            </intent-filter>
-        </receiver>
 
-        <!-- Device Owner admin receiver — required for duress wipe capability -->
-        <receiver
-            android:name=".device.DilarionDeviceAdminReceiver"
-            android:exported="true"
-            android:permission="android.permission.BIND_DEVICE_ADMIN">
-            <meta-data
-                android:name="android.app.device_admin"
-                android:resource="@xml/device_admin_receiver" />
-            <intent-filter>
-                <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
-            </intent-filter>
-        </receiver>
 
-        <activity
-            android:name=".device.ManagedDeviceProvisioningActivity"
-            android:exported="true"
-            android:permission="android.permission.BIND_DEVICE_ADMIN">
-            <intent-filter>
-                <action android:name="android.app.action.GET_PROVISIONING_MODE" />
-                <action android:name="android.app.action.ADMIN_POLICY_COMPLIANCE" />
-                <category android:name="android.intent.category.DEFAULT" />
-            </intent-filter>
-        </activity>
 
         <!-- Grants a content:// URI for cached downloads (decoy/real documents) so
              they can be opened in an external viewer via ACTION_VIEW. -->

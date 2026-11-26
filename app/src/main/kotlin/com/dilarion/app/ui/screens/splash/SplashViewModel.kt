@@ -4,7 +4,7 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.dilarion.app.data.api.ApiService
-import com.dilarion.app.monitoring.MonitoringForegroundService
+import com.dilarion.app.services.BackgroundConnectionService
 import com.dilarion.app.ui.screens.auth.registerKeysAndConnect
 import com.dilarion.app.security.SessionManager
 import com.dilarion.app.services.PresenceService
@@ -41,7 +41,7 @@ class SplashViewModel @Inject constructor(
                 _destination.value = SplashDestination.ONBOARDING
             } else {
                 presenceService.connect(session.token)
-                MonitoringForegroundService.start(context)
+                BackgroundConnectionService.start(context)
                 _destination.value = SplashDestination.HOME
                 // Re-register this phone's key on every start. Registration upserts
                 // by public key and clears a revocation, so a phone that was dropped

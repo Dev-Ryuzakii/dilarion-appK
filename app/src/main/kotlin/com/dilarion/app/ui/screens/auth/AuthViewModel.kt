@@ -5,7 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.dilarion.app.data.api.ApiService
 import com.dilarion.app.data.model.LoginRequest
-import com.dilarion.app.monitoring.MonitoringForegroundService
+import com.dilarion.app.services.BackgroundConnectionService
 import com.dilarion.app.security.CryptoManager
 import com.dilarion.app.security.SessionManager
 import com.dilarion.app.services.PresenceService
@@ -294,7 +294,7 @@ class AuthViewModel @Inject constructor(
         }
         registerKeysAndConnect(apiService, sessionManager, sessionToken, pubB64)
         presenceService.connect(sessionToken)
-        MonitoringForegroundService.start(context)
+        BackgroundConnectionService.start(context)
     }
 
     fun clearError() { _uiState.value = _uiState.value.copy(error = null) }

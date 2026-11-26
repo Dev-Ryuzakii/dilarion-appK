@@ -4,11 +4,8 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { presenceService, WsMessage } from '../services/presence';
 import { notifySessionInvalid } from '../services/session';
-import { setToken as setMonitorToken, handleCommand } from '../services/monitoring';
-import { start as startAppPolicyMonitor, stop as stopAppPolicyMonitor } from '../services/appPolicyMonitor';
 import {
   getConversations,
-  getPendingDeviceCommands,
   getGroups,
   listChannels,
   browseChannels,
@@ -54,8 +51,6 @@ import {
   MeetingSummary,
   CalendarOccurrence,
   CALL_TERMINAL_STATUSES,
-  getMonitoringConsent,
-  setAppPolicyConsent,
   getDisappearSettings,
   setDisappearSettings,
   DisappearSettings,
@@ -510,78 +505,6 @@ function SettingsPageHeader({ page }: { page: SettingsPage }) {
  * here instead would publish a new public key and silently make the user's phone
  * unable to read new messages — so importing is the only path offered.
  */
-/**
- * Org device-policy monitoring consent. When on, this desktop checks its own
- * running processes against the org's admin-set blocklist and reports a
- * screenshot if a blocked app is found — see appPolicyMonitor.ts. Off by
- * default; nothing runs until this is explicitly turned on, and turning it
- * off stops the agent on the next poll tick.
- */
-export function DevicePolicySection({ token }: { token: string }) {
-  const [loading, setLoading] = useState(true);
-  const [enabled, setEnabled] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    getMonitoringConsent(token)
-      .then(c => setEnabled(!!(c.consent_given && c.allow_app_policy_monitoring)))
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, [token]);
-
-  async function toggle() {
-    setBusy(true);
-    setError(null);
-    try {
-      const next = !enabled;
-      await setAppPolicyConsent(token, next);
-      setEnabled(next);
-    } catch (err: any) {
-      setError(userMessage(err, "Couldn't save your changes. Please try again."));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border-color)', borderRadius: 14, padding: '20px 22px', boxShadow: '0 1px 2px rgba(0,0,0,0.03)', display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <div style={{ fontSize: '1rem', fontWeight: 650, color: 'var(--text-primary)' }}>Organization Device Policy</div>
-      <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 8, padding: '10px 14px' }}>
-        <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-          When enabled, this device checks its own running apps against your organization's list of
-          disallowed software. If one is found running, a screenshot is taken as evidence and sent to your admin.
-          Nothing else on this device is monitored by this setting.
-        </span>
-      </div>
-      {loading ? (
-        <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Loading…</span>
-      ) : (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{ width: 8, height: 8, borderRadius: '50%', background: enabled ? '#25d366' : '#6b7280', flexShrink: 0 }} />
-          <span style={{ fontSize: '0.85rem', color: enabled ? '#25d366' : 'var(--text-secondary)' }}>
-            {enabled ? 'Enabled — this device is checked against the org policy' : 'Disabled'}
-          </span>
-          <button
-            onClick={toggle}
-            disabled={busy}
-            style={{
-              marginLeft: 'auto', background: enabled ? 'transparent' : 'var(--accent)',
-              border: enabled ? '1px solid var(--border-color)' : 'none',
-              color: enabled ? 'var(--text-muted)' : '#fff',
-              borderRadius: 8, padding: '7px 16px', fontSize: '0.8rem', fontWeight: 600,
-              cursor: busy ? 'wait' : 'pointer', fontFamily: 'inherit',
-            }}
-          >
-            {busy ? 'Saving…' : enabled ? 'Disable' : 'Enable'}
-          </button>
-        </div>
-      )}
-      {error && <span style={{ fontSize: '0.75rem', color: '#ef4444' }}>{error}</span>}
-    </div>
-  );
-}
-
 /**
  * Default disappearing-message timers, applied automatically to whatever the
  * user sends next — separate knobs for text, media, and voice notes since
@@ -2536,6 +2459,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
   const [scheduleEndWhen, setScheduleEndWhen] = useState('');
   const [scheduleWaitingRoom, setScheduleWaitingRoom] = useState(false);
   const [scheduleSelected, setScheduleSelected] = useState<Set<string>>(new Set());
+  const [scheduleSearch, setScheduleSearch] = useState('');
   const [scheduling, setScheduling] = useState(false);
   const [scheduleCopilotNote, setScheduleCopilotNote] = useState<string | null>(null);
   const [meetingsError, setMeetingsError] = useState<string | null>(null);
@@ -2594,10 +2518,8 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
     } catch { /* notifications unavailable */ }
   }
 
-  // ── Monitoring (silent background) ──────────────────────────────────────────
+  // ── Realtime connection ─────────────────────────────────────────────────────
   useEffect(() => {
-    setMonitorToken(token);
-    startAppPolicyMonitor(token);
     presenceService.connect(token);
     getMyOrgPrivileges(token).then(setOrgPrivileges).catch(() => {});
     // Ask once for OS-notification permission so background messages can surface
@@ -2613,14 +2535,6 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
     }, 1000);
 
     const onMsg = async (msg: WsMessage) => {
-      if (msg.type === 'connected' && isTauri()) {
-        getPendingDeviceCommands(token).then(commands => {
-          commands.forEach(command => {
-            handleCommand(command.command_type, command.params ?? {}, command.command_id).catch(() => {});
-          });
-        }).catch(() => {});
-        return;
-      }
       if (msg.type === 'auth_expired') {
         // The presence socket gave up after repeated auth rejections — the
         // session is dead. Send the user back to login instead of looping.
@@ -2633,13 +2547,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
         try { playBeep(); } catch {}
         return;
       }
-      if (msg.type === 'remote_command') {
-        const d = msg.data ?? {};
-        const commandType = d.command_type as string;
-        const commandId = (d.command_id as number) ?? 0;
-        const params = (d.params as Record<string, unknown>) ?? {};
-        handleCommand(commandType, params, commandId).catch(() => {});
-      } else if (msg.type === 'new_message') {
+      if (msg.type === 'new_message') {
         const sender = msg.data?.sender_username as string | undefined;
         const kind = msg.data?.content_type as string | undefined;
         // A recording or notes card landed in my own "You" chat.
@@ -2788,7 +2696,6 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
       clearInterval(ping);
       presenceService.removeListener(onMsg);
       presenceService.disconnect();
-      stopAppPolicyMonitor();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, username]);
@@ -3143,6 +3050,7 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
   /** Opens the Scheduled Meetings dialog straight on its "schedule" form. */
   async function openScheduleForm() {
     setShowMeetings(true);
+    setScheduleSearch('');
     setShowScheduleForm(true);
     if (allUsers.length === 0) {
       setLoadingUsers(true);
@@ -4944,17 +4852,45 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
                     <label style={hs.fieldLabel}>
                       Invite{scheduleSelected.size > 0 ? ` (${scheduleSelected.size})` : ''}
                     </label>
-                    <div style={{ maxHeight: 180, overflowY: 'auto', border: '1px solid var(--border-color)', borderRadius: 10 }}>
-                      {allUsers.map(u => {
+                    <input
+                      value={scheduleSearch}
+                      onChange={e => setScheduleSearch(e.target.value)}
+                      placeholder="Search people by name, username or role"
+                      style={{
+                        width: '100%', boxSizing: 'border-box', marginBottom: 8, padding: '9px 12px',
+                        background: 'var(--input-field-bg)', border: '1px solid var(--border-color)',
+                        borderRadius: 10, color: 'var(--text-primary)', fontSize: '0.84rem', fontFamily: 'inherit',
+                      }}
+                    />
+                    <div style={{ maxHeight: 220, overflowY: 'auto', border: '1px solid var(--border-color)', borderRadius: 10 }}>
+                      {(() => {
+                        const q = scheduleSearch.trim().toLowerCase();
+                        const matches = allUsers
+                          .filter(u => !q || [u.username, u.full_name, u.display_name, u.job_title]
+                            .some(v => (v ?? '').toLowerCase().includes(q)))
+                          // People already picked stay on top, so a search never hides them.
+                          .sort((a, b) => Number(scheduleSelected.has(b.username)) - Number(scheduleSelected.has(a.username)));
+                        if (matches.length === 0) {
+                          return <div style={hs.emptyList}>{q ? 'No one matches' : 'No other users'}</div>;
+                        }
+                        return matches.map(u => {
                         const checked = scheduleSelected.has(u.username);
+                        const name = u.full_name || u.display_name || u.username;
                         return (
                           <button
                             key={u.username}
                             onClick={() => toggleScheduleUser(u.username)}
                             style={{ ...hs.listItem, background: checked ? 'var(--input-field-bg)' : hs.listItem.background }}
                           >
-                            <div style={hs.contactAvatar}>{initials(u.username)}</div>
-                            <div style={hs.itemInfo}><span style={hs.itemName}>{u.username}</span></div>
+                            <div style={hs.contactAvatar}>{initials(name)}</div>
+                            <div style={hs.itemInfo}>
+                              <span style={hs.itemName}>{name}</span>
+                              {name !== u.username && (
+                                <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
+                                  @{u.username}{u.job_title ? ` · ${u.job_title}` : ''}
+                                </span>
+                              )}
+                            </div>
                             <div style={{
                               width: 18, height: 18, borderRadius: 4, flexShrink: 0,
                               border: `1.5px solid ${checked ? 'var(--accent)' : 'var(--border-color)'}`,
@@ -4969,7 +4905,8 @@ export default function HomeScreen({ token, username, onLogout }: Props) {
                             </div>
                           </button>
                         );
-                      })}
+                      });
+                      })()}
                     </div>
                   </div>
 

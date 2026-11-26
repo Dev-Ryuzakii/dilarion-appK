@@ -37,6 +37,9 @@ class DilarionApp : Application() {
                 release = BuildConfig.VERSION_NAME,
                 environment = BuildConfig.FLAVOR,
                 replay = true,
+                // Watch 0.2.0 shows text in replays by default. Dilarion shows
+                // decrypted messages on screen, so keep every text node masked.
+                maskAllText = true,
                 // MainActivity sets FLAG_SECURE. Replay is a wireframe with all
                 // text masked and never takes pixels, so it stays safe there.
                 replayOnSecureWindows = true,

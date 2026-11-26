@@ -39,7 +39,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.dilarion.app.data.api.ApiService
 import com.dilarion.app.data.model.OnboardingProfileRequest
-import com.dilarion.app.monitoring.MonitoringForegroundService
+import com.dilarion.app.services.BackgroundConnectionService
 import com.dilarion.app.security.SessionManager
 import com.dilarion.app.services.PresenceService
 import com.dilarion.app.ui.screens.auth.registerKeysAndConnect
@@ -152,7 +152,7 @@ class OnboardingViewModel @Inject constructor(
         sessionManager.setOnboardingPending(false)
         sessionManager.publicKey.first()?.let { registerKeysAndConnect(apiService, sessionManager, token, it) }
         presenceService.connect(token)
-        MonitoringForegroundService.start(context)
+        BackgroundConnectionService.start(context)
     }
 }
 
